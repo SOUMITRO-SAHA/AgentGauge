@@ -70,9 +70,12 @@ className in two places that both set the same property.
 - Prefer composition over boolean prop explosions. Three or more booleans in a
   signature is a design smell; use a discriminated `variant`/`size` union
   (the `cva` pattern the shadcn primitives already use).
-- Derive, do not duplicate: compute state from props instead of mirroring it
-  in `useState` + `useEffect`. Every `useEffect` that only syncs state is a bug
-  waiting to happen.
+- **`useState` is for ephemeral UI state only** — an open/closed flag, a draft
+  input value. Fetched or derived state lives in an atom
+  ([`effect.md`](effect.md)). A component that mirrors an atom's value into
+  `useState` is a bug.
+- Components must not call `invoke` and must not contain async fetching logic.
+  They read atoms and render; the atom owns the effect.
 - Keys must be stable domain identifiers, never array indices, for anything
   reorderable or refreshable (usage rows, provider lists).
 - Keep list rendering explicit. `.map()` with an immediately returned element
@@ -83,25 +86,48 @@ className in two places that both set the same property.
 
 ## Data display (this app's actual job)
 
-Usage and status data is the product. Rules that follow from `AGENTS.md`:
+Usage and status data is the product, and it arrives through Effect atoms. Two
+independent layers of state must both be handled; conflating them is the most
+common defect here.
+
+**Async state — `AsyncResult`, exhaustive matching:**
+
+```ts
+const result = useAtomValue(usageAtom)
+
+return AsyncResult.match(result, {
+  onInitial: () => <UsageSkeleton />,
+  onSuccess: (s) => <UsageCard snapshot={s.value} refreshing={s.waiting} />,
+  onFailure: (f) => <UsageUnavailable cause={f.cause} />
+})
+```
+
+- **Every component handles all three branches.** Ignoring `onFailure` is a bug.
+- `Success` with `waiting: true` means a refresh is in flight — render it as
+  *stale, refreshing*, never as a fresh reading.
+- Never wrap an `AsyncResult` in your own `isLoading` boolean; read the tag.
+- Never call `useAtomSuspense` without an error boundary — it throws on
+  `Failure` unless `includeFailure` is set.
+- A `Cause` is not a string: use `Cause.pretty` / `Cause.squash` to render one
+  safely. Never interpolate a raw cause into user-facing text.
+
+**Domain state — the four states, as data:**
 
 - **Never render a value without its freshness.** Any number, status, or limit
-  must be accompanied by its source and last-updated time, or be visibly
-  marked unavailable.
+  carries its source and last-updated time, or is visibly marked unavailable.
 - Model the four states explicitly — `live`, `cached`, `stale`, `unavailable` —
-  as a typed union, never as a nullable number with a truthiness check.
-  A missing value is a **rendered state**, not an empty string, `0`, `-`, or a
-  silent `?? 0` fallback that reads like real data.
-- Distinguish "no usage recorded" from "0% used" and from "could not fetch".
+  as a typed union (see [`typescript.md`](typescript.md)), never as a nullable
+  number with a truthiness check. A missing value is a **rendered state**, not
+  an empty string, `0`, `-`, or a silent `?? 0` fallback that reads like data.
+- Distinguish "no usage recorded" from "0% used" from "could not fetch".
   Use the neutral/muted token for unknown, `destructive` for an actual error
   state, and never colour alone to convey state — pair it with text or an icon
   for accessibility.
-- Format through the design tokens (`text-muted-foreground`,
-  `bg-muted`, `border-border`, `text-destructive`) rather than raw Tailwind
-  palette colours, so light and dark both work and future theming stays
-  possible.
-- Relative time ("3 min ago") needs a stable clock; compute from an injected
-  timestamp rather than `Date.now()` inside render.
+- Format through the design tokens (`text-muted-foreground`, `bg-muted`,
+  `border-border`, `text-destructive`) rather than raw Tailwind palette colours,
+  so light and dark both work and future theming stays possible.
+- Relative time ("3 min ago") needs a stable clock; compute it from the atom's
+  injected timestamp rather than `Date.now()` inside render.
 
 ## Accessibility & motion
 

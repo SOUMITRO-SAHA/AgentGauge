@@ -27,6 +27,20 @@ this file is actionable yet.
 - Do not copy `app/bun.lock`, share a `node_modules`, or hoist website
   dependencies into the app.
 
+## Effect does not apply here
+
+Effect is mandatory in the **app client** (`app/src`) — see
+[`effect.md`](effect.md). It does **not** apply to `website/`:
+
+- The site is **static-first with no client-side JavaScript**. Introducing Effect
+  (or React, or any runtime Effect program) there contradicts the zero-JS
+  posture in [`seo.md`](seo.md) and adds weight for no benefit — a landing page
+  has no async data, no IPC, and no state.
+- Do not add `effect` to the website's dependencies, and do not copy the app's
+  atoms/services/layers into it.
+- If the site ever needs real interactivity, that is a decision to make
+  explicitly with the user — not a reason to reach for Effect by default.
+
 ## When it is initialised
 
 Stack decisions to confirm with the user before writing code: Astro version,

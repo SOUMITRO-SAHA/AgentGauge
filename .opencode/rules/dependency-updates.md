@@ -60,6 +60,47 @@ version we ship may be adopted immediately, before the 15 days are up: pass
 `minimumReleaseAgeExcludes` entry. Note the CVE and the exemption in your
 summary, then remove the exemption once it is no longer needed.
 
+## Recorded exceptions and decisions
+
+### Effect is pinned to the v4 beta line (approved 2026-10-09)
+
+`effect`, `@effect/atom-react`, and `@effect/vitest` are pinned **exactly** to
+`4.0.0-beta.107`. The maintainer approved using the beta line for Effect.
+
+Why the exact beta pin, and not stable v4:
+
+| Line          | Newest publish | Age at approval | Gate verdict                                   |
+| ------------- | -------------- | --------------- | ---------------------------------------------- |
+| `4.0.0-beta.107` | 2026-08-10  | 60 days         | **passes** — chosen                            |
+| `4.0.2` (stable)  | 2026-10-07  | 2 days          | blocked — would resolve `bun add effect` to v3 |
+
+Without an exemption, `bun add effect` resolves to **3.22.2 (v3)**, which has no
+`Context.Service`, no `effect/reactivity/Atom`, and no `@effect/atom-react`
+package at all. The beta line is also where the verified v4 API lives.
+
+The beta packages sit under the gate naturally — **no `minimumReleaseAgeExcludes`
+entry is needed or permitted.** If a future bump makes them look exempt, that is
+a signal to re-derive the versions, not to widen the exemption.
+
+Rules that follow from the pin:
+
+- Pin all three **exactly** (no `^`, no `latest`, no `beta` dist-tag in the
+  manifest) and move them together. A skew between `effect` and
+  `@effect/atom-react` is unsupported.
+- Re-review the stable line once `4.0.3`+ is 15+ days old and the v3 fallback is
+  no longer a risk; migrating off a beta is a deliberate, separate decision.
+- Known peer warning: `@effect/atom-react@4.0.0-beta.107` peers
+  `scheduler >=0.27.0 <0.28.0` while `react-dom@19.3.0` requires `^0.28.0`. This
+  is inherent to the package (stable peers `<0.28.0` too) and `scheduler` is a
+  react-dom internal we never import. **Do not** "fix" it by downgrading
+  `react-dom` without approval.
+
+### Test runner (approved 2026-10-09)
+
+`vitest`, `@effect/vitest`, `@testing-library/react`, `@testing-library/jest-dom`,
+and `jsdom` are approved as dev dependencies, required by the binding testing
+policy in `AGENTS.md`. See [`testing.md`](testing.md).
+
 ## Updating procedure
 
 1. Propose the bump (approval gate above) and get a yes.

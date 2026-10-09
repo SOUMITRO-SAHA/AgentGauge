@@ -23,6 +23,9 @@ target
 # Test artifacts (e2e screenshots, scratch files)
 .temp
 
+# Cloned upstream references (e.g. .agents/references/effect, ~59MB)
+.agents/references/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

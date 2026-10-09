@@ -13,10 +13,15 @@ The current UI and Rust backend are still the Tauri starter greeting example. Do
 - `app/src/components/ui/`: shadcn/ui components.
 - `app/src/lib/utils.ts`: shared `cn()` class-name utility.
 - `app/src-tauri/`: Tauri configuration and Rust backend.
+- `app/src-tauri/src/modules/`: Rust application modules, one per bounded capability (provider integrations, polling, settings, widget).
+- `app/src-tauri/src/shared/`: Rust primitives shared by 2+ modules (domain types, error taxonomy, config, telemetry). Must not depend on `modules/`.
+- `app/src-tauri/crates/`: new independent Rust library crates, one bounded concern each, consumed as path dependencies.
+- Rust dependencies flow downward only: `lib.rs` (composition root) → `modules` → `shared` → `crates`. No cycles, no sideways imports between sibling modules.
 - `website/`: reserved for a future Astro landing page and documentation site. Do not add it to the app build.
 - Use the `~/` alias for imports from `app/src` (for example, `~/lib/utils`). Keep it aligned in `app/vite.config.ts`, `app/tsconfig.json`, and `app/components.json`.
 - Styling uses Tailwind CSS 4 through `@tailwindcss/vite`; do not add a Tailwind 3 config unless the project is deliberately migrated.
 - Follow the surrounding TypeScript/React and Rust style. Keep provider-specific code modular rather than coupling provider behavior into general UI components.
+- Place Rust code in the tier that owns it: a single caller's helper stays private in its module, 2+ consumers' primitives go in `src/shared/`, and reusable or dependency-heavy logic becomes a crate under `app/src-tauri/crates/`. Full architecture rules: [`rust.md`](.opencode/rules/rust.md).
 - Keep `app/bun.lock` and `app/src-tauri/Cargo.lock` in sync with dependency changes.
 
 ## Development and verification

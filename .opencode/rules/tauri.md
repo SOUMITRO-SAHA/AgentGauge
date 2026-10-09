@@ -15,12 +15,16 @@ automation, or widget behavior as implemented unless the code does it.
 | --------------------------------------------- | -------------------------------------------------------------------- |
 | `app/src-tauri/tauri.conf.json`               | product identity, window geometry, build wiring, CSP, bundle, icons |
 | `app/src-tauri/capabilities/default.json`      | **the entire frontend permission surface**                          |
-| `app/src-tauri/Cargo.toml`                     | crates, `custom-protocol` feature, release profile                 |
-| `app/src-tauri/src/lib.rs`                     | plugins, command registration, builder chain                       |
+| `app/src-tauri/Cargo.toml`                     | workspace root: crates, `custom-protocol` feature, release profile  |
+| `app/src-tauri/src/lib.rs`                     | **composition root** — plugins, managed state, `generate_handler!`  |
 | `app/src/main.tsx`                            | `@wdio/tauri-plugin` import + React root                           |
 
 Changing any of these can break the native shell, the e2e harness, or both.
 Read this file before editing them.
+
+`lib.rs` registers commands that live in `src/modules/**`; it contains no
+business logic itself. `src/shared/**` and `crates/**` follow the dependency
+rules in [`rust.md`](rust.md) and never appear in the builder chain.
 
 ## Commands (IPC)
 
@@ -35,9 +39,11 @@ Read this file before editing them.
   whose key order matters. `Result<T, E>` where `E` serializes to something the
   UI can branch on — see the shared error shape in
   [`security.md`](security.md).
-- Commands are **async by default**. Keep the body thin: parse → delegate to a
-  provider module → map the error. No provider HTTP calls, parsing, or
+- Commands are **async by default**. Keep the body thin: parse → delegate to
+  the owning module → map the error. No provider HTTP calls, parsing, or
   filesystem work inline in the command body.
+- Commands live in `app/src-tauri/src/modules/**` and are only *named* in
+  `lib.rs`'s `generate_handler!`; `lib.rs` itself holds no command bodies.
 - Use `tauri::State<T>` for shared, mutex-guarded state (pollers, caches,
   provider clients). Never hold a `Mutex` guard across an `.await` — it
   deadlocks the async runtime.
@@ -48,17 +54,28 @@ Read this file before editing them.
 
 ## Frontend ↔ Rust boundary
 
-- Never call `invoke` from a component. Route it through a typed wrapper in
-  `app/src/lib/ipc.ts` (create it on first use) or the provider's module, so
-  the command name and payload shape exist in exactly one place.
+- The client is **Effect-based**. `invoke` is wrapped once per command in
+  `app/src/lib/ipc.ts` as an `Effect` via `Effect.tryPromise`, which also
+  supplies the `AbortSignal` used to cancel on unmount. No component ever calls
+  `invoke`; components read atoms. See [`effect.md`](effect.md).
+- `invoke` returns `unknown` — decode it with a `Schema` before it reaches a
+  component. Never cast the result to a domain type.
+- Keep network-level failure (`IpcError`) and API-status failure (`UsageError`)
+  as distinct types on both sides of the boundary; collapsing them makes the UI
+  unable to tell "the app is offline" from "the provider said no".
 - The renderer has **no ambient trust**: anything the webview can be made to
   run can call any permitted command. Capabilities are the only control, so
   treat the capability file as reviewed security surface.
 - Do not pass secrets, tokens, or raw credential material across the IPC
-  boundary into renderer state. Keep them in Rust or the OS keychain.
-- The e2e harness mocks commands with `browser.tauri.mock(...)`. A command
-  that must be mockable must stay a pure function of its arguments — no
-  ambient state reads hidden behind the command.
+  boundary into renderer state, atoms, or `Config` values held in the webview.
+  Keep them in Rust or the OS keychain.
+- The e2e harness mocks commands with `browser.tauri.mock(...)`. It patches
+  `invoke` in the renderer, which is the exact seam `Effect.tryPromise` wraps, so
+  command mocks still work under atoms. A command that must be mockable must
+  stay a pure function of its arguments — no ambient state reads hidden behind
+  it.
+- Command placement follows the Rust tier rule in [`rust.md`](rust.md): commands
+  live in `src/modules/**`, and `lib.rs` only names them in `generate_handler!`.
 
 ## Capabilities & permissions (least privilege)
 

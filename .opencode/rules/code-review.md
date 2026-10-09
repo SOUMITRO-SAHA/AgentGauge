@@ -43,16 +43,28 @@ Check these first — they are the highest-risk surfaces here:
    Critical.
 2. **IPC boundary** — commands without input validation, secrets crossing into
    renderer state, unbounded inputs, missing error typing.
-3. **Data honesty** — a usage/status value rendered without provenance or
-   freshness; a `?? 0` / `-` placeholder that reads as real data; a
-   nullable-field model instead of the four-state union.
-4. **The five e2e integration points** — a change that silently breaks the
+3. **Effect discipline** (client) — `async`/`await` or `try`/`catch` inside
+   Effect code; an unhandled `AsyncResult` branch in a component; `any` or
+   `@ts-expect-error` papering over an `R`/`E` channel; an atom holding a
+   secret; `Date.now()` in logic that should take an injected clock; a
+   `Layer.provide` where `provideMerge` was meant (or vice versa).
+4. **Rust tier boundaries** — an import that points upward
+   (`shared/` → `modules/`), a sideways sibling-module import, or a crate that
+   needs `ism`/`tauri` to build. See [`rust.md`](rust.md).
+5. **Data honesty** — a usage/status value rendered without provenance or
+   freshness; a `?? 0` / `-` placeholder that reads as real data; a nullable
+   field instead of the four-state union; `waiting: true` shown as a fresh
+   reading.
+6. **The five e2e integration points** — a change that silently breaks the
    harness (plugin registration moved out of `debug_assertions`, capability or
    `withGlobalTauri` change, `custom-protocol` removed).
-5. **Rust correctness** — `unwrap`/`expect` on reachable paths, a lock guard
+7. **Rust correctness** — `unwrap`/`expect` on reachable paths, a lock guard
    held across `.await`, `cargo clippy -D warnings` noise.
-6. **Dependency / lockfile drift** — a manifest change without the matching
-   `bun.lock` / `Cargo.lock` update; a version younger than the 15-day gate.
+8. **Testing policy** — a UI change without an e2e spec, or with a gate that
+   was claimed but not run. See [`testing.md`](testing.md) and `AGENTS.md`.
+9. **Dependency / lockfile drift** — a manifest change without the matching
+   `bun.lock` / `Cargo.lock` update; a version younger than the 15-day gate; the
+   Effect exact pins loosened into a range or a dist-tag.
 
 ## Severity
 

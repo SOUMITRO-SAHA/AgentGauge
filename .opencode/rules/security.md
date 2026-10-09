@@ -59,14 +59,26 @@ value downstream.
 - The renderer makes **no direct network calls**; provider data comes through
   Rust. This keeps tokens out of the webview. Do not add `fetch` to the client
   for provider data.
+- **Effect does not change the trust model.** Typed errors, Schema decoding, and
+  `Context.Service` give structure, not safety: a value that reaches a component
+  is still untrusted, and an atom is still readable by any component.
+- Never put a secret, token, or raw credential in an **atom**, a service shape
+  exposed to the renderer, or a `Config` value read in the webview. Atoms are
+  trivially inspectable from devtools and are serialised into the renderer.
+  Credentials belong in Rust and the OS keychain; see
+  [`effect.md`](effect.md).
 - Never pass secrets or raw credentials across IPC into renderer state.
 - Never use `dangerouslySetInnerHTML` / `set:html` with provider or user data.
   If text must be shown, render it as text.
 - Validate and clamp everything a command receives: string lengths, enum
   discriminants, numeric ranges, array sizes, and timeouts. Reject rather than
   silently truncate where a wrong value would be a security or correctness bug.
+  On the client, decode `invoke`'s `unknown` result with a `Schema` — never
+  cast it.
 - IPC errors surfaced to the UI must not leak tokens, file paths outside the
-  app, or raw provider response bodies. Log detail on the Rust side only.
+  app, or raw provider response bodies. Render a `Cause` with `Cause.pretty` /
+  `Cause.squash`, never by string-interpolating the raw cause. Log detail on
+  the Rust side only.
 
 ## Provider integrations
 

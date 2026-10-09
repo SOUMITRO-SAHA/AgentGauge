@@ -1,9 +1,10 @@
 # Naming Conventions
 
 Governs files and symbols in this repo. Apply whenever you create a file or
-add code. Two languages are in use: **Rust** (`app/src-tauri/src`) and
-**TypeScript/React** (`app/src`, `app/e2e`, `app/scripts`). `website/` is an
-uninitialised Astro placeholder — when it exists, see [`astro.md`](astro.md).
+add code. Two languages are in use: **Rust** (`app/src-tauri/src`,
+`app/src-tauri/crates`) and **TypeScript/React** (`app/src`, `app/e2e`,
+`app/scripts`). `website/` is an uninitialised Astro placeholder — when it
+exists, see [`astro.md`](astro.md).
 
 `cargo fmt` and the shadcn/upstream component conventions enforce most of this
 automatically. The rules below are what no tool enforces.
@@ -17,8 +18,12 @@ there are no project-specific overrides.
 - Types, traits, enums: `PascalCase` — `ProviderStatus`, `UsageSnapshot`, `RateLimitWindow`.
 - Functions, methods, variables, fields: `snake_case`.
 - Consts and statics: `SCREAMING_SNAKE_CASE`.
-- Crates: `snake_case`; the app crate is `ism` (lib `ism_lib`).
-- Module directories use `mod.rs` (`providers/mod.rs`, `state/mod.rs`).
+- Crates: `snake_case`; the app crate is `ism` (lib `ism_lib`). A crate in
+  `app/src-tauri/crates/` takes the short name of the concern it owns —
+  `http_retry`, `keychain`, `usage_model` — so name it for the concern, never
+  for the layer (`utils`, `helpers`, `common` are not crate names).
+- Module directories use `mod.rs`, named for the **capability**:
+  `modules/providers/mod.rs`, `modules/poller/mod.rs`, `shared/domain/mod.rs`.
 - Provider modules are named for the provider, lowercase: `codex.rs`,
   `claude_code.rs`, `z_ai.rs`.
 
@@ -32,6 +37,9 @@ there are no project-specific overrides.
 | React hook                  | `useHookName.ts`       | `useUsage` in `useUsage.ts`      |
 | shadcn / Radix primitive   | `<name>.tsx`           | `button` in `components/ui/button.tsx` |
 | Typed IPC wrapper / module  | `<name>.ts`            | `ipc.ts`, `codex.ts`             |
+| Effect service + layer      | `<name>.service.ts`    | `usageReader.service.ts`         |
+| Atom (state)                | `<name>.atom.ts`       | `usage.atom.ts`                  |
+| Schema (IPC boundary)       | `<name>.schema.ts`     | `usage.schema.ts`                |
 | Shared types               | `<name>.types.ts`       | `usage.types.ts`                 |
 | Pure helpers               | `<name>.utils.ts`      | `formatUsage.utils.ts`           |
 | Constants / query keys     | `<name>.constants.ts`  | `refresh.constants.ts`           |
@@ -56,11 +64,17 @@ there are no project-specific overrides.
 
 - Components: `PascalCase`, matching the file's default export — `UsageCard` in
   `usage-card.tsx`.
+- Effect services: `PascalCase` extending `Context.Service`, named for the
+  capability it provides — `UsageReader`, `Poller`. Its layer is a `static
+  readonly layer` member; a test double is `static readonly layerTest`.
+- Atoms: `PascalCase` suffixed `Atom` — `usageAtom`, `providerStatusAtom`.
+  Services that read other atoms are `usageByProviderAtom`.
 - Interfaces: `PascalCase`, **no `I` prefix** — `UsageSnapshot`, `CardProps`.
   (Type aliases use `type` for unions, `interface` for objects.)
 - Type aliases and unions: `PascalCase`, **no `T` prefix** — `UsageState`,
   `ProviderKind`. These are **domain** names, not containers: `UsageSnapshot`
   and not `TData`.
+- Typed errors: `PascalCase` ending `Error` — `UsageError`, `IpcError`.
 - Hooks: `use` prefix + PascalCase — `useUsage`, `useProviderStatus`.
 - Variables, functions, parameters: `camelCase`.
 - Compile-time constants only: `SCREAMING_SNAKE_CASE` (`REFRESH_INTERVAL_MS`).
@@ -90,9 +104,10 @@ change — a silent mismatch shows up only as `undefined` at runtime. See
 
 | Kind                    | Name             | Example                          |
 | ----------------------- | ---------------- | -------------------------------- |
-| Rust module             | `snake_case.rs`  | `providers/codex.rs`             |
+| Rust module             | `snake_case.rs`  | `modules/providers/codex.rs`     |
 | Rust type / enum        | `PascalCase`     | `UsageSnapshot`                  |
 | Rust const              | `SCREAMING_SNAKE_CASE` | `MAX_PROVIDERS`             |
+| Rust crate              | `snake_case`     | `http_retry` in `crates/http-retry/` |
 | Rust fn                 | `snake_case`     | `fetch_usage`                    |
 | IPC command name        | `snake_case`     | `get_usage`                      |
 | React component         | `kebab-case.tsx` | `UsageCard` in `usage-card.tsx`  |
