@@ -1,58 +1,118 @@
 # Rust Rules
 
-These rules apply to all Rust code in this repo — today that is `apps/server` (`libryva_server`). Stack and layout specifics live in [`apps/server/AGENTS.md`](../../apps/server/AGENTS.md); this file defines the language-level rules.
+Applies to all Rust in this repo — today `app/src-tauri/src/**` and
+`app/src-tauri/build.rs`. This is a **Tauri desktop backend**: IPC commands,
+provider integrations, local state and persistence. There is no HTTP server, no
+diesel, no PostgreSQL, no tokio runtime of our own — Tauri supplies the async
+runtime. Shell/IPC specifics are in [`tauri.md`](tauri.md).
 
 ## Toolchain & formatting
 
-- No toolchain is pinned (`rust-toolchain.toml` does not exist). Use the installed stable toolchain; never introduce a pin or bump toolchain versions without explicit instruction.
-- Edition 2024. Do not add edition-gated features without checking compatibility.
-- Default `rustfmt` / `clippy` settings only — no `rustfmt.toml` or `clippy.toml` exists; do not add one without approval.
+- **Edition 2021** (per `app/src-tauri/Cargo.toml`). Do not bump it, and do not
+  use edition-2024-gated features.
+- No `rust-toolchain.toml`, no `rustfmt.toml`, no `clippy.toml` exist. Use the
+  installed stable toolchain and default rustfmt/clippy settings; do not add a
+  pin or a config file without explicit instruction.
+- The crate is a `staticlib` + `cdylib` + `rlib` triple (lib name `ism_lib`,
+  bin `main.rs`). Mobile entries use `#[cfg_attr(mobile, tauri::mobile_entry_point)]` —
+  preserve them.
+- `panic = "abort"` in the release profile is deliberate. Do not reintroduce
+  unwinding panics, and never rely on `catch_unwind` in release.
+- `cargo clean -p aism` does **not** clear `tauri-build`'s cached output. When
+  a rebuild serves stale assets, `touch app/src-tauri/build.rs` (or run
+  `bun run e2e:build`, which does it) — see [`tauri.md`](tauri.md).
+
+## Layout
+
+```
+app/src-tauri/src/
+  main.rs      # thin: #![cfg_attr] attributes + aism_lib::run()
+  lib.rs       # plugins, #[tauri::command]s, builder chain, generate_handler!
+```
+
+- `main.rs` stays minimal. Real work belongs in `lib.rs` or a module.
+- As provider integrations arrive, split into modules **by provider**
+  (`providers/codex.rs`, `providers/claude_code.rs`) with a shared
+  `providers/mod.rs` defining the common trait. Do not couple provider-specific
+  logic into general command or state code — `AGENTS.md` requires provider
+  modularity.
+- Start private, widen only when a second caller needs it. No `pub` item that
+  is an internal detail.
 
 ## Dependencies
 
-- **Never add or upgrade a dependency without explicit user approval** — list crate name, version, features, and why, then wait (see golden rules in `apps/server/AGENTS.md`).
-- Keep the dependency graph minimal; every crate must earn its compile time and binary size.
-- Do not enable diesel's `postgres` backend feature (it pulls libpq/`pq-sys`); `diesel-async`'s `postgres` feature is the approved path.
+- **Never add or upgrade a crate without explicit user approval** — name,
+  version, features, why, then wait.
+- Current crates are deliberately minimal: `tauri`, `tauri-plugin-opener`,
+  `serde`, `serde_json`, plus the two `tauri-plugin-wdio*` crates used **only**
+  by the e2e harness. Keep it that way; each crate must earn its compile time
+  and binary size.
+- `tauri-plugin-wdio` and `tauri-plugin-wdio-webdriver` are test-only. They must
+  stay registered behind `#[cfg(debug_assertions)]` and must never appear in a
+  release build path.
+- The `custom-protocol` feature is what makes the debug e2e binary embed the
+  frontend. Do not remove it from `[features]`.
+- Commit `app/src-tauri/Cargo.lock` with dependency changes; never hand-edit it.
 
-## Safety
+## Commands & types
 
-- No `unsafe` code unless there is a documented, unavoidable justification approved by the maintainer.
-- If `unsafe` is ever required, it must be isolated, minimised and covered by tests plus a `// SAFETY:` comment explaining every invariant.
+- Every `#[tauri::command]` is untrusted input crossing a process boundary:
+  validate/coerce with serde at the boundary. Return typed structs, never
+  ad-hoc tuples or `HashMap`s the UI must interpret. See [`tauri.md`](tauri.md).
+- Errors: define one concrete error enum per module (or a shared `IsmError`)
+  implementing `std::error::Error` + `Display`, and map into it with `#[from]`
+  or `.map_err(...)`. Never `Box<dyn Error>` unless truly heterogeneous, and
+  never a bare `String` error. Deriving with `thiserror` is fine **once that
+  crate is approved** — it is not a dependency today, so do not add it as a
+  drive-by.
+- A command error crossing IPC must serialize to something the client can
+  branch on without string-matching. Include actionable context, never secrets
+  or raw provider response bodies in the message.
+- `Result<T, E>` throughout; no panics on expected failures.
 
-## Errors
+## Errors & panics
 
-- Typed errors only: handlers use the shared `ApiError` (thiserror); extracted crates define their own thiserror enum. Do not box errors unnecessarily.
-- Handlers return `Result<Json<T>, ApiError>` and convert failures with `?` plus `#[from]` or `.map_err(...)` — e.g. `.map_err(|e| ApiError::Pool(e.to_string()))`.
-- Provide useful, actionable error messages with context.
-- No `unwrap`/`expect` outside tests and `main.rs` startup. Where an invariant violation is truly unreachable, document why in a `// why` comment.
+- No `unwrap()`, `expect()`, or indexing that can panic outside tests and
+  `main.rs` startup. Use `?`, `match`, or `.unwrap_or*`/`.ok_or*`.
+- Where an invariant is truly unreachable, document **why** it is unreachable
+  in a `//` comment next to the `unwrap`.
+- No `unsafe` unless a documented, unavoidable reason is approved by the
+  maintainer; if required, isolate it, minimise it, cover it with a test, and
+  attach a `// SAFETY:` comment justifying every invariant.
+- Never log secrets, tokens, or full provider response payloads. Provider
+  failures log an error code and enough to diagnose — never credentials.
 
-## API design
+## Concurrency & state
 
-- Prefer borrowed parameters over owned unless ownership is required.
-- Keep public APIs minimal. Start private, widen only when needed.
-- Avoid premature generics and trait indirection. Concrete first, abstract when duplication proves it.
-- No `pub` items that are internal implementation details.
-- Default to a module (`src/module/*`, `src/shared/*`); extract `crates/<name>` only per the decision table in `apps/server/AGENTS.md`.
+- Tauri provides the async runtime. Do not add tokio directly; use
+  `tauri::async_runtime::spawn` / `tokio` features already re-exported.
+- Shared mutable state goes through `tauri::State<T>` with a `Mutex`/`RwLock`.
+  **Never hold a lock guard across `.await`** — it deadlocks the runtime.
+- Blocking I/O or CPU-heavy work goes to `spawn_blocking`; never block the
+  async executor.
+- Long-running monitors/polling belong in a dedicated spawned task with clean
+  shutdown, not in a command. Poll on an interval, and stop when the window is
+  hidden or the app exits (see the client polling rules in
+  [`typescript.md`](typescript.md)).
+- Prefer `&str`/borrowed parameters over owned unless ownership is required;
+  avoid needless `.clone()`/`.to_string()` on hot paths.
 
 ## Style
 
-- Comments and doc comments follow the canonical rule [documentation.rules.md](documentation.rules.md) — no narration of _what_, rustdoc `///` on public items and `//!` for module docs, plain `//` only for a non-obvious _why_ (including the unreachable-invariant notes required in [Errors](#errors)).
-- Names follow Rust conventions exactly (`snake_case` functions, `CamelCase` types, `SCREAMING_SNAKE_CASE` consts) — see [naming-convention.md](naming-convention.md).
-- Prefer iterators, slices and early returns over index juggling and deep nesting.
-- Handlers stay thin: no business logic inline; query code uses the diesel DSL.
-
-## Async & performance
-
-- Never block the async executor: no blocking I/O or `std::thread::sleep` in handlers — use `tokio` primitives (`tokio::time::sleep`, `spawn_blocking` for CPU-bound work).
-- Lazy over eager. Stream large responses instead of buffering them in memory. Every cache/pool is bounded by explicit config (deadpool sizes are config, not magic numbers).
-- No unnecessary `.clone()` or `.to_string()` on hot paths.
-
-## Database & migrations
-
-- Migrations are hand-written SQL at `migrations/<version>_<name>/{up,down}.sql` (there is no `diesel_cli`). Every `up` gets a matching `down`.
-- Never edit a migration that has been applied — add a new one.
-- Keep `src/shared/schema.rs` (`table!` macros) in sync with the migration SQL once that file exists.
+- Follow the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/naming.html)
+  for casing — `snake_case` functions/modules, `PascalCase` types, `SCREAMING_SNAKE_CASE`
+  consts; see [`naming-convention.md`](naming-convention.md).
+- Comments follow [`documentation.md`](documentation.md): rustdoc `///` on public
+  items, `//!` for module docs, `//` only for a non-obvious *why* (including
+  the unreachable-invariant notes and `// SAFETY:` blocks).
+- Prefer iterators, slices, and early returns over index juggling and deep
+  nesting.
+- Keep command bodies thin: parse → delegate to a provider module → map the
+  error. No provider HTTP calls or parsing inline in a command.
 
 ## Warnings
 
-- Zero warnings: `cargo check` must finish with no errors and no warnings; clippy runs with `-D warnings`.
+- **Zero warnings.** `cargo check` and
+  `cargo clippy --all-targets -- -D warnings` must be clean. Never add
+  `#[allow(...)]` to silence a warning you have not understood — fix it or
+  document the deliberate reason.

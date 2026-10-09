@@ -1,109 +1,155 @@
-# TypeScript Rules (backend)
+# TypeScript Rules (client)
 
-These rules apply to all **backend/server TypeScript** in this repo — today that is `apps/mcp_server` (the central MCP hub serving every ChatGPT plugin) and any future TS services, workers, or scripts. They do **not** apply to `apps/web-extension` (WXT/React frontend) or `apps/website` (Astro site config) — those keep their own conventions. Plugin bundles under `apps/plugins/*` are distribution-only artifacts (manifest + skills) with no code.
+Applies to all TypeScript in the Tauri client: `app/src/**`, plus
+`app/e2e/**`, `app/scripts/**`, `app/vite.config.ts`. Rust is covered by
+[`rust.md`](rust.md), the Tauri shell by [`tauri.md`](tauri.md), components and
+styling by [`ui.md`](ui.md).
 
-**The stack is fixed: Effect v4 (beta) for all backend logic, Hono on Bun for every server.** A TS server that is not Hono-on-Bun, or backend TS that bypasses Effect, needs explicit user approval before it is written.
+The client is a **local desktop renderer with no server of its own**. It has no
+API routes, no database, no auth layer. Anything that looks like one of those
+belongs in Rust or is not in scope.
 
 ## Toolchain
 
-- Runtime is **Bun** (`bun run`, `bun test`, `bun install`). No Node-only APIs without a Bun fallback check.
-- **Shared compiler options — `@libryva/tsconfig`** (`packages/tsconfig`). Every hand-rolled tsconfig in `apps/*` / `packages/*` extends a variant (`base`, `ts-library`, `bun-service`, `react-library`, `vite-react`, `vite-node`) and keeps only local `include`, `compilerOptions.paths`, and `tsBuildInfoFile`. Never re-declare an option a variant sets — change the variant. `apps/web-extension` (WXT) and `apps/website` (Astro) stay on their framework-shipped bases by design. See `packages/tsconfig/README.md`.
-- **Effect v4 beta** — the `effect` npm package's `beta` dist-tag (e.g. `4.0.0-beta.107`), pinned **exact once in the root `workspaces.catalog`** and referenced as `"effect": "catalog:"` by every consumer. Do not "upgrade" to `latest` (that is v3) or `rc` unless the user says so.
-- **Hono** for every HTTP server (`^4.x`), served with `Bun.serve({ port, fetch: app.fetch })`.
-- The source of truth for Effect APIs is the cloned reference `.agents/references/effect-smol` (see the `effect` skill) — **never answer Effect questions from v3 memory**; v4 renamed or removed major APIs. Verified cheat sheet below.
+- Runtime and package manager is **Bun** (1.4.2). Run every JS command from
+  `app/`. Prefer `bun run <script>`; do not introduce npm/yarn/pnpm lockfiles.
+- TypeScript `~6.0.3`. Vite `^8`, `moduleResolution: "bundler"`,
+  `module: "ESNext"`, `jsx: "react-jsx"`.
+- `app/tsconfig.json` is **strict, and it stays strict**:
+  `strict`, `noUnusedLocals`, `noUnusedParameters`,
+  `noFallthroughCasesInSwitch`, `isolatedModules`, `useDefineForClassFields`,
+  `skipLibCheck`. `noEmit` is set, which is what makes `bun run build` a real
+  typecheck. Do not relax a flag to make a new error disappear; fix the code.
+- `app/tsconfig.node.json` is `composite` and covers only `vite.config.ts`.
+  Adding a Node-side file (e.g. a script) means widening its `include` —
+  do not move app code into it.
+- Never add `// @ts-expect-error` to silence an error you have not understood,
+  and never widen a type with `any`. `unknown` plus narrowing is the default
+  answer for anything from the IPC boundary.
 
-## Effect v4 cheat sheet (verified against effect-smol)
+## Build & gates
 
-| v3 habit                                                | v4 reality                                                                        |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `Context.Tag` / `Context.GenericTag` / `Effect.Service` | gone — use `class Foo extends Context.Service<Foo, Shape>()("app/Foo")`           |
-| `Layer.scoped(...)`                                     | gone — `Layer.effect` absorbs `Scope` automatically                               |
-| `Effect.config(cfg)`                                    | gone — a `Config` **is an Effect**: `yield* Config.string("NAME")`                |
-| `Config.withDescription`                                | gone                                                                              |
-| `Logger.logfmt`                                         | `Logger.formatLogFmt` / `Logger.consoleLogFmt` (default logger is on, zero setup) |
-| `HttpClientRequest.bearerAuth`                          | `HttpClientRequest.bearerToken` (HTTP client now lives at `effect/unstable/http`) |
-| running from callbacks                                  | `Effect.runPromise` / `ManagedRuntime.make(layer)` + `runtime.runPromise`         |
-
-Canonical service shape:
-
-```ts
-export class LibryvaClient extends Context.Service<LibryvaClient, {
-  getThing(token: string): Effect.Effect<IThing, TClientError>
-}>()("app/LibryvaClient") {
-  static readonly layer = Layer.effect(LibryvaClient, Effect.gen(function* () {
-    // dependencies are yielded, not provided here — compose at the app root
-    return LibryvaClient.of({ getThing: (token) => ... })
-  }))
-}
+```sh
+cd app
+bun run build     # tsc && vite build — the typecheck gate
+bun run dev       # Vite only, port 1420 (no native shell)
+bun run start     # native app: tauri dev
+bun run restart   # stop app-owned processes, then start
+bun run e2e       # build binary + wdio suite
 ```
 
-- Access a service with `yield* Foo` inside `Effect.gen`, or `Foo.use((foo) => program)` at a callback boundary.
-- Typed errors only: `class BarError extends Data.TaggedError("BarError")<{ ... }>() {}`; recover with `Effect.catchTags({ BarError: (e) => ... })` (accepts a tag or tag array). Never `try/catch` inside Effect code — defects are the runtime's business.
-- Wrap promises with `Effect.tryPromise({ try, catch })` — the `catch` maps to a typed error; network-level failures get their own error type distinct from API-status errors.
-- Bracket SDK resources with `Effect.acquireUseRelease(acquire, use, release)`.
-  The release must await async SDK cleanup even on typed failure. Build one
-  `ManagedRuntime` at boot and await `runtime.dispose()` during idempotent
-  `SIGINT`/`SIGTERM` shutdown.
-- Config: read env through `Config.string(...)`/`Config.int(...)` with `Config.option`/`Config.withDefault`; normalization that must stay lenient (invalid values falling back to defaults) belongs in a pure exported function the layer calls and the tests cover directly.
+`bun run build` runs `tsc`, and `tsconfig.json` sets `noEmit` — so
+**`bun run build` is the typecheck**. A green Vite build means nothing on its
+own; a green `bun run build` means the types are clean.
 
-## App shape (the reference implementation is `apps/mcp_server`)
+- Never introduce `eslint`, `prettier`, or a second formatter without
+  approval. There is no linter configured today; `tsc` plus `cargo clippy` are
+  the static gates, and formatting follows the surrounding file.
+- `bun run clean`, `clean:rust`, `clean:frontend` remove build output. Prefer
+  `bun run restart` over killing processes by hand — it also asserts ports
+  1420/1421 are free before relaunching.
+
+## Module structure
 
 ```
-src/
-  index.ts                        # boot: layers -> ManagedRuntime -> Bun.serve(app.fetch)
-  app.ts                          # Hono routes — thin adapters ONLY
-  integration-registry.const.ts   # fixed integration registry
-  constants/                      # cross-cutting immutable runtime values
-  types/                          # shared interfaces and type aliases only
-  libs/
-    services/                     # Effect Context.Service definitions, layers, transport factories
-    utils/                        # pure helpers with no framework lifecycle or environment access
-  <feature>/
-    <feature>.integration.ts      # one platform/flow registration
-    <feature>.schemas.ts          # Zod boundary schemas
-    <feature>.types.ts            # feature-local contracts
-    <feature>*.utils.ts           # focused renderers, mappers, or error translation
-  __tests__/                      # `<subject>.test.ts`, including loopback HTTP integration tests
+app/src/
+  main.tsx              # entry: @wdio/tauri-plugin import + React root
+  App.tsx               # shell/layout composition only
+  index.css             # Tailwind 4 theme + tokens
+  components/ui/        # vendored shadcn primitives
+  components/<area>/    # app components grouped by feature
+  lib/ipc.ts            # typed invoke wrappers — the ONLY place invoke() is called
+  lib/utils.ts          # cn()
+  lib/<provider>.ts     # per-provider data access + normalisation
+  hooks/use<Name>.ts    # one hook per file
+  types/<domain>.ts     # shared domain types
 ```
 
-- Keep only the process boot, Hono edge, and immutable registry at `src/`
-  root. Place reusable code by role under `constants/`, `types/`, or `libs/`;
-  place domain-specific code vertically under its feature directory.
-- Constants contain immutable shared values only; types contain no runtime
-  values. `libs/services/` owns Effect layers and framework-facing lifecycle
-  work. `libs/utils/` stays deterministic and framework-agnostic, making its
-  behavior directly unit-testable.
-- Feature integrations compose schemas, renderers, and services. They do not
-  duplicate transport, authentication, configuration, or generic error-handling
-  logic. Imports flow from feature code toward shared code, never the reverse.
-- Tests use the central `src/__tests__/` directory. Name every test after the
-  contract it covers; unit-test extracted helpers directly and retain
-  loopback-HTTP tests for the full Hono/MCP boundary.
+- Imports flow **inward only**: components → hooks → `lib` → types. Never the
+  reverse; no feature module may import another feature's internals.
+- Keep `App.tsx` a composition shell. Feature logic goes into
+  `components/<area>/` or a hook — a growing `App.tsx` is the signal to split.
+- Names follow [`naming-convention.md`](naming-convention.md) — kebab-case
+  `.tsx` components, `useX.ts` hooks, `<name>.types.ts` for shared types.
 
-- **Boundary discipline:** Hono handlers (and SDK callbacks — e.g. MCP tool registrations) contain **no business logic**. They call `runtime.runPromise(program)` where the program is an `Effect` built from services. Typed errors are converted to output _inside_ the Effect (`catchTags`) so the boundary awaits an infallible result; a final `try/catch` at the boundary only guards defects.
-- One `ManagedRuntime` per process, built once at boot (`Layer.provideMerge` keeps shared deps like config visible). For per-request frameworks (MCP transport), build the inner server per request but reuse the runtime.
-- Treat third-party SDK setup, I/O, and cleanup as effectful boundaries:
-  capture rejected promises as tagged errors with `tryPromise`, map expected
-  failures with `catchTags`, and bracket request-scoped resources with
-  `acquireUseRelease`.
-- A framework that hands you a raw `Request` (MCP transports) is mounted via passthrough: `app.all("/mcp", (c) => handle(c.req.raw))` — the adapter returns the framework's `Response` directly.
+## Types & data modelling
 
-## Testing
+- Model the four data states as a discriminated union, not a nullable field:
 
-- `bun test src` (`src/__tests__/*.test.ts`); typecheck with `tsc --noEmit` (`check-types` script).
-- Follow the binding test-first workflow in `.agents/rules/testing.md`: write
-  the focused failing test, make it pass with the smallest change, then
-  refactor under the green suite.
-- Test Effect services by providing stub layers: `Layer.succeed(Foo, Foo.of(stubShape))`, then `Effect.runPromise(program.pipe(Effect.provide(stubLayer)))`; assert failures with `Effect.flip`.
-- **Do not use the MCP SDK's `InMemoryTransport` under Bun** — its connect handshake hangs (verified Bun 1.4.2, SDK alone, no Effect involved). Drive MCP servers over real loopback HTTP instead: boot the Hono app on port 0 in the test and POST JSON-RPC with `fetch` (see `src/create-server.test.ts`).
+  ```ts
+  type UsageSnapshot =
+    | { status: "live"; value: number; fetchedAt: number; source: string }
+    | { status: "cached"; value: number; fetchedAt: number; source: string }
+    | { status: "stale"; value: number; fetchedAt: number; source: string }
+    | { status: "unavailable"; reason: string };
+  ```
+
+  This makes it impossible to render a usage number without its provenance,
+  which is a hard requirement in `AGENTS.md`. See [`ui.md`](ui.md).
+- Shared domain types live in `types/`, use `PascalCase` with **no `I`/`T`
+  prefix**, and are declared with `interface` for objects and `type` for
+  unions. Domain names first (`UsageSnapshot`, `ProviderStatus`,
+  `RateLimitWindow`) — never generic containers (`Data`, `Info`, `Item`).
+- Rust command payloads are mirrored by TS types in `lib/ipc.ts`. Keep the two
+  in sync: a field renamed in `#[derive(Serialize)]` must be renamed here, or
+  the value is silently `undefined` at runtime.
+- Dates across the boundary are **epoch milliseconds (`number`)**, formatted
+  only at render. Never ship a preformatted string from Rust.
+
+## React specifics
+
+- Function components, hooks in this order: built-ins → custom hooks →
+  effects → early returns. Callbacks need a dependency array; an effect that
+  runs on every render is a bug, not a style choice.
+- Derive state during render instead of mirroring props into `useState`.
+- Custom hooks return a stable, documented shape. If a hook needs a lot of
+  call-site ceremony, the abstraction is in the wrong place.
+- Never mutate props, state, or an `invoke` result.
+- `useEffect` cleanup must release anything it acquired — polling intervals,
+  `AbortController`, event listeners. Polling belongs in one place (a hook), and
+  must not run when the window is hidden.
+- Effects that talk to Rust handle **three** outcomes: resolved, rejected
+  (a typed IPC error → rendered unavailable state), and stale response ignored
+  (guard against out-of-order replies by tracking the latest request).
+- No `dangerouslySetInnerHTML`. There is no content pipeline that needs it, and
+  provider responses must never be injected as markup (see [`security.md`](security.md)).
+
+## E2E specs & scripts
+
+- `app/e2e/specs/*.e2e.ts` is the only automated test surface today. Specs
+  import from `@wdio/globals` (`expect`, `browser`, `$`), never from the global
+  namespace, and are read before extending — see the `tauri-e2e-testing` skill.
+- `capabilities.e2e.ts` is a **harness self-test**. It is not product coverage;
+  a failure there invalidates the whole run.
+- `app/scripts/*.ts` run under Bun. Use `Bun.spawn`/`execFileSync` and
+  `import.meta.dir`, never `process.cwd()`, and never assume a POSIX shell —
+  `restart.ts` is the cross-platform reference (Windows `powershell.exe` and
+  `taskkill`, POSIX `ps`/`SIGTERM`/`SIGKILL`).
+- Scripts must be idempotent and safe to re-run; they kill only processes whose
+  command line contains the app root, never a broader match.
 
 ## Dependencies
 
-- Never add or upgrade a dependency without explicit user approval — name, version, and why (same policy as Rust).
-- `effect` stays pinned to the beta line and moves only on instruction.
+- **Never add, remove, or upgrade a dependency without explicit user
+  approval** — name, version, and why, then wait. This covers `dependencies`,
+  `devDependencies`, and every Cargo crate.
+- New releases are blocked for 15 days by `app/bunfig.toml`
+  (`minimumReleaseAge`); see [`dependency-updates.md`](dependency-updates.md).
+- There is **no unit-test runner** in the client today (no Vitest/Jest). Adding
+  one is a dependency addition and therefore approval-gated — say so rather
+  than reaching for an ad-hoc script. Pure helpers still get covered through
+  the e2e suite or an explicitly approved runner.
+- Prefer what is already installed. `clsx`, `tailwind-merge`, `cva`, `radix-ui`,
+  and `lucide-react` cover the vast majority of UI needs; a new date library,
+  state library, or HTTP client needs a strong reason.
+- The client makes **no direct HTTP requests**. Network access belongs to Rust
+  (provider APIs). Do not add `fetch` to the renderer for provider data.
+- Commit `app/bun.lock` with dependency changes; never hand-edit it.
 
 ## Style
 
-- Names follow [naming-convention.md](naming-convention.md): kebab-case files, `PascalCase` service classes, `I`-prefixed interfaces, `T`-prefixed type aliases, `SCREAMING_SNAKE_CASE` compile-time constants only.
-- Comments follow the canonical rule [documentation.rules.md](documentation.rules.md): JSDoc on exported symbols with real contracts, no narration of _what_.
-- Zero `tsc --noEmit` errors; zero warnings from `bun run check-types`.
+- 2-space indent, double quotes, semicolons — match the surrounding file.
+- Comments follow [`documentation.md`](documentation.md): no narration of
+  _what_, doc comments only for real contracts.
+- Exports: prefer a named export. Only entry points (`App.tsx`, `main.tsx`) use
+  a default export, matching what the Tauri scaffold generates.

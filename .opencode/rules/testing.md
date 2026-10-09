@@ -1,132 +1,97 @@
 # Testing & Validation Rules
 
-There is no CI in this repo — the commands below, run locally before you finish, are the gate. The Husky pre-commit hook only formats the Flutter app (`cd apps/libryva && make format`); it does not validate correctness.
+There is **no CI and no pre-commit hook** in this repo. The commands below, run
+locally before you finish, are the gate. There is also **no client unit-test
+runner** yet — the automated surface is the WebdriverIO e2e suite plus the
+Rust/TypeScript compilers. Adding Vitest/Jest is a dependency addition and
+therefore approval-gated (see [`dependency-updates.md`](dependency-updates.md)).
 
-## Definition of done (every change)
+## Definition of done
 
-Run the checks for **every app you touched**:
+Run the checks for **what you touched**:
 
-| App                          | Commands (run inside the app dir)                                                                                                                                                                                                                                                                                                                    |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/server` (Rust)         | `cargo fmt --all --check` · `cargo clippy --workspace --all-targets --all-features -- -D warnings` · `cargo test --workspace` (unit suite; the ignored `mfa_flow` e2e runs explicitly with `make test-e2e`) · **Postman: run the `server` collection (root `postman/`) when HTTP routes change — see "API test automation" in the root `AGENTS.md`** |
-| `apps/mcp_server` (Hono/Bun) | `bun test src` · `bun run check-types` · `bun build src/index.ts --target=bun --outfile /dev/null` · **Postman: run the `mcp_server` collection (root `postman/`) when routes change — see "API test automation" in the root `AGENTS.md`**                                                                                                           |
-| `apps/libryva` (Flutter)     | `make analyze && make test` · `make format-check` (strict mode: `make lint`) · **UI changes: `make test-ui`** (Patrol smoke, see below)                                                                                                                                                                                                              |
-| `apps/website` (Astro)       | `bun run build` (no warnings) · `bunx astro check` (0 errors, 0 warnings)                                                                                                                                                                                                                                                                            |
-| `apps/web-extension`         | `bun test src` · `bun run check-types` · `bun run build` (+ `bun run build:firefox`) · **`bun run test:e2e`** (deterministic Puppeteer harness, see below) · visual smoke test via Puppeteer MCP for interactive/visual review (see the `puppeteer-ui-testing` skill — extension suite)                                                              |
+| Change                                              | Required commands (from `app/`)                                                                                                                  |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Any client change (`app/src/**`, config)             | `bun run build` (tsc + vite), `bun run e2e`                                                                                                       |
+| IPC command, capability, plugin, or `src-tauri`      | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` · `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` · `cargo check --manifest-path src-tauri/Cargo.toml` · `bun run build` · `bun run e2e` |
+| Pure Rust logic worth isolating                       | the same Rust gates + an inline `#[cfg(test)]` unit test                                                                                            |
+| UI, copy, or data-display change                      | `bun run e2e` (assert the rendered state, not just that it compiles)                                                                                |
+| `tauri.conf.json`, icons, bundle, or release profile  | `bun run tauri build` on the target OS, plus the Rust gates                                                                                        |
+| `website/` (once initialised)                         | its own Astro build — it is **not** part of the app build                                                                                           |
 
-All applicable commands must pass before work is considered complete. Never finish with analyzer warnings or errors.
+Never finish with a compiler warning, a clippy warning, or a skipped e2e run
+"because it was only a small change".
 
 ## Test-first development (binding)
 
-- Start every behavior change and bug fix with the smallest focused test that
+- Start every behaviour change and bug fix with the smallest focused test that
   demonstrates the desired contract or regression. Confirm it fails for the
-  intended reason before implementation, then make it pass with the smallest
-  production change and refactor only while the suite stays green.
-- Test observable behavior and public contracts, not private implementation
-  details. Unit-test pure transformations and error branches directly; use
-  integration tests at framework, transport, persistence, or browser
-  boundaries.
+  intended reason **before** implementing, then make it pass with the smallest
+  production change, then refactor while green.
+- Test observable behaviour and public contracts, not private implementation.
+  For this app that means the rendered usage/status state, the IPC payload
+  shape, and the Rust command's returned value.
 - Refactors preserve or improve coverage. When extracting a module, move its
-  existing tests and add direct tests for newly public pure helpers and every
-  meaningful success, validation, and error branch.
-- No feature, defect fix, or security fix is complete without automated
-  coverage. If automation is genuinely impossible, document the precise
-  manual verification and why in the task record.
+  tests and add direct tests for newly public pure helpers and every meaningful
+  success, validation, and error branch.
+- No feature, defect fix, or security fix is complete without coverage. If
+  automation is genuinely impossible (e.g. a native-widget surface wdio cannot
+  reach), document the exact manual verification and why in your summary.
 
-## Test expectations
+## Writing e2e specs
 
-- New behaviour ships with tests. Bug fixes ship with a regression test that fails without the fix.
-- **Rust** (`apps/server`): unit tests inline (`#[cfg(test)]`); integration tests in `tests/`.
-- **MCP hub** (`apps/mcp_server`): all tests live in `src/__tests__/`.
-  `<subject>.test.ts` unit-tests pure constants, schemas, renderers, and
-  utilities directly; `mcp-http.test.ts` drives the real Hono + MCP transport
-  over loopback HTTP with stubbed Effect layers. Never use MCP SDK
-  `InMemoryTransport` under Bun.
-- **Flutter** (`apps/libryva`): tests live in `test/` mirroring the `lib/` structure, using `flutter_test` (+ `mocktail` for fakes). New features require tests for business logic; non-trivial UI gets widget tests.
-- **Flutter UI smoke** (`apps/libryva`): navigation/visual flows are validated on the Android emulator with **Patrol** — suites in `patrol_test/`, run via `make test-ui`, screenshots pulled to `build/patrol-screenshots/`. Run it for UI/navigation changes; see the `patrol-ui-testing` skill for the procedure, pass criteria, and agent workflow.
-- **Website** (`apps/website`): no runtime test suite — validation is the build + `astro check`; content changes must satisfy the `content.config.ts` zod schemas and the SEO checklist (§52 of `.agents/rules/seo-optimisation.rules.md`).
-- **Web extension** (`apps/web-extension`): deterministic Puppeteer e2e is the automation gate — see the dedicated section below.
-- **Postman API tests (both HTTP backends):** `apps/server` and `apps/mcp_server`
-  endpoints are mirrored 1:1 in the repo-root `postman/` workspace under
-  `collections/<app>/{local,production}/`. The `production/` folders run via
-  the `postman` cloud MCP against the deployed URLs (`api.libryva.com`,
-  `mcp.libryva.com`) — read-only and negative-path requests only, never
-  writes against production. The `local/` folders run in the Postman desktop
-  app against the dev stack (server `make dev` :8000, mcp hub
-  `bun run src/index.ts` :8080). All Postman queries, authoring, and runs go
-  through the `postman` cloud MCP — never the Postman CLI, `newman`, or raw
-  Postman API calls — and any collection create/replace via the MCP uses
-  Collection Format v3 (`3.0`). Procedure, contracts, and safety rules:
-  "API test automation" in the root `AGENTS.md` and `postman/README.md`.
+Specs live in `app/e2e/specs/*.e2e.ts` and drive the **real compiled binary**
+through the native webview — the Rust backend runs, IPC crosses the process
+boundary, and the OS window exists.
 
-## Web extension — deterministic e2e + MCP exploratory testing
+- Read the `tauri-e2e-testing` skill (`.opencode/skills/tauri-e2e-testing`)
+  before extending the suite; it holds the build constraint, mocking, and
+  screenshot API details. `app/e2e/specs/app.e2e.ts` is the pattern to follow.
+- `capabilities.e2e.ts` is a **harness self-test**, not product coverage. If it
+  fails, the harness is broken and no other result in that run is trusted.
+- Always invoke via `bun run e2e` (it owns the build). Never bare `wdio`, never
+  a bare `cargo build` — see the `custom-protocol` + `touch build.rs` constraint
+  in [`tauri.md`](tauri.md).
+- Mock a Rust command with `browser.tauri.mock(...)` to isolate the renderer,
+  then assert on recorded args via `mock.update()`. `mock()` fully resets on
+  every call — set implementations in `beforeEach`, never `beforeAll`, and
+  always `mockRestore()`.
+- Reach the Rust side with `browser.tauri.execute(({ core }) => core.invoke(...))`
+  when no UI gesture triggers the command; prefer a real UI gesture when the
+  point of the test is that the gesture produces the call.
+- Screenshot on failure with `browser.saveScreenshot(file)` — it returns a
+  `Buffer`, not `true`.
+- `maxInstances: 1` is required; the embedded driver binds a fixed port.
 
-`apps/web-extension` ships unit tests for its pure utils (`bun test src`) and a
-deterministic Puppeteer e2e harness that drives the **built** extension
-(`.output/chrome-mv3`) in headless Chrome via `--load-extension`. The harness
-is the regression gate; the Puppeteer MCP browser remains the tool for
-interactive/visual debugging and exploratory review of UI changes.
+## Rust tests
 
-Run it with:
-
-```sh
-cd apps/web-extension && bun run test:e2e
-```
-
-(the script builds first — never test stale output — then runs `bun test e2e`).
-
-How it works: the harness in `apps/web-extension/e2e/` computes the unpacked
-extension id from the output path, opens `popup.html` and
-`app.html` as tabs, seeds/clears `chrome.storage.local`
-(`savedArticles`, `outbox` keys — which also proves the storage-watch
-reactivity), and asserts rendered output with one structured evaluate per
-state. The popup save flow is covered by stubbing `chrome.tabs.query` +
-`chrome.scripting.executeScript` before page scripts run, then asserting the
-full local-first pipeline: storage row (metadata-only) + outbox capture +
-button state. Screenshots of every major state land in
-`.temp/screenshorts/extension-e2e-*.png` (repo root, git-ignored).
-
-Minimum e2e coverage (a run is complete only when all are asserted):
-
-1. Dashboard (`app.html`) renders seeded article cards (thumb or
-   fallback tile, title link, source, read time, bookmark) newest-first.
-2. Filter chips filter the list; active chip styling applies; All restores.
-3. Bookmark toggle removes an article from the list **and** from storage.
-4. Search opens focused (pill, or ⌘K / Ctrl+K), filters by title/source, and resets on close.
-5. Empty states render (no articles / empty filter / empty search).
-6. Bottom nav switches to placeholder views (Home/Library/Profile) and back.
-7. Popup renders: brand header, expand button, chips, saved list
-   newest-first; save-row hint on non-savable pages.
-8. Popup save flow: Save persists the article and queues the outbox capture;
-   an already-saved page toggles off and drops the queued capture; expand
-   opens the library in a new tab.
-
-Manual-only (cannot be automated by either harness): the context-menu "Save
-article to Libryva" flow and the toolbar badge — context menus cannot be
-clicked programmatically. The REAL on-page injection
-(`scripting.executeScript` behind `activeTab` against a live page) is also
-verified manually when touched; the e2e covers everything around it with a
-stubbed extraction. Unit tests + typecheck + builds remain mandatory
-alongside the e2e run (DoD table above).
-
-Environment note: if `PUPPETEER_EXECUTABLE_PATH` is set on the machine but
-points at a missing binary, the harness falls back to puppeteer's own
-downloaded Chrome for Testing (`~/.cache/puppeteer`). Set `E2E_CHROME` to
-point at a specific Chrome binary.
+- Unit tests inline under `#[cfg(test)] mod tests` in the module they cover;
+  integration tests in `app/src-tauri/tests/`.
+- Cover the error branches, not just the happy path. Use temp fixtures; never
+  touch the developer's real data or repo state.
+- Time-dependent logic must be deterministic in tests: inject a clock rather
+  than calling `SystemTime::now()` in the code under test.
+- Run the suite with `cargo test --manifest-path app/src-tauri/Cargo.toml`.
 
 ## Test environment
 
-- Tests never depend on network access, real API keys, or external services.
-- Local authenticated API/client testing may use the shared dev-login identity
-  held in `apps/server/.env.local`. Load it into the local test process without
-  displaying values (for example, from `apps/server`, run
-  `set -a; source .env.local; set +a; ./auto_testing/run.sh`); the runner
-  reads `DEV_LOGIN_EMAIL` / `DEV_LOGIN_PASSWORD` and the server continues to
-  use its existing `DEV_LOGIN_EMAILS` / `DEV_LOGIN_SALT` settings. Never copy
-  the password into commands, logs, fixtures, docs, reports, or agent output.
-  This identity is local-only and must never be used against production
-  services or databases.
-- **Never run tests or one-off queries against the production Neon database.** Neon is production only, and its URL lives solely in `apps/server/.env.prod`, which local server processes never load; `shared/config.rs` reads `.env.local`/`.env` only. ECS receives runtime secret values from Secrets Manager. Local runs use `.env.local`, which points at the dev DB through `dev-db.sh`, so a plain `cargo run` cannot reach production. Still never boot a test server with an explicit production `DATABASE_URL`.
-- **The dev/test database is the local docker-compose stack in `apps/server`** (`libryva-dev-postgres` + redis + pgAdmin, loopback-only) — managed via `apps/server/scripts/dev-db.sh` (`up`, `url`, `env`; `.env.local` carries the dev DB URL, and `eval "$(./scripts/dev-db.sh env)"` re-exports it or selects another database such as `libryva_e2e`). Do not install, run, or spin up PostgreSQL anywhere on a dev machine (brew, docker, or otherwise) — the dev compose stack replaces all of that. Production Neon is never touched by tests or local runs. **MCP-hub tooling never needs the DB at all**: dev sessions are minted over HTTP via the server's `POST /auth/dev-login` (plain curl with a `DEV_LOGIN_EMAILS`-allowlisted email + the `DEV_LOGIN_SALT` password; machine IP must be in the server's `ip_allowlist` table, scope `dev_login`, and the mailbox must hold the `dev` role) — DB access from the hub is strictly prohibited.
-- Filesystem behaviour (Flutter import/file-manager flows, server migration SQL) is tested against temporary fixtures — never the developer's real data or repo state.
-- Time-dependent logic must be injectable/deterministic in tests: route `Utc::now()` / `DateTime.now()` behind an injectable clock wherever logic depends on it.
+- Tests never require network access, real API keys, or live provider
+  accounts. Provider responses are faked at the HTTP/IPC boundary.
+- Never run a test or one-off command against a real provider account in a way
+  that could mutate it. Read-only, mocked, or explicitly-approved only.
+- Do not hardcode real tokens, cookies, or account identifiers in fixtures,
+  mocks, snapshots, or test files.
+- Screenshots and e2e artifacts go to the **repo-root `.temp/`**, resolved from
+  `import.meta.url` so the location holds regardless of the directory the
+  runner started from — never `os.tmpdir()`, which scatters output across a
+  per-machine path. `.temp` is git-ignored, so artifacts stay local; never
+  commit them.
+- Polling, timers, and relative-time rendering need an injected/fixed clock so
+  assertions are not flaky.
+
+## Platform caveat
+
+The e2e suite is **verified on macOS only**; Windows and Linux are configured
+but unproven (see the skill). Never claim cross-platform verification you did
+not perform. A green run on one OS is not evidence for another, and one Linux
+distribution is not evidence for all of them.
