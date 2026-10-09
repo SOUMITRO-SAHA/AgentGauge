@@ -4,7 +4,10 @@ A cross-platform desktop app and native-widget project for keeping track of AI s
 
 The goal is to support subscriptions and tools such as OpenAI Codex, Claude Code, and Z.ai, with an architecture that can grow to include other AI providers. The primary desktop targets are macOS, Windows, and Linux, with Linux distribution compatibility to be validated as the app develops.
 
-> **Project status:** Early scaffold. The current app is still based on the default Tauri greeting example. Provider integrations, subscription statistics, status monitoring, automations, and the widget experience are planned work and are not implemented yet.
+> **Project status:** Working prototype. Codex is integrated: the app reads your
+> real 5-hour and weekly usage windows from the Codex CLI, watches for a window
+> rollover, and ships a desktop widget. Other providers (Z.ai, Claude Code) are
+> designed for but **not yet implemented**.
 
 ## Project goals
 
@@ -30,9 +33,38 @@ The website is intentionally an uninitialized placeholder. It is separate from t
 
 - [Tauri 2](https://v2.tauri.app/) for the native desktop shell and Rust backend
 - React 19 and TypeScript for the client
+- [Effect](https://effect.website) 4 (beta) for state, async work, and Schema
+  decoding of every IPC payload
 - Vite 8 for development and production builds
 - Tailwind CSS 4 and shadcn/ui for styling and UI components
 - Bun for JavaScript dependencies and scripts
+- vitest for unit and component tests; WebdriverIO for end-to-end tests
+
+## Architecture
+
+The renderer and Rust speak **one** protocol: a tagged `AppRequest` in, a tagged
+`AppResponse` out, behind a single `dispatch` command. Both enums are
+exhaustive, so adding a capability is one variant rather than a new
+stringly-typed command name.
+
+```
+app/src/
+  lib/ipc.ts          # the ONLY place invoke() is called; Schema decodes every payload
+  lib/usage.ts        # pure display rules (freshness, tone, countdown)
+  atoms/              # every value the app renders
+  components/         # onboarding, dashboard, usage, widget
+
+app/src-tauri/src/
+  shared/protocol.rs  # the request/response contract
+  shared/domain.rs    # provider-agnostic types carrying provenance
+  modules/            # providers, automation, widget, onboarding, commands
+  crates/             # (empty — no external crates are used yet)
+```
+
+Data honesty is enforced by construction: a reading carries its freshness,
+source, and timestamp, and an unavailable reading always carries a reason. A
+missing value renders as an explicit state, never as `0`, `-`, or an empty
+string.
 
 ## Development setup
 
@@ -95,7 +127,42 @@ The suite is currently verified on macOS only; Windows and Linux are configured 
 
 ## Integrations and credentials
 
-Provider support has not been implemented yet. When adding it, prefer documented and authorized provider interfaces, make the source and timestamp of status/usage data visible, and handle missing or stale data explicitly. Never commit API keys, session tokens, account data, or local environment files. Avoid logging credentials or other sensitive account information.
+### Codex
+
+Codex is integrated by spawning `codex app-server --stdio` and speaking its
+JSON-RPC protocol over stdio. It requires **no API key and no secret storage**:
+the child process inherits the session you already created with `codex login`,
+so no token ever reaches this app, the renderer, or any file it writes.
+
+Usage is read with `account/rateLimits/read`, which returns the 5-hour and
+weekly windows as `{ usedPercent, windowDurationMins, resetsAt }`.
+
+### Rolling the 5-hour window — what actually happens
+
+The window is **not** something a prompt can restart. `resetsAt` is computed by
+the provider and is only ever read, never derived, anywhere in the Codex
+codebase. Sending a prompt **consumes** the current window rather than opening a
+fresh one.
+
+What the app does instead is **detect** the rollover: it polls on an interval
+and compares `resetsAt` across readings, raising a notice when the value moves
+forward. That is the only locally observable signal that a new window opened —
+the provider emits no reset event.
+
+A minimal "hi" prompt is implemented behind `sendPing`, but it is never fired on
+a timer. It spends quota, so the client only reaches it from a setting the user
+explicitly enabled.
+
+### Other providers
+
+Z.ai and Claude Code are **not implemented**. The `Provider` trait and the
+registry exist so that adding one is a registration line plus a module — no
+change to `automation`, `widget`, or `lib.rs`.
+
+When adding providers, prefer documented and authorized provider interfaces,
+make the source and timestamp of status/usage data visible, and handle missing
+or stale data explicitly. Never commit API keys, session tokens, account data,
+or local environment files.
 
 ## License
 

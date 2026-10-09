@@ -4,7 +4,13 @@
 
 This is an early-stage Tauri 2 desktop app and native-widget project for AI subscription statistics, account/service status, and related automation. Intended provider coverage includes Codex, Claude Code, Z.ai, and additional services over time. The primary platform goals are macOS, Windows, and Linux.
 
-The current UI and Rust backend are still the Tauri starter greeting example. Do not describe provider integrations, monitoring, automation, or widget behavior as implemented unless the code actually implements them.
+The current UI and Rust backend implement **Codex only**: real usage reads via `codex app-server`, rollover detection, onboarding, the dashboard, and a frameless desktop widget. Do not describe Z.ai, Claude Code, or any other provider as integrated unless the code actually implements it, and do not claim Windows or Linux verification — only macOS has been exercised.
+
+## A 5-hour window cannot be restarted by a prompt
+
+`resetsAt` is computed by the Codex provider and is only ever read, never derived, anywhere in the upstream codebase. Sending a prompt **consumes** the current window rather than opening a fresh one. The app detects a rollover by comparing `resetsAt` across polls; it never manufactures one. Do not add or describe a "roll the window" action that implies otherwise.
+
+`sendPing` spends the account's quota. Nothing may call it on a timer the user did not explicitly opt into.
 
 ## Project structure and conventions
 

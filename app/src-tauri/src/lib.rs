@@ -1,14 +1,72 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+//!
+//! Composition root. Owns plugin registration, managed-state construction and
+//! the command list — and nothing else. Every behaviour lives in a module under
+//! `src/modules/**`; introducing a module means adding its `mod` line here and
+//! naming its commands in `generate_handler!`, which is the only edit this file
+//! should ever need.
+
+mod modules;
+mod shared;
+
+use std::sync::Arc;
+
+use tauri::Manager;
+
+use modules::automation::AutomationRunner;
+use modules::commands::AppState;
+use modules::onboarding::OnboardingStore;
+use modules::providers::ProviderRegistry;
+use modules::widget::WidgetController;
+use shared::clock::{Clock, SystemClock};
+
+/// Surfaces for the integration tests in `tests/`.
+///
+/// The transport and the decoders are private to their modules by design, so
+/// this re-exports exactly what an out-of-line test needs — and nothing that a
+/// production caller should reach for.
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit {
+    pub use crate::modules::providers::codex::protocol::decode_rate_limits;
+    pub use crate::modules::providers::codex::transport::AppServer;
+    pub use crate::shared::domain::ProviderKind;
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let now_ms = SystemClock.now_ms();
+    // Built once here and shared: the watcher and the command dispatcher must
+    // see the same provider instances, or a poll and a manual read could each
+    // spawn their own app-server process.
+    let registry = Arc::new(ProviderRegistry::new(now_ms));
+    let automation = Arc::new(AutomationRunner::new(Arc::clone(&registry)));
+    let widget = Arc::new(WidgetController::new());
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet]);
+        .setup(move |app| {
+            // The app-data directory is resolved here, once, and handed to the
+            // module that owns persistence. No module reaches for a global.
+            let onboarding = match app.path().app_data_dir() {
+                Ok(dir) => OnboardingStore::in_app_dir(&dir),
+                // Without a writable app-data directory onboarding simply does
+                // not persist; the app still runs.
+                Err(_) => {
+                    OnboardingStore::new(std::env::temp_dir().join("ism").join("onboarding.json"))
+                }
+            };
+
+            app.manage(AppState {
+                registry,
+                automation,
+                onboarding,
+                widget,
+            });
+            Ok(())
+        })
+        // One command implements the whole request/response protocol defined in
+        // `shared::protocol`, so this list never grows per feature.
+        .invoke_handler(tauri::generate_handler![modules::commands::dispatch]);
 
     // E2E testing plugins. Debug builds only, so they never ship in release.
     #[cfg(debug_assertions)]

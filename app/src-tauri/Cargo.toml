@@ -19,6 +19,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # bundled frontendDist". Enabling it lets a *debug* build embed the compiled
 # frontend, which is what makes the E2E suite runnable without a Vite server.
 custom-protocol = ["tauri/custom-protocol"]
+# Exposes `testkit` so the integration tests under `tests/` can reach the
+# transport and decoders, which are private to their modules by design.
+testkit = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

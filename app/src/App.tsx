@@ -1,75 +1,103 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import { Button } from "~/components/ui/button";
+/**
+ * Composition shell only.
+ *
+ * Chooses the surface — onboarding, dashboard, or the compact widget — and
+ * mounts the atom registry. No feature logic lives here; a growing `App.tsx` is
+ * the signal that something belongs in `components/<area>/` or an atom.
+ */
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
+import { RegistryProvider, useAtomValue } from "@effect/atom-react";
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+import { onboardingAtom, onboardingVisibleAtom } from "~/atoms";
+import { Dashboard } from "~/components/dashboard/dashboard";
+import { OnboardingFlow } from "~/components/onboarding/onboarding-flow";
+import { WidgetSurface } from "~/components/widget/widget-surface";
+
+/**
+ * The surface requested by the window.
+ *
+ * The widget window loads `index.html?surface=widget` (see
+ * `modules/widget/mod.rs`), so one bundle serves both and the two cannot drift
+ * apart in how they render a reading.
+ */
+function readSurface(): "widget" | "app" {
+  const requested = new URLSearchParams(window.location.search).get("surface");
+  return requested === "widget" ? "widget" : "app";
+}
+
+/**
+ * Applies the platform's chrome.
+ *
+ * The macOS treatment is a vibrancy-tinted surface; Windows and Linux keep the
+ * opaque one, where translucency over an unknown desktop reads as a fault.
+ */
+function usePlatformChrome(): void {
+  const isMac =
+    typeof navigator !== "undefined" &&
+    /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+  document.body.dataset.platform = isMac ? "macos" : "other";
+
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
+  const apply = () => {
+    document.documentElement.classList.toggle("dark", prefersDark.matches);
+  };
+  apply();
+  prefersDark.addEventListener("change", apply);
+}
+
+function Surface() {
+  const surface = readSurface();
+  usePlatformChrome();
+
+  if (surface === "widget") return <WidgetSurface />;
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8 text-center">
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-        Welcome to Tauri + React
-      </h1>
+    <div className="min-h-screen">
+      <OnboardingGate />
+    </div>
+  );
+}
 
-      <div
-        data-testid="logo-row"
-        className="flex items-center justify-center gap-4"
-      >
-        <a
-          href="https://vite.dev"
-          target="_blank"
-          rel="noreferrer"
-          className="transition-opacity hover:opacity-80"
-        >
-          <img src="/vite.svg" className="size-16" alt="Vite logo" />
-        </a>
-        <a
-          href="https://tauri.app"
-          target="_blank"
-          rel="noreferrer"
-          className="transition-opacity hover:opacity-80"
-        >
-          <img src="/tauri.svg" className="size-16" alt="Tauri logo" />
-        </a>
-        <a
-          href="https://react.dev"
-          target="_blank"
-          rel="noreferrer"
-          className="transition-opacity hover:opacity-80"
-        >
-          <img src={reactLogo} className="size-16" alt="React logo" />
-        </a>
-      </div>
+/**
+ * Shows onboarding until it is dismissed, then the dashboard.
+ *
+ * Both stay mounted so the dashboard's atoms are already warm when the flow
+ * finishes — otherwise the first paint after onboarding is a loading state the
+ * user did not ask to wait through.
+ *
+ * The gate is read from Rust rather than held here: `onboardingVisibleAtom` is
+ * the session-local override for "the user just skipped", and Rust's
+ * `OnboardingProgress.visible` is the durable answer. Either one hiding the
+ * flow hides it.
+ */
+function OnboardingGate() {
+  const skipped = useAtomValue(onboardingVisibleAtom);
+  const progress = useAtomValue(onboardingAtom);
 
-      <p className="text-sm text-muted-foreground">
-        Click on the Tauri, Vite, and React logos to learn more.
-      </p>
+  // Rust owns the durable answer; the atom is the session-local override. Both
+  // are consulted so a dismissed user is never shown the flow again, and a
+  // user who has not dismissed it always sees it.
+  const showFlow = AsyncResult.match(progress, {
+    onInitial: () => true,
+    onSuccess: (result) => result.value.visible,
+    onFailure: () => true,
+  });
 
-      <form
-        className="flex items-center gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-          className="h-9 w-56 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-        />
-        <Button type="submit">Greet</Button>
-      </form>
+  return (
+    <>
+      <Dashboard hidden={!skipped || showFlow} />
+      <OnboardingFlow />
+    </>
+  );
+}
 
-      <p className="text-sm font-medium text-foreground">{greetMsg}</p>
-    </main>
+function App() {
+  return (
+    <RegistryProvider>
+      <Surface />
+    </RegistryProvider>
   );
 }
 

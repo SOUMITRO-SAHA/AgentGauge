@@ -13,6 +13,10 @@
 @theme {
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
+  /* Numeric readouts: the window bars and countdowns must not reflow as digits
+     change, so they use tabular figures rather than inheriting the UI stack. */
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
 }
 
 @theme inline {
@@ -48,6 +52,26 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /*
+   * Status tones. These are semantic, not decorative: a tone is never the only
+   * signal — every component that uses one also renders text or an icon.
+   */
+  --color-ok: var(--ok);
+  --color-ok-foreground: var(--ok-foreground);
+  --color-warn: var(--warn);
+  --color-warn-foreground: var(--warn-foreground);
+  --color-critical: var(--critical);
+  --color-critical-foreground: var(--critical-foreground);
+  --color-unknown: var(--unknown);
+  --color-unknown-foreground: var(--unknown-foreground);
+  /*
+   * Surfaces. On macOS the app paints its own vibrancy and these are the
+   * translucent layers that sit on it; elsewhere they are opaque.
+   */
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-accent-glass: var(--accent-glass);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -95,6 +119,20 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  --ok: oklch(0.62 0.15 155);
+  --ok-foreground: oklch(0.99 0.01 155);
+  --warn: oklch(0.72 0.15 75);
+  --warn-foreground: oklch(0.21 0.05 75);
+  --critical: oklch(0.58 0.21 25);
+  --critical-foreground: oklch(0.99 0.01 25);
+  --unknown: oklch(0.62 0.02 260);
+  --unknown-foreground: oklch(0.99 0.01 260);
+
+  --surface: oklch(0.985 0.002 260);
+  --surface-raised: oklch(1 0 0);
+  --surface-sunken: oklch(0.96 0.003 260);
+  --accent-glass: oklch(1 0 0 / 70%);
 }
 
 .dark {
@@ -130,6 +168,20 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  --ok: oklch(0.72 0.16 155);
+  --ok-foreground: oklch(0.18 0.04 155);
+  --warn: oklch(0.78 0.15 78);
+  --warn-foreground: oklch(0.2 0.05 78);
+  --critical: oklch(0.66 0.2 25);
+  --critical-foreground: oklch(0.99 0.01 25);
+  --unknown: oklch(0.55 0.02 260);
+  --unknown-foreground: oklch(0.95 0.01 260);
+
+  --surface: oklch(0.16 0.006 265);
+  --surface-raised: oklch(0.21 0.008 265);
+  --surface-sunken: oklch(0.13 0.005 265);
+  --accent-glass: oklch(0.28 0.01 265 / 60%);
 }
 
 @layer base {
@@ -137,11 +189,26 @@
     @apply border-border outline-ring/50;
   }
 
+  /*
+   * The macOS look: a layered, slightly translucent surface with a soft
+   * top-light gradient. Only applied on macOS — Windows and Linux keep the
+   * opaque surfaces, where translucency over an unknown desktop reads as a
+   * rendering fault rather than a material.
+   */
+  :root {
+    color-scheme: light dark;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
   body {
     @apply bg-background text-foreground font-sans;
     min-width: 320px;
     min-height: 100vh;
     margin: 0;
+    -webkit-font-smoothing: antialiased;
   }
 
   button,
@@ -149,5 +216,47 @@
   textarea,
   select {
     font: inherit;
+  }
+
+  /*
+   * macOS vibrancy.
+   *
+   * Only `background-image` is set: `background-color` must keep resolving to
+   * the `--background` token, because it is the base layer a surface is stacked
+   * on. Overwriting it with a shorthand gradient would drop the token back to
+   * transparent and every translucent surface above it would lose its base.
+   */
+  @supports (-webkit-backdrop-filter: blur(1px)) {
+    body[data-platform="macos"] {
+      background-image:
+        radial-gradient(
+          120% 80% at 50% -10%,
+          oklch(0.72 0.06 265 / 22%),
+          transparent 60%
+        ),
+        linear-gradient(180deg, var(--surface) 0%, var(--surface-sunken) 100%);
+      background-attachment: fixed, fixed;
+    }
+
+    body[data-platform="macos"].dark {
+      background-image:
+        radial-gradient(
+          120% 80% at 50% -10%,
+          oklch(0.5 0.08 275 / 26%),
+          transparent 60%
+        ),
+        linear-gradient(180deg, var(--surface) 0%, var(--surface-sunken) 100%);
+      background-attachment: fixed, fixed;
+    }
+  }
+
+  /*
+   * Numeric readouts must not shift width as digits change, so the countdowns
+   * and percentages use tabular figures. Applied as a utility rather than
+   * globally because headings should keep proportional digits.
+   */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
   }
 }

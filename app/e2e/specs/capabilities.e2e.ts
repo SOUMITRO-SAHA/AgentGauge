@@ -10,9 +10,30 @@ const repoRoot = path.resolve(
   "../../..",
 );
 const shotDir = path.join(repoRoot, ".temp", "e2e");
-fs.mkdirSync(shotDir, { recursive: true });
+// Two spec files create the same directory at load time, so the guard is an
+// explicit existence check rather than `recursive: true`, which races when the
+// specs are loaded in parallel.
+if (!fs.existsSync(shotDir)) fs.mkdirSync(shotDir, { recursive: true });
 
+/**
+ * Harness self-test, not product coverage.
+ *
+ * Asserts that screenshots, the plugin bridge, mocking and window APIs work in
+ * this environment. If this file fails, the harness is broken and no other
+ * result in the run can be trusted.
+ */
 describe("E2E capability verification", () => {
+  before(async () => {
+    // Runs before any product mock is installed, so it observes the real app.
+    // `beforeAll`-style setup here is safe because this file installs a mock
+    // only inside the one test that exercises mocking, and restores it after.
+    await browser.tauri.switchWindow("main");
+    await browser.url("tauri://localhost");
+    await $('[data-testid="dashboard"], [data-testid="onboarding"]').waitForDisplayed({
+      timeout: 10_000,
+    });
+  });
+
   describe("screenshots", () => {
     it("captures the native window via saveScreenshot()", async () => {
       const file = path.join(shotDir, "native-window.png");
@@ -54,28 +75,74 @@ describe("E2E capability verification", () => {
       console.log("window size:", JSON.stringify(size));
       console.log("window rect:", JSON.stringify(rect));
 
-      // tauri.conf.json declares 800x600.
       expect(rect.width).toBeGreaterThan(0);
       expect(rect.height).toBeGreaterThan(0);
       expect(rect.x).toBeGreaterThanOrEqual(0);
     });
   });
 
-  describe("browser.tauri.execute() plugin bridge", () => {
-    it("runs JS with access to the Tauri API", async () => {
+  describe("plugin bridge", () => {
+    it("reaches the Rust side through the single dispatch command", async () => {
       const result = await browser.tauri.execute(({ core }) =>
-        core.invoke("greet", { name: "PluginBridge" }),
+        core.invoke("dispatch", { request: { type: "hello" } }),
       );
-      expect(result).toBe("Hello, PluginBridge! You've been greeted from Rust!");
-      console.log("tauri.execute invoke ->", result);
+
+      expect(result).toEqual({ type: "protocol", version: 1 });
+      console.log("dispatch(hello) ->", JSON.stringify(result));
     });
 
-    it("passes arguments through the bridge", async () => {
-      const result = await browser.tauri.execute(
-        ({ core }, name: string) => core.invoke("greet", { name }),
-        "ArgTest",
+    it("answers a usage read without touching a provider", async () => {
+      // `providerStatus` only probes for the executable, so this is safe to run
+      // in CI with or without Codex installed.
+      const result = await browser.tauri.execute(({ core }) =>
+        core.invoke("dispatch", { request: { type: "providerStatus" } }),
       );
-      expect(result).toContain("ArgTest");
+
+      console.log("dispatch(providerStatus) ->", JSON.stringify(result));
+      expect(result.type).toBe("providerStatuses");
+      expect(Array.isArray(result.providers)).toBe(true);
+    });
+
+    it("reports onboarding progress from the real store", async () => {
+      const result = await browser.tauri.execute(({ core }) =>
+        core.invoke("dispatch", { request: { type: "onboardingProgress" } }),
+      );
+
+      expect(result.type).toBe("onboarding");
+      // The step count is owned by Rust so the client cannot drift from it.
+      expect(result.progress.total).toBe(6);
+    });
+
+    it("returns a typed failure for an over-long ping prompt", async () => {
+      const result = await browser.tauri.execute(({ core }) =>
+        core.invoke("dispatch", {
+          request: { type: "sendPing", prompt: "x".repeat(500) },
+        }),
+      );
+
+      expect(result.type).toBe("failure");
+      expect(result.error.kind).toBe("invalidRequest");
+    });
+
+    it("refuses an unsupported provider at the boundary", async () => {
+      // Rejected by serde before the handler runs, so the call rejects rather
+      // than resolving. Either a rejection or a typed failure is correct; a
+      // resolved success would mean an unknown provider slipped through.
+      const outcome = await browser.tauri.execute(async ({ core }) => {
+        try {
+          const value = await core.invoke("dispatch", {
+            request: { type: "readPlan", provider: "not-a-provider" },
+          });
+          return { rejected: false, value };
+        } catch (error) {
+          return { rejected: true, message: String(error) };
+        }
+      });
+
+      expect(
+        outcome.rejected ||
+          (outcome.value as { type?: string } | undefined)?.type === "failure",
+      ).toBe(true);
     });
   });
 
@@ -94,52 +161,38 @@ describe("E2E capability verification", () => {
 
   describe("standard element interactions", () => {
     it("reads text, attributes and state", async () => {
-      const h1 = await $("h1");
-      expect(await h1.getText()).toBe("Welcome to Tauri + React");
-      expect(await h1.isDisplayed()).toBe(true);
-      expect(await h1.isExisting()).toBe(true);
-
-      const input = await $("#greet-input");
-      expect(await input.getAttribute("placeholder")).toBe("Enter a name...");
-    });
-
-    it("types with setValue and clearValue", async () => {
-      const input = await $("#greet-input");
-      await input.setValue("First");
-      expect(await input.getValue()).toBe("First");
-      await input.clearValue();
-      expect(await input.getValue()).toBe("");
-    });
-
-    it("types with individual key presses", async () => {
-      const input = await $("#greet-input");
-      await input.click();
-      await browser.keys(["A", "B", "C"]);
-      expect(await input.getValue()).toBe("ABC");
-    });
-
-    it("waits for an element to appear", async () => {
-      const el = await $("button=Greet");
-      await el.waitForDisplayed({ timeout: 5000 });
-      expect(await el.isDisplayed()).toBe(true);
+      // Whichever surface happens to be up, the harness must be able to read
+      // it — these assertions are about the harness, not about a screen.
+      const heading = await $("h1");
+      expect(await heading.isDisplayed()).toBe(true);
+      expect((await heading.getText()).length).toBeGreaterThan(0);
+      expect(await heading.isExisting()).toBe(true);
     });
 
     it("supports getProperty for DOM state", async () => {
       const value = await browser.execute(() => document.querySelector("h1")?.tagName);
       expect(value).toBe("H1");
     });
+
+    it("reads a data attribute off a rendered element", async () => {
+      const element = await $('[data-testid$="panel"], [data-testid="onboarding"]');
+      expect(await element.isExisting()).toBe(true);
+      expect(await element.getAttribute("data-testid")).toBeTruthy();
+    });
   });
 
   describe("Tauri command mocking", () => {
-    it("intercepts a Rust command and asserts on call args", async () => {
-      const mock = await browser.tauri.mock("greet");
-      await mock.mockResolvedValue("MOCKED greeting");
+    it("intercepts the dispatch command and asserts on call args", async () => {
+      const mock = await browser.tauri.mock("dispatch");
+      await mock.mockResolvedValue({ type: "protocol", version: 1 });
 
       const result = await browser.tauri.execute(({ core }) =>
-        core.invoke("greet", { name: "Mocked" }),
+        core.invoke("dispatch", { request: { type: "hello" } }),
       );
-      expect(result).toBe("MOCKED greeting");
+      expect(result).toEqual({ type: "protocol", version: 1 });
 
+      // The whole protocol goes through one command, so the recorded call is
+      // the full request envelope.
       expect(mock.mock.calls).toHaveLength(1);
       console.log("mock calls:", JSON.stringify(mock.mock.calls[0]));
 
@@ -148,10 +201,10 @@ describe("E2E capability verification", () => {
 
     it("restores the real command after mocking", async () => {
       const real = await browser.tauri.execute(({ core }) =>
-        core.invoke("greet", { name: "Real" }),
+        core.invoke("dispatch", { request: { type: "hello" } }),
       );
-      expect(real).toBe("Hello, Real! You've been greeted from Rust!");
-      console.log("after restore ->", real);
+      expect(real).toEqual({ type: "protocol", version: 1 });
+      console.log("after restore ->", JSON.stringify(real));
     });
   });
 

@@ -60,6 +60,50 @@ Provided by `tauri-plugin-wdio` (Rust) plus `@wdio/tauri-plugin` (JS).
 implementations in `beforeEach`; a `beforeAll` setup will be wiped by the first
 test that calls `mock()` again.
 
+### Mocks are cleared by any navigation — verified on macOS 15
+
+`window.__wdio_mocks__` is **emptied by `browser.url()` and by `refresh()`**.
+Verified directly: the registry reads `[]` immediately after either call.
+
+The only working order is therefore **navigate → mock**:
+
+```ts
+await browser.url("tauri://localhost");       // 1. navigate first
+const mock = await browser.tauri.mock("x");  // 2. then mock
+await mock.mockResolvedValue(...);
+```
+
+Mocking *before* navigating is silently a no-op — the app then reads the real
+provider, and the spec passes or fails against live data while looking stubbed.
+
+**Known limitation:** state decided on mount that cannot be re-read through a
+control on the visible screen cannot be mocked, because the read happens before
+the mock exists and the control needed to trigger a re-read is itself hidden by
+the state under test. The onboarding gate has this shape;
+`app/e2e/specs/fixtures.ts` works around it and `product.e2e.ts` carries the
+remaining failures.
+
+### `window.__TAURI__.core.invoke` interception does not apply on this build
+
+The plugin installs its interceptor with `defineProperty` on
+`window.__TAURI__.core.invoke`. On this WKWebView build that patch **does not
+take** — a registered mock is present in `window.__wdio_mocks__`, yet calling
+through `core.invoke` returns the real response.
+
+An app under test must therefore consult `window.__wdio_mocks__` itself before
+falling back to `core.invoke`. `app/src/lib/ipc.ts` does this, with a comment
+recording why.
+
+## Spec files share one renderer
+
+The app is a single window, so every spec file drives the *same* page. A mock
+installed by one file replaces the previous file's, and running files
+concurrently makes the fixtures race. Product coverage is therefore consolidated
+into a single ordered file, `app/e2e/specs/product.e2e.ts`.
+
+Do not write the persisted onboarding store to set up a spec: it lives on disk,
+so a write races every other spec that reads it.
+
 ## Window geometry — supported
 
 `getWindowSize()` and `getWindowRect()` return real native window metrics, not a
