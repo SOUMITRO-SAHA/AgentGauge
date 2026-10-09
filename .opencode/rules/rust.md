@@ -41,7 +41,7 @@ app/src-tauri/
       src/lib.rs
   src/
     main.rs                   # entry point only: #![cfg_attr] attrs + ism_lib::run()
-    lib.rs                    # composition root ONLY: plugins, state, wiring, commands
+    lib.rs                    # composition root ONLY: plugins, state, wiring, handler
     modules/                  # application modules — one per bounded capability
       <module-name>/
         mod.rs
@@ -94,17 +94,31 @@ capability, `mod.rs` as its public surface:
 
 ```rust
 // src/modules/providers/mod.rs
-//! Provider integrations: trait, registry, and the shared provider types.
+//! Provider integrations: one implementation per provider, plus the registry
+//! that resolves a `Provider` trait object. Domain types live in
+//! `crate::shared::domain`; nothing here is provider-agnostic state.
 
 mod claude_code;
 mod codex;
 mod z_ai;
 
+use crate::shared::domain::{UsageSnapshot, UsageSource};
+use crate::shared::error::Error;
+use crate::shared::provider::Provider;
+
 pub use claude_code::ClaudeCodeProvider;
 pub use codex::CodexProvider;
 
-pub trait Provider { /* ... */ }        // the seam
-pub struct ProviderRegistry { /* ... */ }
+/// Resolves a provider by kind and owns its lifetime.
+pub struct ProviderRegistry {
+    // ... `Box<dyn Provider>` entries keyed by provider kind
+}
+
+impl ProviderRegistry {
+    pub fn snapshot(&self, kind: ProviderKind) -> Result<UsageSnapshot, Error> {
+        // delegate to the registered implementation; no branching on kind here
+    }
+}
 ```
 
 - `mod.rs` declares submodules and re-exports. Callers import from
@@ -115,6 +129,10 @@ pub struct ProviderRegistry { /* ... */ }
   No `pub` item that is an internal detail.
 - A module owns its own errors (see [Commands & types](#commands--types)) and
   its tests; it must be unit-testable without booting Tauri.
+- **Traits it implements come from `shared/`, not from `modules/`.** Put
+  `Provider` in `shared/provider/` when more than one module consumes it, so
+  `poller` depends on the trait and not on `providers`. A trait used by exactly
+  one caller stays private to that module.
 
 ### `shared/` is for genuinely shared primitives
 
@@ -127,13 +145,32 @@ Do **not** move a whole capability into `shared/` because it is "important".
 Shared is the narrowest tier; it is not a dumping ground between Modules and
 Crates.
 
+### The promotion ladder
+
+Placing code is a promotion decision. Start at the lowest tier that works and
+move up only on evidence — never pre-build a layer for code that does not exist
+yet.
+
+| Code that…                                        | Lives in                              |
+| ------------------------------------------------- | ------------------------------------- |
+| has one caller                                    | private in the calling module (`fn`)  |
+| is a domain type / trait / error 2+ modules need  | `src/shared/<area>/`                  |
+| is one bounded capability                         | `src/modules/<name>/`                 |
+| needs a heavy dep, platform gating, or tests with no Tauri runtime | `crates/<name>/` |
+
+Move a step up when the trigger fires, in the same change that fires it — do not
+leave code parked in the wrong tier "for later". Moving down is always allowed
+and needs no justification.
+
 ### `crates/` — the workspace
 
 - `crates/` holds library crates consumed by the app via **path**
   dependencies: `foo = { path = "crates/foo" }`. Never a git or registry
   dependency for an in-repo crate.
 - One crate = one bounded concern with a name that says what it is
-  (`http-retry`, `keychain`, `cache`, `usage-model`).
+  (`http-retry`, `keychain`, `cache`, `usage-model`). The directory and
+  `package.name` are the Cargo `kebab-case` form; the Rust identifier you `use`
+  is the `snake_case` form (`http_retry`).
 - Extract to a crate when the code needs one of: a heavyweight dependency the
   app should not pay for everywhere, platform-conditional compilation, its own
   test suite that must not drag in Tauri, or reuse beyond this app.
@@ -154,8 +191,9 @@ Crates.
 `AGENTS.md` requires provider modularity, and it drives the tiering above:
 
 - One module per provider under `src/modules/providers/` (`codex.rs`,
-  `claude_code.rs`, `z_ai.rs`), with the common trait and registry in
-  `providers/mod.rs`.
+  `claude_code.rs`, `z_ai.rs`). The `Provider` trait and the domain types it
+  speaks in live in `src/shared/`; `providers/mod.rs` holds the registry and
+  the implementations.
 - Providers are **trait objects behind a registry**, not `match` statements
   sprinkled through callers. Adding a provider must not require editing
   `lib.rs`, `poller`, or any shared code beyond one registration line.
@@ -178,7 +216,7 @@ These are the mechanisms that keep the app scalable as providers multiply:
   and pass typed values down. No module reaches for a global or reads the
   environment directly.
 - **Explicit background-task lifecycle.** Every spawned poller/monitor gets a
-  shutdown signal (a `tokio`/Tauri `watch` channel or cancellation flag) and is
+  shutdown signal (a `watch`/`oneshot` channel or a `CancellationToken`) and is
   started from exactly one place, so it cannot double-start or outlive the
   window.
 - **Provenance in the data model.** Domain types carry source and update time

@@ -18,10 +18,13 @@ there are no project-specific overrides.
 - Types, traits, enums: `PascalCase` — `ProviderStatus`, `UsageSnapshot`, `RateLimitWindow`.
 - Functions, methods, variables, fields: `snake_case`.
 - Consts and statics: `SCREAMING_SNAKE_CASE`.
-- Crates: `snake_case`; the app crate is `ism` (lib `ism_lib`). A crate in
+- Crates: the app crate is `ism` (lib `ism_lib`). A crate in
   `app/src-tauri/crates/` takes the short name of the concern it owns —
   `http_retry`, `keychain`, `usage_model` — so name it for the concern, never
-  for the layer (`utils`, `helpers`, `common` are not crate names).
+  for the layer (`utils`, `helpers`, `common` are not crate names). The
+  directory and `package.name` are the Cargo `kebab-case` form
+  (`http-retry`); the Rust identifier is the `snake_case` form (`http_retry`),
+  which is what you `use`.
 - Module directories use `mod.rs`, named for the **capability**:
   `modules/providers/mod.rs`, `modules/poller/mod.rs`, `shared/domain/mod.rs`.
 - Provider modules are named for the provider, lowercase: `codex.rs`,
@@ -107,7 +110,7 @@ change — a silent mismatch shows up only as `undefined` at runtime. See
 | Rust module             | `snake_case.rs`  | `modules/providers/codex.rs`     |
 | Rust type / enum        | `PascalCase`     | `UsageSnapshot`                  |
 | Rust const              | `SCREAMING_SNAKE_CASE` | `MAX_PROVIDERS`             |
-| Rust crate              | `snake_case`     | `http_retry` in `crates/http-retry/` |
+| Rust crate              | `kebab-case` dir / `snake_case` ident | `crates/http-retry/` used as `http_retry` |
 | Rust fn                 | `snake_case`     | `fetch_usage`                    |
 | IPC command name        | `snake_case`     | `get_usage`                      |
 | React component         | `kebab-case.tsx` | `UsageCard` in `usage-card.tsx`  |
