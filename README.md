@@ -49,7 +49,12 @@ Useful commands:
 ```sh
 cd app
 bun run dev          # Run the Vite client only
+bun run start        # Start the native Tauri app
+bun run restart      # Stop app-owned processes and restart the native app
 bun run build        # Type-check and build the client
+bun run clean        # Remove Rust and frontend build artifacts
+bun run clean:rust   # Remove Rust build artifacts only
+bun run clean:frontend # Remove frontend build artifacts only
 bun run tauri dev    # Run the native desktop app in development
 bun run tauri build  # Build a native package for the current target
 ```

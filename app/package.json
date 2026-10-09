@@ -5,7 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "tauri dev",
+    "restart": "bun run scripts/restart.ts",
     "build": "tsc && vite build",
+    "clean": "bun run clean:rust && bun run clean:frontend",
+    "clean:rust": "cargo clean --manifest-path src-tauri/Cargo.toml",
+    "clean:frontend": "bun -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\"",
     "preview": "vite preview",
     "tauri": "tauri"
   },
