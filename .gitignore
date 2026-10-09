@@ -23,6 +23,10 @@ target
 # Test artifacts (e2e screenshots, scratch files)
 .temp
 
+# Xcode DerivedData for the macOS widget extension
+app/src-tauri/widget/build/
+app/src-tauri/widget/**/xcuserdata/
+
 # Cloned upstream references (e.g. .agents/references/effect, ~59MB)
 .agents/references/
 

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::modules::automation::AutomationState;
 use crate::modules::onboarding::{OnboardingProgress, OnboardingStep};
-use crate::modules::widget::WidgetStatus;
+use crate::modules::widget::SystemWidgetStatus;
 use crate::shared::domain::{PlanKind, ProviderKind, UsageSnapshot};
 use crate::shared::error::Error;
 use crate::shared::provider::{PingOutcome, ProviderStatus};
@@ -61,12 +61,13 @@ pub enum AppRequest {
         #[serde(default)]
         dismissed: bool,
     },
-    /// Whether the widget window is currently open.
-    WidgetStatus,
-    /// Creates the widget window if needed and shows it.
-    SetupWidget,
-    /// Closes the widget window.
-    HideWidget,
+    /// Whether the platform's own system widget can be used, and how to set it up.
+    ///
+    /// There is deliberately no "create widget" capability. The macOS widget is a
+    /// WidgetKit extension placed by the user through the system's own gallery, so
+    /// the app can only report what is true and explain the procedure — it cannot
+    /// install it, and must not pretend to have done so.
+    SystemWidgetStatus,
 }
 
 impl AppRequest {
@@ -88,9 +89,7 @@ impl AppRequest {
             Self::AcknowledgeRollover => "acknowledgeRollover",
             Self::OnboardingProgress => "onboardingProgress",
             Self::SetOnboardingStep { .. } => "setOnboardingStep",
-            Self::WidgetStatus => "widgetStatus",
-            Self::SetupWidget => "setupWidget",
-            Self::HideWidget => "hideWidget",
+            Self::SystemWidgetStatus => "systemWidgetStatus",
         }
     }
 }
@@ -125,8 +124,8 @@ pub enum AppResponse {
     Onboarding {
         progress: OnboardingProgress,
     },
-    Widget {
-        status: WidgetStatus,
+    SystemWidget {
+        status: SystemWidgetStatus,
     },
     /// A request that could not be satisfied.
     Failure {
@@ -216,9 +215,7 @@ mod tests {
                 step: OnboardingStep::Done,
                 dismissed: false,
             },
-            AppRequest::WidgetStatus,
-            AppRequest::SetupWidget,
-            AppRequest::HideWidget,
+            AppRequest::SystemWidgetStatus,
         ];
         let mut names: Vec<&str> = all.iter().map(AppRequest::name).collect();
         let count = names.len();

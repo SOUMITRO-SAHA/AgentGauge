@@ -10,14 +10,14 @@
 
 use std::sync::Arc;
 
-use tauri::{AppHandle, State};
+use tauri::State;
 
 use crate::modules::automation::AutomationRunner;
 use crate::modules::onboarding::{
     OnboardingProgress, OnboardingState, OnboardingStep, OnboardingStore,
 };
 use crate::modules::providers::{ProviderRegistry, PING_PROMPT};
-use crate::modules::widget::WidgetController;
+use crate::modules::widget::{SnapshotStore, SystemWidgetStatus, WidgetSnapshot, now_secs};
 use crate::shared::domain::{ProviderKind, UsageSnapshot};
 use crate::shared::error::Error;
 use crate::shared::protocol::{AppRequest, AppResponse, PROTOCOL_VERSION};
@@ -27,7 +27,7 @@ pub struct AppState {
     pub registry: Arc<ProviderRegistry>,
     pub automation: Arc<AutomationRunner>,
     pub onboarding: OnboardingStore,
-    pub widget: Arc<WidgetController>,
+    pub widget_snapshots: Option<SnapshotStore>,
 }
 
 /// The single entry point for every renderer capability.
@@ -36,14 +36,14 @@ pub struct AppState {
 /// promise, so the client can branch on a stable tag. Only a bridge-level
 /// fault (the command was never invoked) reaches the renderer as an exception.
 #[tauri::command]
-pub fn dispatch(request: AppRequest, app: AppHandle, state: State<'_, AppState>) -> AppResponse {
-    match handle(request, &app, &state) {
+pub fn dispatch(request: AppRequest, state: State<'_, AppState>) -> AppResponse {
+    match handle(request, &state) {
         Ok(response) => response,
         Err(error) => AppResponse::Failure { error },
     }
 }
 
-fn handle(request: AppRequest, app: &AppHandle, state: &AppState) -> Result<AppResponse, Error> {
+fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
     // Named up front so a rejected request says which capability was refused.
     let name = request.name();
 
@@ -61,13 +61,17 @@ fn handle(request: AppRequest, app: &AppHandle, state: &AppState) -> Result<AppR
             providers: state.registry.status(),
         }),
 
-        AppRequest::ReadUsage => Ok(AppResponse::Usage {
-            snapshots: read_all(state),
-        }),
+        AppRequest::ReadUsage => {
+            let snapshots = read_all(state);
+            publish_snapshot(state, &snapshots);
+            Ok(AppResponse::Usage { snapshots })
+        }
 
-        AppRequest::ReadUsageFor { provider } => Ok(AppResponse::Usage {
-            snapshots: vec![state.registry.usage(provider)?],
-        }),
+        AppRequest::ReadUsageFor { provider } => {
+            let snapshots = vec![state.registry.usage(provider)?];
+            publish_snapshot(state, &snapshots);
+            Ok(AppResponse::Usage { snapshots })
+        }
 
         AppRequest::ReadPlan { provider } => Ok(AppResponse::Plan {
             plan: state.registry.plan(provider)?,
@@ -121,16 +125,8 @@ fn handle(request: AppRequest, app: &AppHandle, state: &AppState) -> Result<AppR
             })
         }
 
-        AppRequest::WidgetStatus => Ok(AppResponse::Widget {
-            status: state.widget.status(app),
-        }),
-
-        AppRequest::SetupWidget => Ok(AppResponse::Widget {
-            status: state.widget.show(app)?,
-        }),
-
-        AppRequest::HideWidget => Ok(AppResponse::Widget {
-            status: state.widget.hide(app)?,
+        AppRequest::SystemWidgetStatus => Ok(AppResponse::SystemWidget {
+            status: SystemWidgetStatus::current(),
         }),
     }
 }
@@ -150,6 +146,33 @@ fn read_all(state: &AppState) -> Vec<UsageSnapshot> {
             Err(err) => UsageSnapshot::unavailable(kind, err.message),
         })
         .collect()
+}
+
+/// Publishes the Codex reading for the system widget to read.
+///
+/// Called as a side effect of every usage read rather than on a renderer command,
+/// so the widget cannot drift out of sync with what the app is showing: there is
+/// no sequence in which the UI is fresh and the widget is stale.
+///
+/// Only the Codex snapshot is published. The widget's contract names the 5-hour
+/// and weekly windows specifically, so publishing another provider's windows
+/// under those labels would be a fabrication.
+fn publish_snapshot(state: &AppState, snapshots: &[UsageSnapshot]) {
+    let Some(store) = state.widget_snapshots.as_ref() else {
+        return;
+    };
+    let now = now_secs();
+
+    let snapshot = match snapshots.iter().find(|s| s.provider == ProviderKind::Codex) {
+        Some(codex) => WidgetSnapshot::from_usage(codex, now),
+        None => WidgetSnapshot::unavailable("No reading available.", now),
+    };
+
+    if let Err(error) = store.write(&snapshot) {
+        // A widget that cannot be written must not break the reading the user
+        // actually asked for, so this is reported and not propagated.
+        eprintln!("ism: could not publish widget snapshot: {}", error.message);
+    }
 }
 
 /// Shapes progress for the renderer, so the client does not reimplement the step
@@ -223,9 +246,7 @@ mod tests {
             AppRequest::StopAutomation,
             AppRequest::AcknowledgeRollover,
             AppRequest::OnboardingProgress,
-            AppRequest::WidgetStatus,
-            AppRequest::SetupWidget,
-            AppRequest::HideWidget,
+            AppRequest::SystemWidgetStatus,
         ];
         for request in all {
             assert!(

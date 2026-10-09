@@ -175,6 +175,13 @@ export const AutomationState = Schema.Struct({
 });
 export type AutomationState = typeof AutomationState.Type;
 
+/**
+ * Onboarding steps, in order.
+ *
+ * Must match `OnboardingStep` in the Rust backend, including the count: the
+ * ordinal is persisted, so a step present on one side and missing on the other
+ * makes saved progress mean something different to each.
+ */
 export const OnboardingStep = Schema.Literals([
   "welcome",
   "statusCheck",
@@ -198,12 +205,27 @@ export const OnboardingProgress = Schema.Struct({
 });
 export type OnboardingProgress = typeof OnboardingProgress.Type;
 
-export const WidgetStatus = Schema.Struct({
-  installed: Schema.Boolean,
-  alwaysOnTop: Schema.Boolean,
+/**
+ * What the setup guide needs to know about the system's own widget.
+ *
+ * `supported` is false off macOS and below macOS 14, and `reason` says which —
+ * so the UI never has to infer availability from a missing field.
+ */
+export const SystemWidgetStatus = Schema.Struct({
+  supported: Schema.Boolean,
+  system: Schema.Union([Schema.Literal("widgetKit"), Schema.Literal("none")]),
+  osVersion: Schema.NullOr(Schema.String),
+  minimumVersion: Schema.String,
+  extensionBundled: Schema.Boolean,
+  extensionPresent: Schema.Boolean,
+  snapshotWritten: Schema.Boolean,
+  menuBarAvailable: Schema.Boolean,
+  setup: Schema.Array(
+    Schema.Struct({ title: Schema.String, detail: Schema.String }),
+  ),
   reason: Schema.NullOr(Schema.String),
 });
-export type WidgetStatus = typeof WidgetStatus.Type;
+export type SystemWidgetStatus = typeof SystemWidgetStatus.Type;
 
 export const PingOutcome = Schema.Struct({
   accepted: Schema.Boolean,
@@ -245,9 +267,7 @@ export const AppRequest = Schema.Union([
     step: OnboardingStep,
     dismissed: Schema.optional(Schema.Boolean),
   }),
-  Schema.Struct({ type: Schema.Literal("widgetStatus") }),
-  Schema.Struct({ type: Schema.Literal("setupWidget") }),
-  Schema.Struct({ type: Schema.Literal("hideWidget") }),
+  Schema.Struct({ type: Schema.Literal("systemWidgetStatus") }),
 ]);
 export type AppRequest = typeof AppRequest.Type;
 
@@ -274,7 +294,7 @@ export const AppResponse = Schema.Union([
     type: Schema.Literal("onboarding"),
     progress: OnboardingProgress,
   }),
-  Schema.Struct({ type: Schema.Literal("widget"), status: WidgetStatus }),
+  Schema.Struct({ type: Schema.Literal("systemWidget"), status: SystemWidgetStatus }),
   Schema.Struct({ type: Schema.Literal("failure"), error: ErrorPayload }),
 ]);
 export type AppResponse = typeof AppResponse.Type;
@@ -427,19 +447,14 @@ export const setOnboardingStep = (step: OnboardingStep, dismissed: boolean) =>
     Effect.map((response) => expectType(response, "onboarding").progress),
   );
 
-/** Whether the widget window is currently open. */
-export const getWidgetStatus = () =>
-  request({ type: "widgetStatus" }).pipe(
-    Effect.map((response) => expectType(response, "widget").status),
-  );
-
-/** Creates the widget window if needed and shows it. */
-export const setupWidget = () =>
-  request({ type: "setupWidget" }).pipe(
-    Effect.map((response) => expectType(response, "widget").status),
-  );
-
-export const hideWidget = () =>
-  request({ type: "hideWidget" }).pipe(
-    Effect.map((response) => expectType(response, "widget").status),
+/**
+ * Whether this machine can run the system's own widget, and how to add it.
+ *
+ * There is deliberately no "install" call. The macOS widget is placed by the
+ * user through the system widget gallery, so the app reports facts and explains
+ * the procedure; it cannot install the widget and must not imply that it did.
+ */
+export const getSystemWidgetStatus = () =>
+  request({ type: "systemWidgetStatus" }).pipe(
+    Effect.map((response) => expectType(response, "systemWidget").status),
   );

@@ -35,6 +35,15 @@ import {
  *    write. An unhandled request falls through to the default arm, and a decode
  *    failure there silently changes which screen renders.
  *
+ * ## Widget specs assert the real Rust response
+ *
+ * The widget specs deliberately do not assert fixture data. `bun run e2e` runs an
+ * unbundled binary, so `extension_present` is genuinely false — the extension
+ * lives inside the `.app` — which makes that state deterministic and independent
+ * of the mock. It is also the more valuable assertion: a dev build that claimed
+ * the widget was ready would send the user to the gallery for something that is
+ * not there.
+ *
  * ## KNOWN FAILING — the onboarding gate
  *
  * The blocks below `onboarding flow` and `onboarding when nothing can be read`
@@ -93,12 +102,32 @@ describe("onboarding flow", () => {
     );
   });
 
-  it("shows a setup button when the widget is not installed", async () => {
+  it("explains the system widget instead of offering to install it", async () => {
     for (let step = 0; step < 3; step += 1) {
       await $('[data-testid="onboarding-next"]').click();
     }
     await expect($('[data-testid="demo-widget"]')).toBeDisplayed();
-    await expect($('[data-testid="widget-setup"]')).toBeDisplayed();
+
+    // macOS owns widget placement: the user adds it from the system gallery, so
+    // an install button would be a lie. There must be no such control.
+    expect(await $('[data-testid="widget-setup"]').isExisting()).toBe(false);
+    await expect($('[data-testid="widget-steps"]')).toBeDisplayed();
+  });
+
+  it("names both windows the widget will show", async () => {
+    for (let step = 0; step < 3; step += 1) {
+      await $('[data-testid="onboarding-next"]').click();
+    }
+    await expect($('[data-testid="demo-widget"]')).toBeDisplayed();
+
+    // The user added this asking about two windows; the step must answer that
+    // rather than only saying "add a widget somewhere".
+    await expect($('[data-testid="demo-widget"]')).toHaveText(
+      expect.stringContaining("5-hour window"),
+    );
+    await expect($('[data-testid="demo-widget"]')).toHaveText(
+      expect.stringContaining("weekly limit"),
+    );
   });
 
   it("reports that the watcher is already running", async () => {
@@ -174,11 +203,14 @@ describe("onboarding when nothing can be read", () => {
     );
   });
 
-  it("keeps the widget setup affordance available without data", async () => {
+  it("still explains the widget when no usage could be read", async () => {
+    // The widget is independent of whether Codex is reachable, so its guidance
+    // must survive an unavailable reading.
     for (let step = 0; step < 3; step += 1) {
       await $('[data-testid="onboarding-next"]').click();
     }
-    await expect($('[data-testid="widget-setup"]')).toBeDisplayed();
+    await expect($('[data-testid="demo-widget"]')).toBeDisplayed();
+    await expect($('[data-testid="widget-steps"]')).toBeDisplayed();
   });
 });
 
@@ -230,23 +262,34 @@ describe("dashboard", () => {
     await expect($('[data-testid="automation-status"]')).toHaveText("Running");
   });
 
-  it("offers to set up the widget when it is absent", async () => {
-    await expect($('[data-testid="widget-status"]')).toHaveText(
-      expect.stringContaining("not open"),
-    );
-    await expect($('[data-testid="widget-toggle"]')).toHaveText(
-      expect.stringContaining("Set up widget"),
+  // These two assert the *real* Rust response rather than a fixture value.
+  //
+  // `bun run e2e` runs an unbundled binary, so `extension_present` is genuinely
+  // false — the widget extension lives inside the `.app` and there is no `.app`
+  // here. That makes this state deterministic and mock-independent, and it is
+  // the more valuable assertion anyway: a dev build that claimed the widget was
+  // ready would send the user looking in the gallery for something that is not
+  // there.
+  it("reports the widget as absent from a dev build", async () => {
+    const status = $('[data-testid="widget-status"]');
+    await expect(status).toBeDisplayed();
+    await expect(status).toHaveAttribute("data-state", "not-embedded");
+    await expect(status).toHaveText(
+      expect.stringContaining("packaged app"),
     );
   });
 
-  it("reaches the widget controller when the toggle is used", async () => {
-    await $('[data-testid="widget-toggle"]').click();
-    await settle("refresh-usage");
+  it("offers no install control, because macOS owns widget placement", async () => {
+    // The old affordance opened a floating always-on-top window. A control that
+    // implies the app can install a widget is the regression to catch.
+    expect(await $('[data-testid="widget-toggle"]').isExisting()).toBe(false);
+    expect(await $('[data-testid="widget-setup"]').isExisting()).toBe(false);
+  });
 
-    // The fixture answers `setupWidget` with an installed status, so the button
-    // flips to the remove affordance — proving the gesture reached the protocol.
-    await expect($('[data-testid="widget-toggle"]')).toHaveText(
-      expect.stringContaining("Remove"),
+  it("tells the user what to do about a missing extension", async () => {
+    await expect($('[data-testid="widget-setup-steps"]')).toBeDisplayed();
+    await expect($('[data-testid="widget-setup-steps"]')).toHaveText(
+      expect.stringContaining("tauri build"),
     );
   });
 });
@@ -278,10 +321,14 @@ describe("dashboard when Codex is unavailable", () => {
     );
   });
 
-  it("reports the widget as already set up", async () => {
-    await expect($('[data-testid="widget-status"]')).toHaveText(
-      "Set up and always on top",
+  it("keeps widget guidance independent of usage availability", async () => {
+    // Widget support and provider availability are separate facts: a broken
+    // Codex login must not remove the explanation of how to add the widget.
+    await expect($('[data-testid="widget-status"]')).toHaveAttribute(
+      "data-state",
+      "not-embedded",
     );
+    await expect($('[data-testid="widget-setup-steps"]')).toBeDisplayed();
   });
 });
 
@@ -323,7 +370,8 @@ describe("styling and chrome", () => {
       usage: liveSnapshot(),
       installed: true,
       version: "codex-cli 0.159.0",
-      widgetInstalled: false,
+      widgetEmbedded: true,
+      widgetSupported: true,
       automationRunning: true,
     });
     await settle("refresh-usage");
@@ -383,8 +431,8 @@ describe("responsive layout", () => {
   });
 
   it("does not overflow horizontally at a narrow width", async () => {
-    // The app ships to a 300px widget window as well as a desktop one, so a
-    // horizontal scrollbar at any width is a layout defect.
+    // The window is resizable down to 360px, so a horizontal scrollbar at any
+    // width is a layout defect.
     const overflow = await browser.execute(
       () =>
         document.documentElement.scrollWidth -

@@ -27,7 +27,7 @@ import {
   onboardingAtom,
   onboardingVisibleAtom,
   usageAtom,
-  widgetAtom,
+  systemWidgetAtom,
 } from "~/atoms";
 import { Button } from "~/components/ui/button";
 import { Progress } from "~/components/ui/progress";
@@ -63,9 +63,9 @@ const STEPS: ReadonlyArray<{
   },
   {
     id: "widget",
-    title: "A widget that lives on your desktop",
+    title: "A real macOS widget",
     blurb:
-      "Pin the reading to a small always-on-top window so you can see your remaining window without opening the app.",
+      "Add it to your desktop or the menu bar from the system widget gallery. It shows your 5-hour window and weekly limit, and macOS refreshes it for you.",
   },
   {
     id: "automation",
@@ -80,11 +80,11 @@ export function OnboardingFlow() {
   const setVisible = useAtomSet(onboardingVisibleAtom);
   const progress = useAtomValue(onboardingAtom);
   const usage = useAtomValue(usageAtom);
-  const widget = useAtomValue(widgetAtom);
+  const widget = useAtomValue(systemWidgetAtom);
   const automation = useAtomValue(automationAtom);
   const refreshProgress = useAtomRefresh(onboardingAtom);
   const refreshUsage = useAtomRefresh(usageAtom);
-  const refreshWidget = useAtomRefresh(widgetAtom);
+  const refreshWidget = useAtomRefresh(systemWidgetAtom);
   const refreshAutomation = useAtomRefresh(automationAtom);
 
   // Rust owns the "should this reappear" rule. Until the read resolves the flow
@@ -145,9 +145,7 @@ export function OnboardingFlow() {
         refreshWidget();
         refreshAutomation();
       }}
-      onSetupWidget={() => {
-        void Effect.runPromise(Ipc.setupWidget()).then(refreshWidget);
-      }}
+      onRefreshWidget={refreshWidget}
       onStartAutomation={() => {
         void Effect.runPromise(Ipc.startAutomation()).then(refreshAutomation);
       }}
@@ -164,7 +162,7 @@ function OnboardingBody({
   widget,
   automation,
   onRefresh,
-  onSetupWidget,
+  onRefreshWidget,
   onStartAutomation,
 }: {
   readonly stepIndex: number;
@@ -173,9 +171,9 @@ function OnboardingBody({
   readonly onRefresh: () => void;
   readonly onFinish: () => void;
   readonly usage: AsyncResult.AsyncResult<ReadonlyArray<Ipc.UsageSnapshot>, unknown>;
-  readonly widget: AsyncResult.AsyncResult<Ipc.WidgetStatus, unknown>;
+  readonly widget: AsyncResult.AsyncResult<Ipc.SystemWidgetStatus, unknown>;
   readonly automation: AsyncResult.AsyncResult<Ipc.AutomationState, unknown>;
-  readonly onSetupWidget: () => void;
+  readonly onRefreshWidget: () => void;
   readonly onStartAutomation: () => void;
 }) {
   const current = STEPS[Math.min(stepIndex, STEPS.length - 1)];
@@ -218,7 +216,7 @@ function OnboardingBody({
           {current.id === "statusCheck" && <StatusCheckDemo usage={usage} />}
           {current.id === "windowRollover" && <RolloverDemo automation={automation} />}
           {current.id === "widget" && (
-            <WidgetDemo widget={widget} onSetup={onSetupWidget} />
+            <WidgetDemo widget={widget} onRefresh={onRefreshWidget} />
           )}
           {current.id === "automation" && (
             <AutomationDemo
@@ -373,10 +371,10 @@ function RolloverDemo({
 
 function WidgetDemo({
   widget,
-  onSetup,
+  onRefresh,
 }: {
-  readonly widget: AsyncResult.AsyncResult<Ipc.WidgetStatus, unknown>;
-  readonly onSetup: () => void;
+  readonly widget: AsyncResult.AsyncResult<Ipc.SystemWidgetStatus, unknown>;
+  readonly onRefresh: () => void;
 }) {
   return (
     <div
@@ -385,26 +383,65 @@ function WidgetDemo({
     >
       {AsyncResult.match(widget, {
         onInitial: () => (
-          <p className="text-sm text-muted-foreground">Checking the widget…</p>
+          <p className="text-sm text-muted-foreground">
+            Checking what this Mac supports…
+          </p>
         ),
-        onSuccess: (result) =>
-          result.value.installed ? (
-            <div className="flex items-center gap-2" data-testid="widget-ready">
-              <LayoutPanelTop className="size-4 text-ok" aria-hidden="true" />
-              <span className="text-sm text-foreground">
-                Your widget is set up and always on top.
-              </span>
-            </div>
-          ) : (
-            <div className="flex flex-col items-start gap-3">
-              <span className="text-sm text-foreground">
-                {result.value.reason ?? "The widget window is not open."}
-              </span>
-              <Button onClick={onSetup} data-testid="widget-setup">
-                Set up the widget
+        onSuccess: (result) => {
+          const status = result.value;
+
+          if (!status.supported) {
+            return (
+              <p className="text-sm text-muted-foreground" data-testid="widget-unsupported">
+                {status.reason ?? "Not available on this system."}
+              </p>
+            );
+          }
+
+          return (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2" data-testid="widget-ready">
+                <LayoutPanelTop className="size-4 text-ok" aria-hidden="true" />
+                <span className="text-sm text-foreground">
+                  {status.extensionPresent
+                    ? `Ready to add on macOS ${status.osVersion ?? status.minimumVersion}.`
+                    : "Not in this build — use the packaged app, not the dev server."}
+                </span>
+              </div>
+
+              {/* Named explicitly so the step answers "what will I see?" rather
+                  than only "how do I add it?". */}
+              <p className="text-sm text-muted-foreground">
+                It shows your 5-hour window and weekly limit.
+              </p>
+
+              <ol
+                className="flex list-decimal flex-col gap-2 pl-5"
+                data-testid="widget-steps"
+              >
+                {status.setup.map((step) => (
+                  <li key={step.title} className="flex flex-col gap-0.5">
+                    <span className="text-sm font-medium">{step.title}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {step.detail}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                className="self-start"
+                onClick={onRefresh}
+                data-testid="refresh-widget"
+              >
+                <RefreshCw aria-hidden="true" />
+                Re-check
               </Button>
             </div>
-          ),
+          );
+        },
         onFailure: () => (
           <p className="text-sm text-muted-foreground">
             The app could not be reached.

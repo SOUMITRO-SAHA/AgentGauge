@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+#
+# Builds the macOS WidgetKit extension and embeds it in a Tauri .app bundle.
+#
+# Why this is a script and not part of `tauri build`:
+#
+#   1. A WidgetKit widget MUST be built from a real Xcode app-extension target
+#      (`com.apple.product-type.app-extension`). Hand-wrapping a plain Swift
+#      executable into a `.appex` — which is what SwiftPM gives you — produces
+#      an extension that registers but then immediately exits, because
+#      `WidgetBundle.main()` returns instead of blocking and there is no XPC
+#      runloop. Verified against steipete/CodexBar#1095, where this was traced
+#      with lldb to a three-frame `exit()` in dyld's post-main epilogue on
+#      macOS 26. Do not "simplify" this back to a SwiftPM target.
+#
+#   2. Tauri has no concept of an embedded app extension, so the `.appex` is
+#      copied into `Contents/PlugIns/` and the host bundle is re-signed
+#      afterwards.
+#
+# Signing:
+#
+#   Ad-hoc by default, which is enough for a locally built app to be offered in
+#   the widget gallery. A real "Apple Development" identity is used when
+#   AISM_SIGN_IDENTITY is set.
+#
+#   Note on team IDs: the parenthetical in an Apple Development certificate's CN
+#   is the Apple ID, NOT the Team ID. On this machine CN says `(DW5S8RN36T)` while
+#   the Team ID is the OU field, `N4W9KXP57T`. Reading the CN suffix produces an
+#   entitlements/profile mismatch that macOS rejects — the same trap documented in
+#   CodexBar#1095.
+#
+# Usage:
+#   build-widget.sh build                    # build the .appex only
+#   build-widget.sh embed /path/to/App.app    # embed into an existing bundle
+#   build-widget.sh all                      # build, then embed into the newest bundle
+
+set -euo pipefail
+
+WIDGET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT="$WIDGET_DIR/AIStatsWidget.xcodeproj"
+SCHEME="AIStatsWidget"
+CONFIGURATION="${AISM_WIDGET_CONFIGURATION:-Release}"
+DERIVED="$WIDGET_DIR/build"
+
+# Empty means ad-hoc.
+SIGN_IDENTITY="${AISM_SIGN_IDENTITY:--}"
+
+log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+build_appex() {
+  log "Building $SCHEME ($CONFIGURATION)"
+  # The widget ships only on macOS. On any other platform this script is not
+  # invoked at all, so a hard failure here is the correct behaviour rather than
+  # a silent skip.
+  command -v xcodebuild >/dev/null || die "xcodebuild not found. Install Xcode; the macOS widget cannot be built without it."
+
+  rm -rf "$DERIVED"
+  xcodebuild \
+    -project "$PROJECT" \
+    -scheme "$SCHEME" \
+    -configuration "$CONFIGURATION" \
+    -sdk macosx \
+    -derivedDataPath "$DERIVED" \
+    build \
+    -quiet
+
+  local appex
+  appex="$(find "$DERIVED/Build/Products" -maxdepth 2 -name "$SCHEME.appex" | head -1)"
+  [ -n "$appex" ] || die "build reported success but no .appex was produced"
+
+  # The two properties CodexBar#1095 identified as the difference between a
+  # working extension and one that silently exits. Checked here so a future edit
+  # cannot quietly reintroduce the failure.
+  local pkg_type point
+  pkg_type="$(/usr/libexec/PlistBuddy -c 'Print :CFBundlePackageType' "$appex/Contents/Info.plist" 2>/dev/null || echo '')"
+  point="$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$appex/Contents/Info.plist" 2>/dev/null || echo '')"
+  [ "$pkg_type" = "XPC!" ] || die "CFBundlePackageType is '$pkg_type', expected 'XPC!'"
+  [ "$point" = "com.apple.widgetkit-extension" ] || die "extension point is '$point', expected 'com.apple.widgetkit-extension'"
+  if /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPrincipalClass' "$appex/Contents/Info.plist" >/dev/null 2>&1; then
+    die "NSExtensionPrincipalClass must not be set; it crashes _EXRunningExtension with 'Unrecognized extension type'"
+  fi
+
+  printf '%s\n' "$appex"
+}
+
+embed_into() {
+  local app="$1"
+  [ -d "$app" ] || die "no such app bundle: $app"
+  [ -d "$app/Contents" ] || die "$app does not look like a macOS bundle"
+
+  local appex="${1:-}"
+  appex="$(find "$DERIVED/Build/Products" -maxdepth 2 -name "$SCHEME.appex" | head -1)"
+  [ -n "$appex" ] || die "no built .appex found; run 'build' first"
+
+  log "Embedding into $(basename "$app")"
+  mkdir -p "$app/Contents/PlugIns"
+  rm -rf "$app/Contents/PlugIns/$SCHEME.appex"
+  cp -R "$appex" "$app/Contents/PlugIns/$SCHEME.appex"
+
+  # Order matters: the extension first, then the host. Signing the host last
+  # seals the nested signature, and `--deep` is avoided on the inner bundle so
+  # its own signature is not rewritten in a way that breaks verification.
+  log "Signing extension (${SIGN_IDENTITY})"
+  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
+    "$app/Contents/PlugIns/$SCHEME.appex" 2>/dev/null \
+    || die "failed to sign the widget extension"
+
+  log "Signing host bundle"
+  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$app" 2>/dev/null \
+    || die "failed to sign $app"
+
+  if ! codesign --verify --deep --strict "$app" 2>/dev/null; then
+    die "signature verification failed after embedding"
+  fi
+
+  # Nudge LaunchServices so the widget shows up without a rescan or a logout.
+  local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+  [ -x "$lsregister" ] && "$lsregister" -f "$app" 2>/dev/null || true
+
+  log "Done: $app/Contents/PlugIns/$SCHEME.appex"
+}
+
+case "${1:-all}" in
+  build)
+    build_appex >/dev/null
+    log "Built $SCHEME.appex"
+    ;;
+  embed)
+    shift
+    [ $# -ge 1 ] || die "usage: build-widget.sh embed /path/to/App.app"
+    embed_into "$1"
+    ;;
+  all)
+    build_appex >/dev/null
+    shift || true
+    if [ $# -ge 1 ]; then
+      embed_into "$1"
+    else
+      # Pick the most recently built .app so `all` works with no arguments.
+      app="$(find "$(dirname "$WIDGET_DIR")/target" -maxdepth 4 -name '*.app' -print0 2>/dev/null \
+        | xargs -0 ls -dt 2>/dev/null | head -1)"
+      [ -n "$app" ] || die "no .app bundle found to embed into; run 'bun run tauri build' first"
+      embed_into "$app"
+    fi
+    ;;
+  *)
+    die "usage: build-widget.sh [build|embed <App.app>|all]"
+    ;;
+esac

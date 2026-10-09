@@ -1,4 +1,4 @@
-import { expect, browser, $ } from "@wdio/globals";
+import { expect, browser, $, $$ } from "@wdio/globals";
 
 /**
  * Shared fixtures for the dashboard specs.
@@ -80,7 +80,15 @@ export interface DispatchFixtures {
   readonly usage: Record<string, unknown>;
   readonly installed: boolean;
   readonly version: string | null;
-  readonly widgetInstalled: boolean;
+  /**
+   * Whether this build contains the widget extension.
+   *
+   * Replaces the old `widgetInstalled`, which meant "a floating window was open".
+   * Nothing opens a window now: the extension is either embedded in the bundle
+   * or it is not.
+   */
+  readonly widgetEmbedded: boolean;
+  readonly widgetSupported: boolean;
   readonly automationRunning: boolean;
 }
 
@@ -109,7 +117,7 @@ export async function installDispatch(fixtures: DispatchFixtures) {
               dismissed: !fixtures.visible,
               visible: fixtures.visible,
               index: fixtures.visible ? 0 : 5,
-              total: 5,
+              total: 6,
             },
           };
         case "readUsage":
@@ -145,17 +153,42 @@ export async function installDispatch(fixtures: DispatchFixtures) {
               nextPollAt: null,
             },
           };
-        case "widgetStatus":
-        case "setupWidget":
-        case "hideWidget":
+        case "systemWidgetStatus":
           return {
-            type: "widget",
+            type: "systemWidget",
             status: {
-              installed: fixtures.widgetInstalled,
-              alwaysOnTop: fixtures.widgetInstalled,
-              reason: fixtures.widgetInstalled
+              supported: fixtures.widgetSupported,
+              system: fixtures.widgetSupported ? "widgetKit" : "none",
+              osVersion: fixtures.widgetSupported ? "27.0" : null,
+              minimumVersion: "14.0",
+              extensionBundled: true,
+              extensionPresent: fixtures.widgetEmbedded,
+              snapshotWritten: fixtures.widgetEmbedded,
+              menuBarAvailable: fixtures.widgetSupported,
+              reason: fixtures.widgetSupported
                 ? null
-                : "The widget window is not open.",
+                : "The system widget is implemented for macOS only.",
+              setup: !fixtures.widgetSupported
+                ? []
+                : fixtures.widgetEmbedded
+                  ? [
+                      {
+                        title: "Open the widget gallery",
+                        detail:
+                          "Right-click the desktop and choose Edit Widgets.",
+                      },
+                      {
+                        title: "Find AI Sub Stats",
+                        detail: "Search for \u201cAI Sub Stats\u201d.",
+                      },
+                    ]
+                  : [
+                      {
+                        title: "Run the packaged app, not the dev server",
+                        detail:
+                          "This build does not contain the widget extension.",
+                      },
+                    ],
             },
           };
         default:
@@ -174,13 +207,31 @@ export async function installDispatch(fixtures: DispatchFixtures) {
  * a user's click would take rather than by poking the registry.
  */
 export async function settle(
-  nudge: "onboarding-refresh" | "refresh-usage",
+  nudge: "onboarding-refresh" | "refresh-usage" | "refresh-widget",
 ): Promise<void> {
-  const target = await $(`[data-testid="${nudge}"]`);
-  if (await target.isExisting()) {
+  const target = await firstDisplayed(`[data-testid="${nudge}"]`);
+  if (target) {
     await target.click();
   }
   await browser.pause(500);
+}
+
+/**
+ * The first *displayed* element matching a selector, or `null`.
+ *
+ * Both surfaces stay mounted while the other is showing, so several controls
+ * share a `data-testid` — `refresh-widget` belongs to both the dashboard panel
+ * and the onboarding step. `$(selector)` returns the first match in document
+ * order, which is the hidden one, so clicking it refreshes nothing and the spec
+ * then asserts against the value the atom read before the mock existed.
+ */
+async function firstDisplayed(
+  selector: string,
+): Promise<WebdriverIO.Element | null> {
+  for (const element of await $$(selector)) {
+    if (await element.isDisplayed()) return element;
+  }
+  return null;
 }
 
 /**
@@ -209,11 +260,17 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
 
   await installDispatch(fixtures);
 
-  // The flow's "Re-read" re-reads onboarding, usage, widget and automation
-  // together. When the flow is dismissed only the dashboard's refresh is
-  // present, so both are attempted and whichever exists wins.
-  await settle("onboarding-refresh");
-  await settle("refresh-usage");
+  // Every atom the surface shows is nudged, not just the first one found. Each
+  // panel owns its own refresh control and reads its own atom, so settling only
+  // usage leaves the widget panel asserting against the value it read before the
+  // mock existed — which on a dev build is "not embedded", not the fixture.
+  for (const nudge of [
+    "onboarding-refresh",
+    "refresh-usage",
+    "refresh-widget",
+  ] as const) {
+    await settle(nudge);
+  }
 
   // If the fixtures want the flow shown but it is not up, the persisted gate
   // disagreed. That happens because the gate is decided by an atom read that
@@ -275,7 +332,8 @@ export async function onboardingVisible(): Promise<void> {
     usage: liveSnapshot({ plan: "pro" }),
     installed: true,
     version: "codex-cli 0.159.0",
-    widgetInstalled: false,
+    widgetEmbedded: true,
+    widgetSupported: true,
     automationRunning: true,
   });
 }
@@ -287,7 +345,8 @@ export async function dashboardLive(): Promise<void> {
     usage: liveSnapshot(),
     installed: true,
     version: "codex-cli 0.159.0",
-    widgetInstalled: false,
+    widgetEmbedded: true,
+    widgetSupported: true,
     automationRunning: true,
   });
 }
@@ -299,7 +358,8 @@ export async function dashboardUnavailable(): Promise<void> {
     usage: unavailableSnapshot(),
     installed: false,
     version: null,
-    widgetInstalled: true,
+    widgetEmbedded: true,
+    widgetSupported: true,
     automationRunning: false,
   });
 }
@@ -311,7 +371,8 @@ export async function onboardingWithNoData(): Promise<void> {
     usage: unavailableSnapshot(),
     installed: false,
     version: null,
-    widgetInstalled: false,
+    widgetEmbedded: true,
+    widgetSupported: true,
     automationRunning: false,
   });
 }

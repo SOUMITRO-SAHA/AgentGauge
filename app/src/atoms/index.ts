@@ -41,8 +41,8 @@ export const planAtom = runtime.atom(Ipc.getPlan("codex"));
 /** The automation watcher's state, including any detected rollover. */
 export const automationAtom = runtime.atom(Ipc.getAutomationState);
 
-/** Whether the widget window is currently open. */
-export const widgetAtom = runtime.atom(Ipc.getWidgetStatus);
+/** Whether this machine can run the system widget, and how to add it. */
+export const systemWidgetAtom = runtime.atom(Ipc.getSystemWidgetStatus);
 
 /** Persisted onboarding progress. */
 export const onboardingAtom = runtime.atom(Ipc.getOnboardingProgress);

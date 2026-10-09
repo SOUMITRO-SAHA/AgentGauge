@@ -12,6 +12,30 @@ The current UI and Rust backend implement **Codex only**: real usage reads via `
 
 `sendPing` spends the account's quota. Nothing may call it on a timer the user did not explicitly opt into.
 
+## The widget is a system widget, not a window
+
+Do not reintroduce a floating or always-on-top window for the widget. On macOS the
+mechanism is a WidgetKit app extension in `app/src-tauri/widget/`, embedded at
+`Contents/PlugIns/`, which the user places from the system widget gallery. Three
+things make this fragile and each has bitten already — see
+`app/src-tauri/widget/README.md` before changing any of it:
+
+- It **must** be built from a real Xcode app-extension target. A SwiftPM executable
+  wrapped in an `.appex` registers and then exits immediately on macOS 26+.
+- `NSExtensionPrincipalClass` must not be set, and `CFBundlePackageType` must be
+  `XPC!`. `build-widget.sh` enforces both.
+- macOS has **no** `accessory*` widget families; they are iOS/watchOS only. Use
+  `systemSmall` / `systemMedium` / `systemLarge`.
+
+The app must never imply it installed the widget. macOS exposes no API for a host
+app to add one or to ask whether the user placed it, so `SystemWidgetStatus` only
+ever reports facts about the build.
+
+The widget and the app are separate processes and share data through a JSON
+snapshot written atomically to `~/Library/Application Support/AI Sub Stats/`. The
+window list carries an explicit `kind`, never a label the Swift side has to
+pattern-match on.
+
 ## Project structure and conventions
 
 - `app/`: Tauri desktop application; keep all Tauri configuration and code here.

@@ -1,9 +1,9 @@
 /**
  * Composition shell only.
  *
- * Chooses the surface — onboarding, dashboard, or the compact widget — and
- * mounts the atom registry. No feature logic lives here; a growing `App.tsx` is
- * the signal that something belongs in `components/<area>/` or an atom.
+ * Chooses the surface — onboarding or dashboard — and mounts the atom registry.
+ * No feature logic lives here; a growing `App.tsx` is the signal that something
+ * belongs in `components/<area>/` or an atom.
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
@@ -12,19 +12,6 @@ import { RegistryProvider, useAtomValue } from "@effect/atom-react";
 import { onboardingAtom, onboardingVisibleAtom } from "~/atoms";
 import { Dashboard } from "~/components/dashboard/dashboard";
 import { OnboardingFlow } from "~/components/onboarding/onboarding-flow";
-import { WidgetSurface } from "~/components/widget/widget-surface";
-
-/**
- * The surface requested by the window.
- *
- * The widget window loads `index.html?surface=widget` (see
- * `modules/widget/mod.rs`), so one bundle serves both and the two cannot drift
- * apart in how they render a reading.
- */
-function readSurface(): "widget" | "app" {
-  const requested = new URLSearchParams(window.location.search).get("surface");
-  return requested === "widget" ? "widget" : "app";
-}
 
 /**
  * Applies the platform's chrome.
@@ -48,10 +35,7 @@ function usePlatformChrome(): void {
 }
 
 function Surface() {
-  const surface = readSurface();
   usePlatformChrome();
-
-  if (surface === "widget") return <WidgetSurface />;
 
   return (
     <div className="min-h-screen">

@@ -17,7 +17,7 @@ use modules::automation::AutomationRunner;
 use modules::commands::AppState;
 use modules::onboarding::OnboardingStore;
 use modules::providers::ProviderRegistry;
-use modules::widget::WidgetController;
+use modules::widget::SnapshotStore;
 use shared::clock::{Clock, SystemClock};
 
 /// Surfaces for the integration tests in `tests/`.
@@ -40,7 +40,10 @@ pub fn run() {
     // spawn their own app-server process.
     let registry = Arc::new(ProviderRegistry::new(now_ms));
     let automation = Arc::new(AutomationRunner::new(Arc::clone(&registry)));
-    let widget = Arc::new(WidgetController::new());
+    // Where the macOS system widget reads its snapshot from. `None` only when
+    // there is no home directory, in which case the widget has nowhere to read
+    // either and the setup guide says so.
+    let widget_snapshots = SnapshotStore::from_env();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -60,7 +63,7 @@ pub fn run() {
                 registry,
                 automation,
                 onboarding,
-                widget,
+                widget_snapshots,
             });
             Ok(())
         })

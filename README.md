@@ -153,6 +153,34 @@ A minimal "hi" prompt is implemented behind `sendPing`, but it is never fired on
 a timer. It spends quota, so the client only reaches it from a setting the user
 explicitly enabled.
 
+### The macOS system widget
+
+The widget is a WidgetKit app extension at `app/src-tauri/widget/`, embedded in
+the app bundle. The user places it from the system widget gallery and macOS owns
+its position, size, and refresh schedule. It shows the **5-hour window and the
+weekly limit** in every size.
+
+There is no floating window. The previous version opened a frameless
+always-on-top Tauri window that covered whatever the user was working in and
+could not be placed by the system; that is gone.
+
+The app cannot install the widget — macOS exposes no API for a host app to add one,
+and none for asking whether the user has placed it. The in-app panel therefore
+reports what is true about the build and shows the system's own procedure for
+this macOS release, instead of a button that would imply otherwise.
+
+```sh
+cd app
+bun run build:mac      # tauri build + build and embed the widget extension
+```
+
+Requires **macOS 14+** and **Xcode 16+**. Windows and Linux have no system widget
+implemented yet; the app says so rather than showing an empty panel.
+
+`app/src-tauri/widget/README.md` records how the extension is built, the three
+traps that make it silently not work, and exactly what has and has not been
+verified.
+
 ### Other providers
 
 Z.ai and Claude Code are **not implemented**. The `Provider` trait and the

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  The App Sandbox is deliberately OFF.
+
+	  The widget and the host app are two separate processes, and the only
+	  reliable way to share a snapshot between them without a registered App
+	  Group is a plain file in the user's home directory. Sandboxing would
+	  block that read.
+
+	  An App Group (`group.<team>.com.soumitrasaha.aism`) is the production
+	  answer, but it has to be registered on the developer portal first and
+	  then signed with a real Team ID. See widget/README.md.
+	-->
+</dict>
+</plist>

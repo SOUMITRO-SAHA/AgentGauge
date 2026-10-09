@@ -27,7 +27,7 @@ pub enum ErrorKind {
     Storage,
     /// The request was not valid.
     InvalidRequest,
-    /// The widget window could not be created or toggled.
+    /// The system widget's snapshot could not be published.
     Widget,
 }
 

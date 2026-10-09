@@ -334,3 +334,52 @@ mod tests {
         assert!(store.load().dismissed);
     }
 }
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    /// The wire names the client schema must contain.
+    #[test]
+    fn the_step_order_is_the_contract_the_client_mirrors() {
+        // The ordinal is persisted, so a reorder silently changes the meaning of
+        // saved progress. `src/lib/ipc.ts` asserts the same six names.
+        let names: Vec<&str> = OnboardingStep::ALL
+            .iter()
+            .map(|step| serde_json::to_value(step).expect("serialises"))
+            .map(|json| {
+                json.as_str()
+                    .expect("a bare string tag")
+                    .to_string()
+                    .leak() as &str
+            })
+            .collect();
+
+        assert_eq!(
+            names,
+            vec![
+                "welcome",
+                "statusCheck",
+                "windowRollover",
+                "widget",
+                "automation",
+                "done"
+            ]
+        );
+    }
+
+    #[test]
+    fn every_step_has_a_distinct_ordinal() {
+        let mut indices: Vec<u8> =
+            OnboardingStep::ALL.iter().map(|s| s.index()).collect();
+        let count = indices.len();
+        indices.sort_unstable();
+        indices.dedup();
+        assert_eq!(indices.len(), count, "ordinals must be unique");
+    }
+
+    #[test]
+    fn the_last_step_is_the_final_one() {
+        assert_eq!(OnboardingStep::ALL.last(), Some(&OnboardingStep::Done));
+    }
+}

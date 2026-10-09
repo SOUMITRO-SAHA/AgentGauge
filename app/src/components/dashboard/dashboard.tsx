@@ -1,8 +1,8 @@
 /**
  * The main dashboard.
  *
- * Responsive by default: the same markup serves a 300px-wide widget window and
- * a wide desktop window. Two rules make that work:
+ * Responsive by default: the same markup serves a narrow desktop window and a
+ * wide one. Two rules make that work:
  *
  *  - space is expressed in `clamp()` so padding and type scale with the
  *    viewport rather than jumping at a breakpoint, and
@@ -13,15 +13,18 @@
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import * as Effect from "effect/Effect";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
-import { LayoutPanelTop, Play, RefreshCw, Square } from "lucide-react";
+import { Play, Square } from "lucide-react";
 
-import { automationAtom, usageAtom, widgetAtom } from "~/atoms";
+import { automationAtom, usageAtom } from "~/atoms";
 import { Button } from "~/components/ui/button";
 import {
   FreshnessPill,
   ProviderStatusCard,
 } from "~/components/usage/provider-status-card";
 import { UsageWindowList } from "~/components/usage/usage-window-row";
+import { SystemWidgetGuide } from "~/components/widget/system-widget-guide";
+
+import { PANEL, PanelHeader } from "./panel";
 import { useClock } from "~/hooks/use-clock";
 import * as Ipc from "~/lib/ipc";
 import { formatFreshness, formatPlan } from "~/lib/usage";
@@ -29,16 +32,11 @@ import { formatFreshness, formatPlan } from "~/lib/usage";
 /** Shared shell: fluid gutter and vertical rhythm, no fixed width. */
 const PAGE = "mx-auto flex w-full flex-col gap-[clamp(0.75rem,2.5vw,1.5rem)] px-[clamp(0.75rem,4vw,2rem)] py-[clamp(1rem,4vw,2rem)]";
 
-/** Every panel shares one shape so they stack cleanly at any width. */
-const PANEL = "rounded-xl border border-border/70 bg-surface-raised/70 p-[clamp(0.75rem,2.5vw,1.25rem)] backdrop-blur-md";
-
 export function Dashboard({ hidden = false }: { readonly hidden?: boolean }) {
   const usage = useAtomValue(usageAtom);
   const automation = useAtomValue(automationAtom);
-  const widget = useAtomValue(widgetAtom);
   const refreshUsage = useAtomRefresh(usageAtom);
   const refreshAutomation = useAtomRefresh(automationAtom);
-  const refreshWidget = useAtomRefresh(widgetAtom);
   const nowMs = useClock();
 
   return (
@@ -156,90 +154,12 @@ export function Dashboard({ hidden = false }: { readonly hidden?: boolean }) {
         })}
       </section>
 
-      <section className={PANEL} data-testid="widget-panel">
-        <PanelHeader
-          title="Desktop widget"
-          testId="refresh-widget"
-          onRefresh={refreshWidget}
-        />
-
-        {AsyncResult.match(widget, {
-          onInitial: () => (
-            <p className="text-sm text-muted-foreground">Checking the widget…</p>
-          ),
-          onSuccess: (result) => {
-            const status = result.value;
-            return (
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <span
-                  className="text-sm text-foreground"
-                  data-testid="widget-status"
-                >
-                  {status.installed
-                    ? "Set up and always on top"
-                    : (status.reason ?? "Not set up")}
-                </span>
-                <Button
-                  variant={status.installed ? "outline" : "default"}
-                  size="sm"
-                  className="shrink-0"
-                  onClick={() => {
-                    const next = status.installed
-                      ? Ipc.hideWidget()
-                      : Ipc.setupWidget();
-                    void Effect.runPromise(next).then(refreshWidget);
-                  }}
-                  data-testid="widget-toggle"
-                >
-                  <LayoutPanelTop aria-hidden="true" />
-                  {status.installed ? "Remove" : "Set up widget"}
-                </Button>
-              </div>
-            );
-          },
-          onFailure: () => (
-            <p className="text-sm text-destructive">
-              The app could not be reached.
-            </p>
-          ),
-        })}
-      </section>
+      <SystemWidgetGuide />
     </main>
     </div>
   );
 }
 
-/**
- * A panel title with a refresh action.
- *
- * The title truncates rather than wrapping, so the action stays on one line at
- * narrow widths instead of pushing itself off-screen.
- */
-function PanelHeader({
-  title,
-  testId,
-  onRefresh,
-}: {
-  readonly title: string;
-  readonly testId: string;
-  readonly onRefresh: () => void;
-}) {
-  return (
-    <div className="mb-4 flex items-center justify-between gap-2">
-      <h2 className="truncate text-sm font-semibold text-foreground">{title}</h2>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="shrink-0"
-        onClick={onRefresh}
-        data-testid={testId}
-      >
-        <RefreshCw aria-hidden="true" />
-        <span className="hidden sm:inline">Refresh</span>
-      </Button>
-    </div>
-  );
-}
 
 function SnapshotHeader({
   snapshot,
