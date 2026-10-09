@@ -129,9 +129,12 @@ bun run build                                          # tsc typecheck + vite bu
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo check  --manifest-path src-tauri/Cargo.toml
-bun run e2e                                            # when UI, IPC, or capabilities changed
+bun run e2e                                            # required for any UI change
 ```
 
-Run the Rust checks for any `src-tauri` change and `bun run e2e` for any change
-to the client, IPC, capabilities, or window setup. Full gate list and the
-definition of done: [`testing.md`](testing.md).
+Run the Rust checks for any `src-tauri` change. `bun run e2e` is **required for
+any UI change** — layout, copy, state rendering, navigation, or interaction —
+because a passing build cannot show that the screen renders the right thing.
+There is no "small UI change" exemption; see the binding rules in the root
+`AGENTS.md` and [`testing.md`](testing.md) for the full gate list and the
+TDD-first workflow.

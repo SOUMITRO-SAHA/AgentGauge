@@ -39,6 +39,23 @@ cargo check --manifest-path app/src-tauri/Cargo.toml
 
 Builds and runtime behavior are platform-specific. Validate changes on macOS, Windows, and Linux as applicable; do not infer support for all Linux distributions from a build on just one distribution.
 
+## Testing policy
+
+Two rules are binding on every change, with no exceptions for small or low-risk edits.
+
+**Prefer TDD for everything.** Start from the smallest focused test that states the desired behaviour or reproduces the defect. Confirm it fails for the intended reason, then make it pass with the smallest production change, then refactor while it stays green. This applies to UI work, IPC commands, provider modules, and pure helpers alike — not only to "testable" logic.
+
+**A UI change requires e2e coverage.** Any change to what the user sees or does — layout, copy, state rendering, navigation, interaction, or data display — ships with an e2e spec in `app/e2e/specs/` asserting the rendered result, not merely that it compiles. Asserting that the change type-checks is not coverage. A UI change without a passing e2e run is unfinished, and the run must actually have been executed:
+
+```sh
+cd app
+bun run e2e
+```
+
+`bun run e2e` builds the frontend and the binary and then drives the real compiled app through its native webview, so it covers both the renderer and the Rust side. Use it rather than bare `wdio` or a bare `cargo build`. If a surface genuinely cannot be automated (for example the native widget, which is outside the webview), document the exact manual verification and the reason in your summary rather than silently omitting it.
+
+Gates by change type, and the harness mechanics — build constraint, mocking, screenshots, troubleshooting — are in [`testing.md`](.opencode/rules/testing.md) and the `tauri-e2e-testing` skill.
+
 ## Provider data and security
 
 - Use documented, authorized provider interfaces and respect provider terms and rate limits.

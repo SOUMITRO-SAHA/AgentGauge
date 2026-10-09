@@ -67,6 +67,32 @@ The app client uses `~/` as its source alias (for example, `~/components/ui/butt
 bunx shadcn@latest add button
 ```
 
+## Testing
+
+Work test-first. Write the smallest focused test that describes the new behaviour or reproduces the bug, watch it fail for the right reason, then implement.
+
+End-to-end tests drive the **real compiled app** through its native webview — the Rust backend runs and the OS window exists:
+
+```sh
+cd app
+bun run e2e
+```
+
+`bun run e2e` builds the frontend and the binary before running the suite, so the tests never run against a stale build. Use it instead of invoking `wdio` directly.
+
+**Any UI change requires e2e coverage** — layout, copy, state rendering, navigation, interaction, or data display. A passing type-check or build is not a substitute: neither can show that a screen renders the right value, handles a missing or stale response, or stays usable at narrow widths. There is no exemption for small or styling-only changes.
+
+E2E specs live in `app/e2e/specs/`. Run artifacts (screenshots and dumps) are written to `.temp/e2e/`, which is git-ignored.
+
+For Rust changes, also run:
+
+```sh
+cargo fmt --manifest-path app/src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings
+```
+
+The suite is currently verified on macOS only; Windows and Linux are configured but unproven. See [`AGENTS.md`](AGENTS.md) and [`.opencode/rules/testing.md`](.opencode/rules/testing.md) for the full policy.
+
 ## Integrations and credentials
 
 Provider support has not been implemented yet. When adding it, prefer documented and authorized provider interfaces, make the source and timestamp of status/usage data visible, and handle missing or stale data explicitly. Never commit API keys, session tokens, account data, or local environment files. Avoid logging credentials or other sensitive account information.

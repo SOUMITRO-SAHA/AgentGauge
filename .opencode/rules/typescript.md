@@ -119,6 +119,11 @@ app/src/
 - `app/e2e/specs/*.e2e.ts` is the only automated test surface today. Specs
   import from `@wdio/globals` (`expect`, `browser`, `$`), never from the global
   namespace, and are read before extending — see the `tauri-e2e-testing` skill.
+- **A UI change requires a spec here.** TDD is the default for every change, and
+  any change to what the user sees or does is unfinished until an e2e spec
+  asserts the rendered result and `bun run e2e` has run green. Type-checking and
+  a passing build are not coverage for a UI change. Binding rules:
+  [`testing.md`](testing.md).
 - `capabilities.e2e.ts` is a **harness self-test**. It is not product coverage;
   a failure there invalidates the whole run.
 - `app/scripts/*.ts` run under Bun. Use `Bun.spawn`/`execFileSync` and

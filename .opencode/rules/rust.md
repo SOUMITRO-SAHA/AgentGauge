@@ -110,6 +110,25 @@ app/src-tauri/src/
 - Keep command bodies thin: parse → delegate to a provider module → map the
   error. No provider HTTP calls or parsing inline in a command.
 
+## Tests
+
+TDD is the default for every change. Write the failing test first, confirm it
+fails for the intended reason, then implement.
+
+- Unit tests inline under `#[cfg(test)] mod tests` in the module they cover;
+  integration tests in `app/src-tauri/tests/`. Run with
+  `cargo test --manifest-path app/src-tauri/Cargo.toml`.
+- Cover error branches, not just the happy path. Use temp fixtures; never touch
+  the developer's real data or repo state.
+- A `#[tauri::command]`'s **returned value and error serialization** are the
+  contract the client branches on. If a command is new or its behaviour changed,
+  a spec in `app/e2e/specs/` must assert it — commands with no coverage are the
+  usual source of "the UI shows nothing" defects. Reach the command with
+  `browser.tauri.execute(({ core }) => core.invoke(...))` when no UI gesture
+  triggers it.
+- A change to anything the user sees requires e2e coverage; a passing
+  `cargo check` cannot show that. Binding rules: [`testing.md`](testing.md).
+
 ## Warnings
 
 - **Zero warnings.** `cargo check` and

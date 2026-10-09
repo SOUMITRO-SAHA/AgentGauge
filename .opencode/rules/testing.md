@@ -24,6 +24,10 @@ Never finish with a compiler warning, a clippy warning, or a skipped e2e run
 
 ## Test-first development (binding)
 
+TDD is the default for **every** change — UI, IPC, provider modules, and pure
+helpers alike. The word "prefer" is not an escape hatch: the only reasons to
+write code first are a genuinely unknown API or a spike that will be deleted.
+
 - Start every behaviour change and bug fix with the smallest focused test that
   demonstrates the desired contract or regression. Confirm it fails for the
   intended reason **before** implementing, then make it pass with the smallest
@@ -37,6 +41,26 @@ Never finish with a compiler warning, a clippy warning, or a skipped e2e run
 - No feature, defect fix, or security fix is complete without coverage. If
   automation is genuinely impossible (e.g. a native-widget surface wdio cannot
   reach), document the exact manual verification and why in your summary.
+
+## UI changes require e2e coverage (binding)
+
+A change to anything the user sees or does — layout, copy, state rendering,
+navigation, interaction, or data display — is **not complete** until an e2e
+spec asserts the rendered result and `bun run e2e` has actually been run green.
+
+- The spec asserts the **outcome**, not the mechanics: that the screen shows the
+  right state, not that the component compiled or that a class name is present.
+- Type-checking, linting, and a passing build are **not** coverage for a UI
+  change. They cannot catch a wrong number, a missing empty state, a clipped
+  label, or an unreachable control.
+- "It was only a small change", "it is styling only", and "the logic did not
+  change" are not exemptions. Styling changes are the ones that break data
+  honesty silently.
+- The run must really have happened. Report the actual result — a green claim
+  from an unrun command is worse than an admitted gap.
+
+For review-and-capture workflows rather than regression coverage, use the
+`ui-review` skill; it drives the same suite.
 
 ## Writing e2e specs
 

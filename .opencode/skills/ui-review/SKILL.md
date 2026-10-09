@@ -19,6 +19,19 @@ For harness mechanics — the build constraint, the five integration points,
 mocking, troubleshooting — read the **`tauri-e2e-testing`** skill. This skill
 covers **what to review and how to report it**, not how the harness works.
 
+## Review and regression coverage are different jobs
+
+Per the root `AGENTS.md`, a UI change requires e2e coverage and TDD is the
+default. This skill is for reviewing an existing screen and capturing evidence;
+it is **not** a substitute for the regression spec that change must ship with.
+
+- A change under review needs a spec in `app/e2e/specs/` asserting the rendered
+  outcome, so the defect cannot return.
+- Reviewing here — a clean report, a screenshot — catches problems in code you
+  did not just touch. It does not close the requirement for the change itself.
+- When the review finds a defect, fix it test-first: add the failing spec, then
+  the fix.
+
 ## Setup
 
 ```sh
@@ -80,7 +93,7 @@ therefore correct — most real defects here are *misleading* rather than broken
 
 ### 1. Data honesty (highest priority)
 
-Per `.opencode/rules/AGENTS.md` and `.opencode/rules/ui.md`:
+Per the root `AGENTS.md` and [`ui.md`](../../rules/ui.md):
 
 - Every usage number, limit, and status carries its **source** and
   **last-updated time**. A number without provenance fails.

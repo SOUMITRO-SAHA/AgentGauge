@@ -18,6 +18,15 @@ bun run e2e:build    # build only (no test run)
 Do not run `wdio` against a Vite dev server or a stale binary. `bun run e2e`
 owns the build so the frontend and binary can never drift apart.
 
+## Why this is load-bearing
+
+Per the root `AGENTS.md` and `.opencode/rules/testing.md`, **a UI change
+requires e2e coverage** and TDD is the default for every change. A passing
+build cannot show that a screen renders the right thing, so this suite — not
+`tsc`, not clippy — is what proves a UI change works. "It was only a small
+change" and "it was styling only" are not exemptions; styling changes are
+exactly the ones that break data honesty silently.
+
 ## Before changing anything
 
 `e2e/specs/capabilities.e2e.ts` is a harness self-test, not product coverage.
