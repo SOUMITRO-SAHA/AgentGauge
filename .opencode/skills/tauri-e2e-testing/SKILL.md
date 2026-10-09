@@ -122,6 +122,12 @@ import { expect, browser, $ } from "@wdio/globals";
 - Screenshot on failure with `browser.saveScreenshot(file)`. It returns a
   Buffer, not `true`. **Element screenshots are not cropped** — they return the
   full viewport. See `references/capabilities.md`.
+- Write all artifacts — screenshots, dumps, scratch files — to the repo-root
+  `.temp/` directory, never to `os.tmpdir()`. `.temp` is git-ignored, so
+  artifacts cannot leak into a commit, and they sit next to the run output
+  instead of a per-machine system path. `.temp/e2e/` is the screenshot
+  destination; resolve it from `import.meta.url` so it holds regardless of the
+  directory the runner was launched from.
 - `maxInstances: 1` is required. Worker IDs read `[0-0]`, `[0-1]` — the second
   index is the spec file, not a second worker; the embedded driver binds a
   fixed port and concurrent app instances collide.

@@ -144,6 +144,10 @@ page than the embedded bundle.
 
 Element screenshots are never cropped; see `capabilities.md`.
 
+If a capture lands in a system temp directory, or `.temp/e2e/` is missing after
+a run, a spec is still calling `os.tmpdir()`. All artifacts belong under the
+repo-root `.temp/`, resolved from `import.meta.url`.
+
 ## Linux: `webkit2gtk-driver not found` or `X11 connection refused`
 
 Install the driver and run headless:

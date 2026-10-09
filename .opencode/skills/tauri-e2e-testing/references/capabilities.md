@@ -16,11 +16,12 @@ the two disagree, the spec is correct.
 | `browser.takeScreenshot()`                    | Returns a base64 string                              |
 | `element.saveScreenshot(path)`                | Works, but is **not cropped** to the element         |
 
-Observed output for an 800x600 window on a Retina display:
+Observed output for an 800x600 window on a Retina display, written to the
+repo-root `.temp/e2e/`:
 
 ```
-native-window.png   102,795 bytes   PNG image data, 1600 x 1200, RGBA
-element-h1.png      102,795 bytes   PNG image data, 1600 x 1200, RGBA
+native-window.png   103,211 bytes   PNG image data, 1600 x 1200, RGBA
+element-h1.png      103,211 bytes   PNG image data, 1600 x 1200, RGBA
 ```
 
 The two files are **byte-identical** (same MD5). The embedded provider

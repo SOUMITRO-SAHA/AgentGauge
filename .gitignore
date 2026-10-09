@@ -20,6 +20,9 @@ dist-ssr
 target
 *.local
 
+# Test artifacts (e2e screenshots, scratch files)
+.temp
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

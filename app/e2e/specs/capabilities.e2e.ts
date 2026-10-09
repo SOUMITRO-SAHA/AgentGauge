@@ -1,9 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
-import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { expect, browser, $ } from "@wdio/globals";
 
-const shotDir = path.join(tmpdir(), "aism-e2e-shots");
+// Repo-root `.temp/e2e`, resolved from this file so the path holds regardless
+// of the working directory the runner was launched from.
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../..",
+);
+const shotDir = path.join(repoRoot, ".temp", "e2e");
 fs.mkdirSync(shotDir, { recursive: true });
 
 describe("E2E capability verification", () => {
