@@ -17,6 +17,15 @@ The goal is to support subscriptions and tools such as OpenAI Codex, Claude Code
 
 Provider names above describe intended coverage, not a claim of an existing integration. Available data and automation will depend on each provider's supported APIs, local tools, and terms.
 
+## Repository layout
+
+```text
+app/       Tauri desktop application (React client and Rust backend)
+website/   Reserved for a future Astro landing page and documentation site
+```
+
+The website is intentionally an uninitialized placeholder. It is separate from the desktop app and is not included in the app's build. All Tauri configuration and code lives under `app/`.
+
 ## Technology
 
 - [Tauri 2](https://v2.tauri.app/) for the native desktop shell and Rust backend
@@ -27,9 +36,10 @@ Provider names above describe intended coverage, not a claim of an existing inte
 
 ## Development setup
 
-Install [Bun](https://bun.sh/) and the [Rust toolchain](https://www.rust-lang.org/tools/install). Tauri also requires platform-specific native build dependencies; see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your operating system and Linux distribution.
+Install [Bun](https://bun.sh/) and the [Rust toolchain](https://www.rust-lang.org/tools/install). Tauri also requires platform-specific native build dependencies; see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your operating system and Linux distribution. Run app commands from `app/`:
 
 ```sh
+cd app
 bun install
 bun run tauri dev
 ```
@@ -37,6 +47,7 @@ bun run tauri dev
 Useful commands:
 
 ```sh
+cd app
 bun run dev          # Run the Vite client only
 bun run build        # Type-check and build the client
 bun run tauri dev    # Run the native desktop app in development
@@ -45,17 +56,7 @@ bun run tauri build  # Build a native package for the current target
 
 Native packages should be built and tested on their target operating systems (or with a properly configured cross-compilation toolchain). A successful build on one platform does not verify support for every OS or Linux distribution.
 
-## Project layout
-
-```text
-src/                 React client
-  components/ui/     shadcn/ui components
-  lib/utils.ts       Shared class-name utility
-src-tauri/           Tauri configuration and Rust application
-components.json      shadcn/ui configuration
-```
-
-The client uses `~/` as its source alias (for example, `~/components/ui/button`). Add shadcn/ui components with:
+The app client uses `~/` as its source alias (for example, `~/components/ui/button`). Add shadcn/ui components from `app/` with:
 
 ```sh
 bunx shadcn@latest add button

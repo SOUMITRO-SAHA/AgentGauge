@@ -8,20 +8,23 @@ The current UI and Rust backend are still the Tauri starter greeting example. Do
 
 ## Project structure and conventions
 
-- `src/`: React and TypeScript client.
-- `src/components/ui/`: shadcn/ui components.
-- `src/lib/utils.ts`: shared `cn()` class-name utility.
-- `src-tauri/`: Tauri configuration and Rust backend.
-- Use the `~/` alias for imports from `src` (for example, `~/lib/utils`). Keep it aligned in `vite.config.ts`, `tsconfig.json`, and `components.json`.
+- `app/`: Tauri desktop application; keep all Tauri configuration and code here.
+- `app/src/`: React and TypeScript client.
+- `app/src/components/ui/`: shadcn/ui components.
+- `app/src/lib/utils.ts`: shared `cn()` class-name utility.
+- `app/src-tauri/`: Tauri configuration and Rust backend.
+- `website/`: reserved for a future Astro landing page and documentation site. Do not add it to the app build.
+- Use the `~/` alias for imports from `app/src` (for example, `~/lib/utils`). Keep it aligned in `app/vite.config.ts`, `app/tsconfig.json`, and `app/components.json`.
 - Styling uses Tailwind CSS 4 through `@tailwindcss/vite`; do not add a Tailwind 3 config unless the project is deliberately migrated.
 - Follow the surrounding TypeScript/React and Rust style. Keep provider-specific code modular rather than coupling provider behavior into general UI components.
-- Keep `bun.lock` and `src-tauri/Cargo.lock` in sync with dependency changes.
+- Keep `app/bun.lock` and `app/src-tauri/Cargo.lock` in sync with dependency changes.
 
 ## Development and verification
 
 Use Bun for JavaScript package operations:
 
 ```sh
+cd app
 bun install
 bun run build
 bun run tauri dev
@@ -30,8 +33,8 @@ bun run tauri dev
 For native Rust changes, also run relevant Rust checks, such as:
 
 ```sh
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo check --manifest-path src-tauri/Cargo.toml
+cargo fmt --manifest-path app/src-tauri/Cargo.toml -- --check
+cargo check --manifest-path app/src-tauri/Cargo.toml
 ```
 
 Builds and runtime behavior are platform-specific. Validate changes on macOS, Windows, and Linux as applicable; do not infer support for all Linux distributions from a build on just one distribution.
@@ -47,6 +50,6 @@ Builds and runtime behavior are platform-specific. Validate changes on macOS, Wi
 
 ## Repository hygiene
 
-- Preserve the root and `src-tauri` ignore rules; do not add build output, dependency directories, generated Tauri schemas, or local secrets to commits.
+- Preserve the root and `app/src-tauri` ignore rules; do not add build output, dependency directories, generated Tauri schemas, or local secrets to commits.
 - Avoid unrelated changes and do not overwrite existing user work.
 - Update the README when project setup, supported behavior, or platform requirements materially change.
