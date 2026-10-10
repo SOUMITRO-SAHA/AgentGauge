@@ -131,10 +131,12 @@ export async function openApp(): Promise<void> {
     // painted (33k of markup). Trusting the timeout here made every boot
     // report "the app never rendered a surface" while the app was sitting
     // there, rendering correctly.
-    if (await pollForDisplayed(
-      '[data-testid="app-shell"], [data-testid="onboarding"]',
-      15_000,
-    )) {
+    if (
+      await pollForDisplayed(
+        ['[data-testid="app-shell"]', '[data-testid="onboarding"]'],
+        15_000,
+      )
+    ) {
       return;
     }
     // The window may have closed between attempts; give the app a moment.
@@ -145,21 +147,81 @@ export async function openApp(): Promise<void> {
 }
 
 /**
- * Polls `isDisplayed` on a selector until it is displayed.
+ * Polls each selector in turn until one of them is displayed.
  *
- * The explicit counterpart to `waitForDisplayed`, which this driver
- * misreports for comma selectors on rendered elements.
+ * ## Why not a single comma selector
+ *
+ * `$(a, b).isDisplayed()` answers for the *first* match only. Both surfaces
+ * stay mounted while the other is showing, so with
+ * `[data-testid="app-shell"], [data-testid="onboarding"]` the hidden
+ * `app-shell` comes first in document order and the result is `false` even
+ * while onboarding is fully visible. Verified directly: on a live onboarding
+ * flow the single selector and wdio's own `toBeDisplayed` matcher both report
+ * displayed, while the comma selector reports not displayed — the same element,
+ * the same instant.
+ *
+ * That made `openApp` report "the app never rendered a surface" while the app
+ * sat there rendering perfectly, and it is the reason the onboarding specs
+ * failed: their `beforeEach` never got past the boot.
+ *
+ * Each selector is therefore polled on its own, so "any of these" really does
+ * mean any.
  */
 export async function pollForDisplayed(
-  selector: string,
+  selectors: string | readonly string[],
   timeoutMs: number,
 ): Promise<boolean> {
+  const list = typeof selectors === "string" ? [selectors] : selectors;
   for (let waited = 0; waited <= timeoutMs; waited += 250) {
-    const element = await $(selector);
-    if (await element.isDisplayed().catch(() => false)) return true;
+    for (const selector of list) {
+      const elements = await $$(selector);
+      for (const element of elements) {
+        if (await element.isDisplayed().catch(() => false)) return true;
+      }
+    }
     await browser.pause(250);
   }
   return false;
+}
+
+/**
+ * Clicks the first *displayed* element matching a selector.
+ *
+ * `$(selector).click()` answers for the first match in document order, and both
+ * surfaces stay mounted while the other is showing — so the button a spec means
+ * to press is often not the one `$` returns, and the click fails with "element
+ * wasn't found" on a screen that plainly has the button. `firstDisplayed` walks
+ * the matches instead of taking the first.
+ */
+export async function clickDisplayed(selector: string): Promise<void> {
+  const target = await firstDisplayed(selector);
+  if (!target) {
+    throw new Error(`nothing displayed for ${selector}`);
+  }
+  await target.click();
+}
+
+/**
+ * Asserts that a selector is displayed, with a wait.
+ *
+ * The same first-match-only trap as `pollForDisplayed` applies to a bare
+ * `expect(el).toBeDisplayed()` when several elements share a `data-testid`, so
+ * every assertion about visibility goes through here. `toBeDisplayed()` itself
+ * is reliable for a selector that matches exactly one *displayed* element —
+ * the failure was never the matcher, it was the comma selector feeding it.
+ *
+ * Waits rather than asserting immediately, because most of these follow a click
+ * that only *starts* a re-read; asserting straight away races the very render
+ * being waited on.
+ */
+export async function expectDisplayed(
+  selector: string,
+  timeoutMs = 10_000,
+): Promise<void> {
+  if (await pollForDisplayed(selector, timeoutMs)) return;
+  throw new Error(
+    `expected ${selector} to be displayed within ${timeoutMs}ms`,
+  );
 }
 
 /** Resolves once the native window is listed, retrying while it is absent. */
@@ -191,6 +253,9 @@ let savedOnboardingStore: string | null | undefined;
  * called BEFORE the boot's `url()`.
  */
 export function seedOnboardingStore(visible: boolean): void {
+  // `visible` means what it says: `true` seeds a fresh user whose flow shows.
+  // An inverted call site is the single easiest mistake to make here, and it
+  // fails silently — the app reads a dismissed store and the gate never opens.
   const file = onboardingStorePath();
   if (savedOnboardingStore === undefined) {
     savedOnboardingStore = fs.existsSync(file)
@@ -437,8 +502,8 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                           "Right-click the desktop and choose Edit Widgets.",
                       },
                       {
-                        title: "Find AI Sub Stats",
-                        detail: "Search for \u201cAI Sub Stats\u201d.",
+                        title: "Find AgentGauge",
+                        detail: "Search for \u201cAgentGauge\u201d.",
                       },
                     ]
                   : [
@@ -639,7 +704,14 @@ export async function dispatchCalls(): Promise<
 export async function boot(fixtures: DispatchFixtures): Promise<void> {
   // The gate and the route are seeded on disk BEFORE the app launches, so the
   // mount-time read answers what the fixtures need — no post-hoc fixing.
-  seedOnboardingStore(!fixtures.visible);
+  //
+  // Straight pass-through, deliberately NOT `!fixtures.visible`: the store's
+  // `visible` already means "the flow should show". Inverting it here seeded
+  // every onboarding-visible boot with a *dismissed* store, so the gate never
+  // opened and all 12 onboarding specs failed on a page that was otherwise
+  // correct. Verified by printing the file after `openApp`: it read
+  // `{"step":"done","dismissed":true}` for a spec that had asked for the flow.
+  seedOnboardingStore(fixtures.visible);
   seedRoute("home");
 
   await openApp();
@@ -705,7 +777,7 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
 /** Waits for either surface to have rendered. */
 async function waitForAnySurface(): Promise<void> {
   await pollForDisplayed(
-    '[data-testid="onboarding"], [data-testid="app-shell"]',
+    ['[data-testid="onboarding"]', '[data-testid="app-shell"]'],
     10_000,
   );
 }
@@ -721,7 +793,24 @@ async function waitForSurface(fixtures: DispatchFixtures): Promise<void> {
   const gate = fixtures.visible
     ? '[data-testid="onboarding"]'
     : '[data-testid="app-shell"]';
-  await pollForDisplayed(gate, 10_000);
+  // Throws on failure. This previously discarded the poll's result, so a boot
+  // that never reached the requested surface passed silently and every spec
+  // behind it failed on a confusing missing element instead.
+  if (!(await pollForDisplayed(gate, 10_000))) {
+    const seen = await browser
+      .execute(() => {
+        const shell = document.querySelector('[data-testid="app-shell"]');
+        return {
+          onboarding: !!document.querySelector('[data-testid="onboarding"]'),
+          shellClass: shell?.className ?? null,
+          heading: document.querySelector("h1")?.textContent?.slice(0, 40) ?? null,
+        };
+      })
+      .catch(() => null);
+    throw new Error(
+      `boot never reached "${gate}" — page state: ${JSON.stringify(seen)}`,
+    );
+  }
 
   // The usage panel must have resolved: either real rows, or the explicit
   // unavailable state. Either proves the read came back rather than lingering
@@ -732,7 +821,7 @@ async function waitForSurface(fixtures: DispatchFixtures): Promise<void> {
   // for one there would block forever on a correct render.
   if (!fixtures.visible) {
     await pollForDisplayed(
-      '[data-testid="window-bar"], [data-testid="window-unavailable"]',
+      ['[data-testid="window-bar"]', '[data-testid="window-unavailable"]'],
       10_000,
     );
   }

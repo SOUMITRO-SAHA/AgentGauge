@@ -3,7 +3,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, browser, $ } from "@wdio/globals";
 
-import { installDispatch, liveSnapshot, openApp, seedOnboardingStore, seedRoute } from "./fixtures.js";
+import {
+  installDispatch,
+  liveSnapshot,
+  openApp,
+  pollForDisplayed,
+  seedOnboardingStore,
+  seedRoute,
+} from "./fixtures.js";
 
 // Repo-root `.temp/e2e`, resolved from this file so the path holds regardless
 // of the working directory the runner was launched from.
@@ -37,6 +44,17 @@ describe("E2E capability verification", () => {
       if (await heading.isDisplayed()) return heading;
     }
     return $("h1");
+  }
+
+  /**
+   * Asserts some h1 is displayed.
+   *
+   * `expect($("h1")).toBeDisplayed()` would answer for the first match, and
+   * the first h1 belongs to a hidden view — so this cannot use the `$("h1")`
+   * form at all.
+   */
+  async function expectVisibleHeading() {
+    await pollForDisplayed("h1", 10_000);
   }
 
   before(async () => {
@@ -193,9 +211,7 @@ describe("E2E capability verification", () => {
       await browser.tauri.switchWindow("main");
       // Route-agnostic: the app reopens on whatever destination was persisted,
       // so the visible h1 may belong to any view.
-      const heading = await visibleHeading();
-      await heading.waitForDisplayed({ timeout: 10_000 });
-      await expect(heading).toBeDisplayed();
+      await expectVisibleHeading();
     });
   });
 

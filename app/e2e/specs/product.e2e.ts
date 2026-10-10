@@ -1,9 +1,11 @@
 import { expect, browser, $ } from "@wdio/globals";
 
 import {
+  clickDisplayed,
   dashboardLive,
   dashboardUnavailable,
   dispatchCalls,
+  expectDisplayed,
   gotoView,
   installDispatch,
   liveSnapshot,
@@ -72,36 +74,33 @@ import {
  */
 
 describe("onboarding flow", () => {
-  // The run seeds the persisted gate before every boot; the original bytes go
-  // back when the whole file is done.
-  after(async () => {
-    restoreOnboardingStore();
-  });
-
   beforeEach(async () => {
     await onboardingVisible();
   });
 
   it("shows the welcome step first", async () => {
-    await expect($('[data-testid="onboarding"]')).toBeDisplayed();
-    await expect($("h1")).toHaveText("Never wait for a window again");
+    await expectDisplayed('[data-testid="onboarding"]');
+    await expect($("h1")).toHaveText("A clear view of your coding tools");
+    await expect($('[data-testid="onboarding"]')).toHaveText(
+      expect.stringContaining("AgentGauge shows the usage and status information"),
+    );
   });
 
   it("renders the detected Codex version on the status step", async () => {
     // This step is what proves the app reads the local install rather than
     // showing a picture of one.
-    await $('[data-testid="onboarding-next"]').click();
-    await expect($('[data-testid="demo-status"]')).toBeDisplayed();
+    await clickDisplayed('[data-testid="onboarding-next"]');
+    await expectDisplayed('[data-testid="demo-status"]');
 
-    await expect($('[data-testid="provider-status"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="provider-status"]');
     await expect($('[data-testid="codex-version"]')).toHaveText(
       "codex-cli 0.159.0",
     );
   });
 
   it("renders the 5-hour window with its percentage and reset countdown", async () => {
-    await $('[data-testid="onboarding-next"]').click();
-    await expect($('[data-testid="demo-status"]')).toBeDisplayed();
+    await clickDisplayed('[data-testid="onboarding-next"]');
+    await expectDisplayed('[data-testid="demo-status"]');
 
     // The bar renders REMAINING: 88% of the window is left.
     await expect($('[data-testid="window-bar"]')).toHaveAttribute(
@@ -115,21 +114,21 @@ describe("onboarding flow", () => {
 
   it("explains the system widget instead of offering to install it", async () => {
     for (let step = 0; step < 3; step += 1) {
-      await $('[data-testid="onboarding-next"]').click();
+      await clickDisplayed('[data-testid="onboarding-next"]');
     }
-    await expect($('[data-testid="demo-widget"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="demo-widget"]');
 
     // macOS owns widget placement: the user adds it from the system gallery, so
     // an install button would be a lie. There must be no such control.
     expect(await $('[data-testid="widget-setup"]').isExisting()).toBe(false);
-    await expect($('[data-testid="widget-steps"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="widget-steps"]');
   });
 
   it("names both windows the widget will show", async () => {
     for (let step = 0; step < 3; step += 1) {
-      await $('[data-testid="onboarding-next"]').click();
+      await clickDisplayed('[data-testid="onboarding-next"]');
     }
-    await expect($('[data-testid="demo-widget"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="demo-widget"]');
 
     // The user added this asking about two windows; the step must answer that
     // rather than only saying "add a widget somewhere".
@@ -143,7 +142,7 @@ describe("onboarding flow", () => {
 
   it("reports that the watcher is already running", async () => {
     for (let step = 0; step < 4; step += 1) {
-      await $('[data-testid="onboarding-next"]').click();
+      await clickDisplayed('[data-testid="onboarding-next"]');
     }
     await expect($('[data-testid="demo-automation"]')).toHaveText(
       expect.stringContaining("already running"),
@@ -152,7 +151,7 @@ describe("onboarding flow", () => {
 
   it("reaches the finish step", async () => {
     for (let step = 0; step < 5; step += 1) {
-      await $('[data-testid="onboarding-next"]').click();
+      await clickDisplayed('[data-testid="onboarding-next"]');
     }
     await expect($("h1")).toHaveText("Watching runs in the background");
     await expect($('[data-testid="onboarding-next"]')).toHaveText(
@@ -161,7 +160,7 @@ describe("onboarding flow", () => {
   });
 
   it("persists the step through the protocol, not just local state", async () => {
-    await $('[data-testid="onboarding-next"]').click();
+    await clickDisplayed('[data-testid="onboarding-next"]');
     await browser.pause(400);
 
     // The write is what makes a relaunch resume rather than restart. The call
@@ -174,13 +173,13 @@ describe("onboarding flow", () => {
   });
 
   it("skipping hides the flow and shows the dashboard", async () => {
-    await $('[data-testid="onboarding-skip"]').click();
+    await clickDisplayed('[data-testid="onboarding-skip"]');
     await browser.pause(400);
 
     // `toBeDisplayed({ reverse: true })` is silently ignored by this wdio
     // build, so absence is asserted on the displayed state directly.
     expect(await $('[data-testid="onboarding"]').isDisplayed()).toBe(false);
-    await expect($('[data-testid="app-shell"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="app-shell"]');
   });
 });
 
@@ -190,8 +189,8 @@ describe("onboarding when nothing can be read", () => {
   });
 
   it("states that Codex is not found rather than showing an empty dashboard", async () => {
-    await $('[data-testid="onboarding-next"]').click();
-    await expect($('[data-testid="demo-status"]')).toBeDisplayed();
+    await clickDisplayed('[data-testid="onboarding-next"]');
+    await expectDisplayed('[data-testid="demo-status"]');
 
     await expect($('[data-testid="provider-status"]')).toHaveText(
       expect.stringContaining("Codex CLI not found"),
@@ -203,11 +202,11 @@ describe("onboarding when nothing can be read", () => {
   });
 
   it("renders an explicit unavailable state, never a zero", async () => {
-    await $('[data-testid="onboarding-next"]').click();
-    await expect($('[data-testid="demo-status"]')).toBeDisplayed();
+    await clickDisplayed('[data-testid="onboarding-next"]');
+    await expectDisplayed('[data-testid="demo-status"]');
 
     // The reason must be visible. A `0% used` here would be a fabrication.
-    await expect($('[data-testid="window-unavailable"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="window-unavailable"]');
     await expect($('[data-testid="window-unavailable"]')).toHaveText(
       expect.stringContaining("codex login"),
     );
@@ -217,10 +216,10 @@ describe("onboarding when nothing can be read", () => {
     // The widget is independent of whether Codex is reachable, so its guidance
     // must survive an unavailable reading.
     for (let step = 0; step < 3; step += 1) {
-      await $('[data-testid="onboarding-next"]').click();
+      await clickDisplayed('[data-testid="onboarding-next"]');
     }
-    await expect($('[data-testid="demo-widget"]')).toBeDisplayed();
-    await expect($('[data-testid="widget-steps"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="demo-widget"]');
+    await expectDisplayed('[data-testid="widget-steps"]');
   });
 });
 
@@ -230,7 +229,7 @@ describe("dashboard", () => {
   });
 
   it("shows the shell once onboarding is dismissed", async () => {
-    await expect($('[data-testid="app-shell"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="app-shell"]');
     // The reverse flag is ignored by this wdio build; assert absence directly.
     expect(await $('[data-testid="onboarding"]').isDisplayed()).toBe(false);
   });
@@ -285,9 +284,9 @@ describe("dashboard", () => {
   it("guides a user through the gallery when the build embeds the widget", async () => {
     await gotoView("settings");
     const status = $('[data-testid="widget-status"]');
-    await expect(status).toBeDisplayed();
+    await expectDisplayed('[data-testid="widget-status"]');
     await expect(status).toHaveAttribute("data-state", "ready");
-    await expect($('[data-testid="widget-setup-steps"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="widget-setup-steps"]');
     await expect($('[data-testid="widget-setup-steps"]')).toHaveText(
       expect.stringContaining("widget gallery"),
     );
@@ -306,7 +305,7 @@ describe("dashboard", () => {
     // With the fixture's embedded extension the guide walks the user through
     // the gallery; the dev-build warning is covered by the real-response spec
     // above.
-    await expect($('[data-testid="widget-setup-steps"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="widget-setup-steps"]');
     await expect($('[data-testid="widget-setup-steps"]')).toHaveText(
       expect.stringContaining("gallery"),
     );
@@ -319,7 +318,7 @@ describe("dashboard when Codex is unavailable", () => {
   });
 
   it("renders an explicit unavailable state, never a zero", async () => {
-    await expect($('[data-testid="window-unavailable"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="window-unavailable"]');
     await expect($('[data-testid="window-unavailable"]')).toHaveText(
       expect.stringContaining("codex login"),
     );
@@ -348,7 +347,7 @@ describe("dashboard when Codex is unavailable", () => {
       "data-state",
       "ready",
     );
-    await expect($('[data-testid="widget-setup-steps"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="widget-setup-steps"]');
   });
 });
 
@@ -478,17 +477,17 @@ describe("navigation", () => {
 
   it("starts on Home with exactly the four destinations", async () => {
     for (const id of ["home", "automation", "stats", "settings"]) {
-      await expect($(`[data-testid="nav-${id}"]`)).toBeDisplayed();
+      await expectDisplayed(`[data-testid="nav-${id}"]`);
     }
     await expect(
       $('[data-testid="nav-home"]'),
     ).toHaveAttribute("aria-current", "page");
-    await expect($('[data-testid="view-home"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="view-home"]');
   });
 
   it("moves between destinations when the navigation is used", async () => {
     await gotoView("stats");
-    await expect($('[data-testid="view-stats"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="view-stats"]');
     await expect(
       $('[data-testid="nav-stats"]'),
     ).toHaveAttribute("aria-current", "page");
@@ -497,7 +496,7 @@ describe("navigation", () => {
     expect(await $('[data-testid="view-home"]').isDisplayed()).toBe(false);
 
     await gotoView("automation");
-    await expect($('[data-testid="view-automation"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="view-automation"]');
     expect(await $('[data-testid="view-stats"]').isDisplayed()).toBe(false);
   });
 
@@ -505,7 +504,7 @@ describe("navigation", () => {
     // ⌘3 = Stats, derived from ROUTES order (see navigation.test.ts).
     await browser.keys(["Meta", "3"]);
     await browser.pause(300);
-    await expect($('[data-testid="view-stats"]')).toBeDisplayed();
+    await expectDisplayed('[data-testid="view-stats"]');
   });
 
   it("persists a navigation through the protocol, not just local state", async () => {
@@ -600,6 +599,24 @@ describe("navigation", () => {
  * that claimed the widget was ready would send the user looking in the gallery
  * for something that is not there; this is the regression guard for that.
  */
+/**
+ * The run seeds both persisted stores before every boot. The original bytes go
+ * back here, at *file* scope.
+ *
+ * This was previously an `after` inside the first `describe`, which fired when
+ * that block finished — six later blocks then re-seeded the stores with nothing
+ * left to restore them, so a full run left `lastRoute: "settings"` on the user's
+ * disk. Verified: a run ended with the file holding a route no navigation in
+ * the suite intended to leave behind.
+ *
+ * File scope is the only correct place: mocha runs a file-level `after` after
+ * every `describe` has finished, and these blocks are top-level siblings rather
+ * than nested, so there is no inner hook that could restore at the right time.
+ */
+after(async () => {
+  restoreOnboardingStore();
+});
+
 describe("real dev-build widget state", () => {
   it("reports the extension as absent before any mock exists", async () => {
     // Seed first: the app reopens on whatever route the last run left, and a
@@ -610,7 +627,7 @@ describe("real dev-build widget state", () => {
 
     await gotoView("settings");
     const status = $('[data-testid="widget-status"]');
-    await expect(status).toBeDisplayed();
+    await expectDisplayed('[data-testid="widget-status"]');
     await expect(status).toHaveAttribute("data-state", "not-embedded");
     await expect(status).toHaveText(expect.stringContaining("packaged app"));
   });
