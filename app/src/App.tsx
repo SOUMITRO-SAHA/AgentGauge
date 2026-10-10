@@ -57,7 +57,7 @@ function Surface() {
  * flow hides it.
  */
 function OnboardingGate() {
-  const skipped = useAtomValue(onboardingVisibleAtom);
+  const sessionVisible = useAtomValue(onboardingVisibleAtom);
   const progress = useAtomValue(onboardingAtom);
 
   // Rust owns the durable answer; the atom is the session-local override. Both
@@ -71,7 +71,7 @@ function OnboardingGate() {
 
   return (
     <>
-      <AppShell hidden={!skipped || showFlow} />
+      <AppShell hidden={sessionVisible && showFlow} />
       <OnboardingFlow />
     </>
   );

@@ -58,7 +58,7 @@ export function WelcomeArt(): ReactElement {
       />
       <circle cx="160" cy="130" r="5" className="fill-brand-amber" />
       <rect x="130" y="146" width="60" height="6" rx="3" className="fill-muted-foreground/70" />
-      <rect x="140" y="158" width="40" height="6" rx="3" className="fill-border" />
+      <rect x="140" y="158" width="40" height="6" rx="3" className="fill-muted-foreground/40" />
       <rect
         x="18"
         y="70"
@@ -137,7 +137,7 @@ export function StatusArt(): ReactElement {
         className="stroke-ok"
       />
       <rect x="112" y="61" width="76" height="8" rx="4" className="fill-muted-foreground/70" />
-      <rect x="112" y="76" width="52" height="6" rx="3" className="fill-border" />
+      <rect x="112" y="76" width="52" height="6" rx="3" className="fill-muted-foreground/40" />
       <rect
         x="204"
         y="58"
@@ -149,10 +149,10 @@ export function StatusArt(): ReactElement {
       />
       <circle cx="216" cy="68" r="3" className="fill-brand-teal" />
       <rect x="223" y="65.5" width="14" height="5" rx="2.5" className="fill-brand-teal" />
-      <circle cx="92" cy="104" r="4" className="fill-border" />
-      <rect x="104" y="101" width="110" height="6" rx="3" className="fill-border" />
-      <circle cx="92" cy="124" r="4" className="fill-border" />
-      <rect x="104" y="121" width="84" height="6" rx="3" className="fill-border" />
+      <circle cx="92" cy="104" r="4" className="fill-muted-foreground/40" />
+      <rect x="104" y="101" width="110" height="6" rx="3" className="fill-muted-foreground/40" />
+      <circle cx="92" cy="124" r="4" className="fill-muted-foreground/40" />
+      <rect x="104" y="121" width="84" height="6" rx="3" className="fill-muted-foreground/40" />
       <path
         d="M 76 142 H 244"
         strokeWidth="2"
@@ -304,7 +304,7 @@ export function AutomationArt(): ReactElement {
         className="stroke-brand-amber"
       />
       <circle cx="248" cy="72" r="5" className="fill-ok" />
-      <rect x="152" y="69" width="60" height="6" rx="3" className="fill-border" />
+      <rect x="152" y="69" width="60" height="6" rx="3" className="fill-muted-foreground/40" />
     </StepArt>
   );
 }

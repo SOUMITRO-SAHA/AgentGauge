@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_ROUTE,
+  DEV_ROUTES,
   NAV_BREAKPOINT_PX,
   ROUTES,
   isRoute,
@@ -51,6 +52,37 @@ describe("ROUTES", () => {
   it("starts on Home", () => {
     expect(DEFAULT_ROUTE).toBe("home");
     expect(isRoute(DEFAULT_ROUTE)).toBe(true);
+  });
+});
+
+describe("development destinations", () => {
+  it("keeps the Test screen after Settings only when explicitly enabled", () => {
+    expect(DEV_ROUTES.map((route) => route.id)).toEqual(["test"]);
+    expect(routesNeedingNavigation(false).map((route) => route.id)).toEqual([
+      "home",
+      "automation",
+      "stats",
+      "settings",
+    ]);
+    expect(routesNeedingNavigation(true).map((route) => route.id)).toEqual([
+      "home",
+      "automation",
+      "stats",
+      "settings",
+      "test",
+    ]);
+  });
+
+  it("rejects a persisted Test route outside dev and accepts it in dev", () => {
+    expect(isRoute("test", false)).toBe(false);
+    expect(isRoute("test", true)).toBe(true);
+    expect(routeLabel("test", true)).toBe("Test");
+  });
+
+  it("assigns the Test route Cmd-5 only when explicitly enabled", () => {
+    const key = { key: "5", metaKey: true };
+    expect(routeForShortcut(key, false)).toBeNull();
+    expect(routeForShortcut(key, true)).toBe("test");
   });
 });
 

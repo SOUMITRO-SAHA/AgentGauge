@@ -31,14 +31,34 @@ const repoRoot = path.resolve(
 const OUT = path.join(repoRoot, ".temp", "e2e", "onboarding");
 
 const WIDTHS = [360, 500, 768, 1280];
-const HEIGHT = 700;
+const HEIGHTS = [480, 700];
 
 const STEPS = [
-  { title: "A clear view of your coding tools", demo: "demo-welcome" },
-  { title: "Live status, with its source attached", demo: "demo-status" },
-  { title: "It notices the moment a window resets", demo: "demo-rollover" },
-  { title: "A real macOS widget", demo: "demo-widget" },
-  { title: "Watching runs in the background", demo: "demo-automation" },
+  {
+    title: "A clear, honest view of Codex usage",
+    copy: "Other harness integrations are planned, not assumed.",
+    demo: "demo-welcome",
+  },
+  {
+    title: "Every reading keeps its source",
+    copy: "source and freshness, with a capture time when available",
+    demo: "demo-status",
+  },
+  {
+    title: "Notice when Codex reports a new window",
+    copy: "never resets or extends it",
+    demo: "demo-rollover",
+  },
+  {
+    title: "Your usage, at a glance",
+    copy: "macOS widget gallery",
+    demo: "demo-widget",
+  },
+  {
+    title: "A read-only rollover monitor",
+    copy: "never sends a prompt or spends quota",
+    demo: "demo-automation",
+  },
 ];
 
 /**
@@ -49,14 +69,23 @@ const STEPS = [
  * uses. The window moves to the screen origin first so a wide request cannot
  * run off the edge and get shrunk.
  */
-async function resizeTo(width: number): Promise<void> {
-  await browser.setWindowRect(60, 60, width, HEIGHT);
+async function resizeTo(width: number, height: number): Promise<void> {
+  await browser.setWindowRect(60, 60, width, height);
   for (let waited = 0; waited < 8000; waited += 250) {
-    const innerWidth = await browser.execute(() => window.innerWidth);
-    if (Math.abs(innerWidth - width) <= 16) return;
+    const viewport = await browser.execute(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+    if (
+      Math.abs(viewport.width - width) <= 16 &&
+      viewport.height <= height &&
+      viewport.height >= height - 120
+    ) {
+      return;
+    }
     await browser.pause(250);
   }
-  throw new Error(`the window never reached a width near ${width}px`);
+  throw new Error(`the window never reached a size near ${width}×${height}px`);
 }
 
 /** Asserts the no-scroll and flush-footer invariants for the current size. */
@@ -64,11 +93,23 @@ async function assertFits(): Promise<void> {
   const fit = await browser.execute(() => {
     const doc = document.documentElement;
     const flow = document.querySelector('[data-testid="onboarding"]');
+    const content = flow?.querySelector('[data-testid="onboarding-content"]');
     const footer = flow?.querySelector("footer");
+    const copy = content?.querySelector("section p");
+    const art = content?.querySelector('[data-testid^="demo-"]');
+    const copyBottom = copy?.getBoundingClientRect().bottom ?? -1;
+    const artTop = art?.getBoundingClientRect().top ?? -1;
+    const artBottom = art?.getBoundingClientRect().bottom ?? -1;
+    const footerTop = footer?.getBoundingClientRect().top ?? -1;
     return {
       documentOverflowY: doc.scrollHeight - doc.clientHeight,
       documentOverflowX: doc.scrollWidth - doc.clientWidth,
       flowOverflowY: flow ? flow.scrollHeight - flow.clientHeight : -1,
+      contentOverflowY: content
+        ? content.scrollHeight - content.clientHeight
+        : -1,
+      copyArtGap: artTop - copyBottom,
+      artFooterGap: footerTop - artBottom,
       footerGap: footer
         ? window.innerHeight - footer.getBoundingClientRect().bottom
         : -1,
@@ -77,6 +118,10 @@ async function assertFits(): Promise<void> {
   expect(fit.documentOverflowY).toBeLessThanOrEqual(0);
   expect(fit.documentOverflowX).toBeLessThanOrEqual(0);
   expect(fit.flowOverflowY).toBeLessThanOrEqual(0);
+  expect(fit.contentOverflowY).toBeLessThanOrEqual(0);
+  expect(fit.copyArtGap).toBeGreaterThanOrEqual(16);
+  expect(fit.copyArtGap).toBeLessThanOrEqual(32);
+  expect(fit.artFooterGap).toBeGreaterThanOrEqual(0);
   expect(Math.abs(fit.footerGap)).toBeLessThanOrEqual(1);
 }
 
@@ -86,30 +131,32 @@ describe("onboarding visual pass", () => {
     await onboardingVisible();
 
     for (const width of WIDTHS) {
-      await resizeTo(width);
-      for (const [index, step] of STEPS.entries()) {
-        await expectDisplayed(`[data-testid="${step.demo}"]`);
-        // Scoped to the flow: the hidden shell renders its own h1 first.
-        await expect($('[data-testid="onboarding"] h1')).toHaveText(
-          step.title,
-        );
-        expect(
-          await $(`[data-testid="${step.demo}"] svg`).isExisting(),
-        ).toBe(true);
-        await assertFits();
-        await browser.saveScreenshot(
-          `${OUT}/step${index + 1}-${width}.png`,
-        );
-        if (index < STEPS.length - 1) {
-          await clickDisplayed('[data-testid="onboarding-next"]');
+      for (const height of HEIGHTS) {
+        await resizeTo(width, height);
+        for (const [index, step] of STEPS.entries()) {
+          await expectDisplayed(`[data-testid="${step.demo}"]`);
+          await expect($('[data-testid="onboarding"] h1')).toHaveText(
+            step.title,
+          );
+          await expect($('[data-testid="onboarding"]')).toHaveText(
+            expect.stringContaining(step.copy),
+          );
+          expect(
+            await $(`[data-testid="${step.demo}"] svg`).isExisting(),
+          ).toBe(true);
+          await assertFits();
+          await browser.saveScreenshot(
+            `${OUT}/step${index + 1}-${width}-${height}.png`,
+          );
+          if (index < STEPS.length - 1) {
+            await clickDisplayed('[data-testid="onboarding-next"]');
+          }
         }
+        for (let back = 0; back < STEPS.length - 1; back += 1) {
+          await clickDisplayed('[data-testid="onboarding-back"]');
+        }
+        await expectDisplayed('[data-testid="demo-welcome"]');
       }
-      // Return to the first step for the next width. The Back control is the
-      // real gesture; four clicks undo the four advances above.
-      for (let back = 0; back < STEPS.length - 1; back += 1) {
-        await clickDisplayed('[data-testid="onboarding-back"]');
-      }
-      await expectDisplayed('[data-testid="demo-welcome"]');
     }
   });
 });

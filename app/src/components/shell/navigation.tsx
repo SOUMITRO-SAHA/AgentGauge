@@ -34,7 +34,8 @@ import {
   SidebarRail,
 } from "~/components/ui/sidebar";
 import { useIsMobile } from "~/hooks/use-mobile";
-import { ROUTES, type Route } from "~/lib/navigation";
+import { DEV_TEST_SCREEN_ENABLED } from "~/lib/dev-test-screen";
+import { routesNeedingNavigation, type Route } from "~/lib/navigation";
 
 export function Navigation({
   onNavigate,
@@ -103,7 +104,7 @@ function SidebarNav({
           <SidebarGroupLabel>Destinations</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {ROUTES.map((definition) => {
+              {routesNeedingNavigation(DEV_TEST_SCREEN_ENABLED).map((definition) => {
                 const active = route === definition.id;
                 const Icon = definition.icon;
                 return (
@@ -150,7 +151,7 @@ function FloatingTabs({
       aria-label="Destinations"
       className="glass fixed inset-x-0 bottom-2 z-40 mx-auto flex w-fit max-w-[calc(100vw-1.5rem)] items-stretch gap-0.5 rounded-full p-1.5 shadow-lg"
     >
-      {ROUTES.map((definition) => {
+      {routesNeedingNavigation(DEV_TEST_SCREEN_ENABLED).map((definition) => {
         const active = route === definition.id;
         const Icon = definition.icon;
         return (

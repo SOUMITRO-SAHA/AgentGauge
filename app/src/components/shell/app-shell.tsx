@@ -11,8 +11,8 @@
  *    the stored preference once on mount and writes on every navigation. The
  *    read is guarded — a value that is not a destination is ignored, and a read
  *    that lands after the user has already navigated never overrides them.
- * 3. **⌘1…⌘4 switch destinations.** Desktop-native and cheap; the mapping rule
- *    is `routeForShortcut`, tested in `navigation.test.ts`.
+ * 3. **⌘1…⌘4 switch production destinations.** Dev builds append the Test
+ *    screen as ⌘5; `routeForShortcut` is tested in `navigation.test.ts`.
  */
 
 import * as Effect from "effect/Effect";
@@ -24,12 +24,14 @@ import { AutomationView } from "~/components/views/automation-view";
 import { HomeView } from "~/components/views/home-view";
 import { SettingsView } from "~/components/views/settings-view";
 import { StatsView } from "~/components/views/stats-view";
+import { TestView } from "~/components/views/test-view";
 import { Navigation } from "~/components/shell/navigation";
 import {
   SidebarInset,
   SidebarProvider,
 } from "~/components/ui/sidebar";
 import * as Ipc from "~/lib/ipc";
+import { DEV_TEST_SCREEN_ENABLED } from "~/lib/dev-test-screen";
 import { isRoute, routeForShortcut, type Route } from "~/lib/navigation";
 
 /**
@@ -76,7 +78,10 @@ export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
         setAnalyticsConsent(state.analyticsEnabled);
         // A stored value from an older build whose route set differed must
         // fall back to Home, not break the shell.
-        if (!navigatedRef.current && isRoute(state.lastRoute)) {
+        if (
+          !navigatedRef.current &&
+          isRoute(state.lastRoute, DEV_TEST_SCREEN_ENABLED)
+        ) {
           setRoute(state.lastRoute);
         }
       })
@@ -87,7 +92,7 @@ export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = routeForShortcut(event);
+      const target = routeForShortcut(event, DEV_TEST_SCREEN_ENABLED);
       if (target !== null) {
         event.preventDefault();
         navigate(target);
@@ -116,6 +121,12 @@ export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
             <AutomationView visible={route === "automation"} />
             <StatsView visible={route === "stats"} />
             <SettingsView visible={route === "settings"} />
+            {DEV_TEST_SCREEN_ENABLED && (
+              <TestView
+                visible={route === "test"}
+                onNavigate={navigate}
+              />
+            )}
           </div>
         </SidebarInset>
       </SidebarProvider>

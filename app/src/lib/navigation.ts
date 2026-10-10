@@ -17,6 +17,7 @@
 import type { Icon } from "@phosphor-icons/react";
 import {
   ChartBar,
+  Flask,
   Gear,
   House,
   Pulse,
@@ -26,8 +27,8 @@ import {
  * The destinations, in reading order.
  *
  * `home` is first because it answers "is my window usable right now", which is
- * the question the app exists for. `settings` is last because it is the
- * destination a user reaches for deliberately rather than by browsing.
+ * the question the app exists for. `settings` is last among production
+ * destinations; a separately gated Test route is appended only in dev builds.
  */
 export interface RouteDefinition {
   readonly id: Route;
@@ -66,7 +67,7 @@ export function layoutForWidth(width: number): NavLayout {
 }
 
 /** A destination. */
-export type Route = "home" | "automation" | "stats" | "settings";
+export type Route = "home" | "automation" | "stats" | "settings" | "test";
 
 /** The destination shown on first paint. */
 export const DEFAULT_ROUTE: Route = "home";
@@ -98,14 +99,25 @@ export const ROUTES: ReadonlyArray<RouteDefinition> = [
   },
 ];
 
+export const DEV_ROUTES: ReadonlyArray<RouteDefinition> = [
+  {
+    id: "test",
+    label: "Test",
+    description: "Developer-only screen and flow checks.",
+    icon: Flask,
+  },
+];
+
 /**
  * Every destination, in order.
  *
  * A function rather than a bare array so the exported list cannot be mutated
  * by a consumer and leave the navigation and the route table disagreeing.
  */
-export function routesNeedingNavigation(): ReadonlyArray<RouteDefinition> {
-  return ROUTES;
+export function routesNeedingNavigation(
+  includeDevTestScreen = false,
+): ReadonlyArray<RouteDefinition> {
+  return includeDevTestScreen ? [...ROUTES, ...DEV_ROUTES] : ROUTES;
 }
 
 /**
@@ -115,16 +127,28 @@ export function routesNeedingNavigation(): ReadonlyArray<RouteDefinition> {
  * not a reason to show Home, because the user would then have no way to tell
  * the app had lost their selection.
  */
-export function isRoute(value: unknown): value is Route {
+export function isRoute(
+  value: unknown,
+  includeDevTestScreen = false,
+): value is Route {
   return (
     typeof value === "string" &&
-    ROUTES.some((route) => route.id === (value as Route))
+    routesNeedingNavigation(includeDevTestScreen).some(
+      (route) => route.id === (value as Route),
+    )
   );
 }
 
 /** The label for a destination, with a safe fallback. */
-export function routeLabel(route: Route): string {
-  return ROUTES.find((candidate) => candidate.id === route)?.label ?? "Home";
+export function routeLabel(
+  route: Route,
+  includeDevTestScreen = false,
+): string {
+  return (
+    routesNeedingNavigation(includeDevTestScreen).find(
+      (candidate) => candidate.id === route,
+    )?.label ?? "Home"
+  );
 }
 
 /**
@@ -144,16 +168,18 @@ export interface ShortcutKeyEvent {
 /**
  * The destination a keyboard shortcut selects, or none.
  *
- * ⌘1…⌘4 (control on other keyboards) map to `ROUTES` by position, so the
- * shortcut set is derived from the destination list and cannot claim a
- * destination that does not exist — a fifth route would acquire ⌘5 simply by
- * being added, and never before.
+ * ⌘1…⌘4 map to production destinations. Dev builds may append the Test screen
+ * as ⌘5; the caller explicitly opts into that route set, so it cannot leak into
+ * production shortcuts.
  *
  * Chords with extra modifiers answer `null`: ⌘⇧1 and ⌘⌥1 conventionally mean
  * something else, and stealing them would break the user's other tools. The
  * listener must ignore `null` rather than treat it as Home.
  */
-export function routeForShortcut(event: ShortcutKeyEvent): Route | null {
+export function routeForShortcut(
+  event: ShortcutKeyEvent,
+  includeDevTestScreen = false,
+): Route | null {
   // Boolean() coerces absent flags, so `{ key: "3" }` — no modifiers at all —
   // is rejected the same as `{ metaKey: false }`.
   if (Boolean(event.metaKey) === Boolean(event.ctrlKey)) {
@@ -164,5 +190,5 @@ export function routeForShortcut(event: ShortcutKeyEvent): Route | null {
   }
 
   const index = Number(event.key) - 1;
-  return ROUTES[index]?.id ?? null;
+  return routesNeedingNavigation(includeDevTestScreen)[index]?.id ?? null;
 }

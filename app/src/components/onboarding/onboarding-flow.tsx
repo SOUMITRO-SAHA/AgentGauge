@@ -7,8 +7,11 @@
  * never read just to explain the app.
  *
  * Layout: the flow is fixed to the viewport, so the footer always sits flush
- * with the bottom edge and no step can push the surface into a scroll — the
- * illustration slot shrinks instead.
+ * with the bottom edge and no step can push the surface into a scroll. The
+ * step's header, copy, and illustration center as one group on a single gap
+ * rhythm; the illustration slot grows with the available viewport height but
+ * can contract at the minimum window size rather than stranding the art in a
+ * stretched hole between the copy and the footer.
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
@@ -22,7 +25,6 @@ import type { ReactElement } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  ArrowClockwise,
   Check,
   Sparkle,
 } from "@phosphor-icons/react";
@@ -50,41 +52,41 @@ const STEPS: ReadonlyArray<{
 }> = [
   {
     id: "welcome",
-    title: "A clear view of your coding tools",
+    title: "A clear, honest view of Codex usage",
     blurb:
-      "AgentGauge shows the usage and status information your installed coding tools actually provide. Missing or unsupported data stays clearly marked.",
+      "AgentGauge currently reads usage and reset information reported by your local Codex app-server. Other harness integrations are planned, not assumed.",
     Art: WelcomeArt,
     demo: "demo-welcome",
   },
   {
     id: "statusCheck",
-    title: "Live status, with its source attached",
+    title: "Every reading keeps its source",
     blurb:
-      "The dashboard reads your own Codex CLI directly. Every number it shows carries its source, and nothing is shown without saying where it came from.",
+      "Codex readings keep their source and freshness, with a capture time when available. Missing values stay marked unavailable instead of appearing as zero.",
     Art: StatusArt,
     demo: "demo-status",
   },
   {
     id: "windowRollover",
-    title: "It notices the moment a window resets",
+    title: "Notice when Codex reports a new window",
     blurb:
-      "Your 5-hour window rolls over on the provider's schedule. This app detects that the instant it happens and tells you, instead of making you check.",
+      "AgentGauge compares the reported reset time between polls and marks a changed window. Codex controls the schedule; this app never resets or extends it.",
     Art: RolloverArt,
     demo: "demo-rollover",
   },
   {
     id: "widget",
-    title: "A real macOS widget",
+    title: "Your usage, at a glance",
     blurb:
-      "Add it to your desktop or the menu bar from the system widget gallery. It shows your 5-hour window and weekly limit, and macOS refreshes it for you.",
+      "Add the AgentGauge widget from the macOS widget gallery. It shows Codex's five-hour and weekly readings; macOS manages when the snapshot refreshes.",
     Art: WidgetArt,
     demo: "demo-widget",
   },
   {
     id: "automation",
-    title: "Watching runs in the background",
+    title: "A read-only rollover monitor",
     blurb:
-      "The monitor keeps polling while the app is open. It only ever reads; nothing is sent on your behalf unless you ask for it.",
+      "While AgentGauge is open, the monitor checks Codex's reported usage state. Monitoring never sends a prompt or spends quota.",
     Art: AutomationArt,
     demo: "demo-automation",
   },
@@ -108,7 +110,7 @@ export function OnboardingFlow() {
     onFailure: () => true,
   });
 
-  // `skipped` is the session-local override: once the user skips or finishes,
+  // `visible` is the session-local override: once the user skips or finishes,
   // the flow stays hidden even though Rust still reports it as visible.
   const show = visible && persistedVisible;
 
@@ -135,6 +137,13 @@ export function OnboardingFlow() {
     );
   };
 
+  const dismiss = () => {
+    void Effect.runPromise(Ipc.setOnboardingStep("done", true)).then(
+      refreshProgress,
+    );
+    setVisible(false);
+  };
+
   return (
     <OnboardingBody
       // The flow is the one surface that must render before its read resolves,
@@ -142,14 +151,8 @@ export function OnboardingFlow() {
       stepIndex={index}
       onNext={advance}
       onBack={goBack}
-      onSkip={() => {
-        void Effect.runPromise(Ipc.setOnboardingStep("done", true)).then(
-          refreshProgress,
-        );
-        setVisible(false);
-      }}
-      onFinish={() => setVisible(false)}
-      onRefresh={refreshProgress}
+      onSkip={dismiss}
+      onFinish={dismiss}
     />
   );
 }
@@ -160,14 +163,12 @@ function OnboardingBody({
   onNext,
   onBack,
   onFinish,
-  onRefresh,
 }: {
   readonly stepIndex: number;
   readonly onSkip: () => void;
   readonly onNext: () => void;
   readonly onBack: () => void;
   readonly onFinish: () => void;
-  readonly onRefresh: () => void;
 }) {
   const current = STEPS[Math.min(stepIndex, STEPS.length - 1)];
   const isLast = stepIndex >= STEPS.length - 1;
@@ -180,7 +181,10 @@ function OnboardingBody({
       className="fixed inset-0 z-10 flex flex-col overflow-hidden"
       data-testid="onboarding"
     >
-      <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col justify-center gap-[clamp(1rem,3vw,2rem)] px-[clamp(1rem,4vw,1.5rem)] py-[clamp(1rem,4vw,2.5rem)]">
+      <div
+        className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col justify-center gap-[clamp(1rem,3vw,2rem)] px-[clamp(1rem,4vw,1.5rem)] py-[clamp(1rem,4vw,2.5rem)]"
+        data-testid="onboarding-content"
+      >
         <header className="flex flex-col gap-4">
           <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             <Sparkle className="size-3.5 shrink-0" aria-hidden="true" />
@@ -197,7 +201,7 @@ function OnboardingBody({
         </header>
 
         <section className="flex flex-col gap-3">
-          <h1 className="text-[clamp(1.375rem,5vw,1.875rem)] font-semibold tracking-tight text-foreground">
+          <h1 className="font-display text-[clamp(1.375rem,5vw,1.875rem)] font-semibold tracking-tight text-foreground">
             {current.title}
           </h1>
           <p className="text-[clamp(0.875rem,2.5vw,1rem)] leading-relaxed text-muted-foreground">
@@ -206,27 +210,17 @@ function OnboardingBody({
         </section>
 
         <section
-          className="flex min-h-0 flex-1 items-center justify-center"
+          className="flex items-center justify-center"
           data-testid={current.demo}
         >
-          <div className="h-full max-h-72 w-full">
+          <div className="h-[clamp(8rem,30vh,20rem)] w-full">
             <current.Art />
           </div>
         </section>
       </div>
 
-      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border/70 bg-accent-glass px-[clamp(1rem,4vw,1.5rem)] py-3 backdrop-blur-md">
+      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border/70 bg-accent-glass px-[clamp(1rem,4vw,1.5rem)] py-2 backdrop-blur-md sm:py-3">
         <div className="flex min-w-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0"
-            onClick={onRefresh}
-            data-testid="onboarding-refresh"
-          >
-            <ArrowClockwise aria-hidden="true" />
-            <span className="hidden sm:inline">Re-read</span>
-          </Button>
           <Button
             variant="ghost"
             onClick={onSkip}

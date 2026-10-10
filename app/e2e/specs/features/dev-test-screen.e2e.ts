@@ -49,6 +49,28 @@ async function resizeTo(width: number): Promise<void> {
   throw new Error(`the window never reached a width near ${width}px`);
 }
 
+async function expectOnboardingButtonsFit(): Promise<void> {
+  const overflowingButtons = await browser.execute(() => {
+    const panel = document.querySelector(
+      '[data-testid="test-onboarding-navigation"]',
+    );
+    const grid = panel?.querySelector(".grid");
+    if (!grid) return ["onboarding navigation grid not found"];
+
+    return Array.from(
+      grid.querySelectorAll<HTMLElement>(
+        '[data-testid^="test-onboarding-step-"]',
+      ),
+    )
+      .filter((button) => button.scrollWidth > button.clientWidth)
+      .map(
+        (button) =>
+          `${button.dataset.testid}: ${button.scrollWidth}px > ${button.clientWidth}px`,
+      );
+  });
+  expect(overflowingButtons).toEqual([]);
+}
+
 after(() => {
   restoreOnboardingStore();
 });
@@ -66,6 +88,7 @@ describe("developer test screen", () => {
 
     await clickDisplayed('[data-testid="nav-test"]');
     await expectDisplayed('[data-testid="view-test"]');
+    await expectOnboardingButtonsFit();
     await browser.saveScreenshot(`${OUT}/wide.png`);
     await expect($('[data-testid="test-safety-note"]')).toHaveText(
       expect.stringContaining("never send a prompt or consume usage"),
@@ -82,6 +105,7 @@ describe("developer test screen", () => {
       await resizeTo(width);
       await expectDisplayed('[data-testid="nav-test"]');
       await expectTestFollowsSettings();
+      await expectOnboardingButtonsFit();
     }
     await browser.saveScreenshot(`${OUT}/compact.png`);
   });

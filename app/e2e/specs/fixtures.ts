@@ -701,9 +701,14 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
  * The nudge is a real gesture, so the atoms are refreshed through the same path
  * a user's click would take rather than by poking the registry.
  */
-export async function settle(
-  nudge: "onboarding-refresh" | "refresh-usage" | "refresh-widget",
-): Promise<void> {
+type UiNudge =
+  | "test-onboarding-replay"
+  | "refresh-provider"
+  | "refresh-usage"
+  | "refresh-automation"
+  | "refresh-widget";
+
+export async function settle(nudge: UiNudge): Promise<void> {
   const target = await firstDisplayed(`[data-testid="${nudge}"]`);
   if (target) {
     // DOM-side click. The driver's native click path was implicated in the
@@ -778,9 +783,8 @@ export async function dispatchCalls(): Promise<
  * Installs fixtures, then drives the app onto them.
  *
  * The app is loaded *before* the mock exists, so its first read has already
- * happened by then. Rather than reload (which would discard the mock), the
- * refresh control is used: the onboarding flow's "Re-read" covers every atom
- * the app shows, so one click settles the whole surface.
+ * happened by then. Rather than reload (which would discard the mock), real
+ * onboarding navigation and each panel's own refresh action nudge the atoms.
  *
  * The wait is explicit rather than a fixed pause: the refresh click only
  * *starts* a re-read, and asserting immediately after would race the very
@@ -816,6 +820,15 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
 
   await installDispatch(fixtures);
 
+  if (fixtures.visible) {
+    if (await firstDisplayed('[data-testid="onboarding"]')) {
+      await clickDisplayed('[data-testid="onboarding-skip"]');
+    }
+    await expectDisplayed('[data-testid="app-shell"]');
+    await clickDisplayed('[data-testid="nav-test"]');
+    await settle("test-onboarding-replay");
+  }
+
   // Every atom the surface shows is nudged, not just the first one found.
   // Each panel owns its own refresh control and reads its own atom; since the
   // navigation, several of those controls live on other destinations, so the
@@ -825,12 +838,9 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
   // document, so the first pass can complete against the previous page state.
   // The second pass re-issues every read through whatever mock is registered
   // now.
-  // The onboarding flow's own re-read comes first ONLY while the shell is the
-  // visible surface. Clicking it while the flow is up is harmless for the flow
-  // itself, but the later destinations cannot be reached then (the shell is
-  // hidden), and reaching for them is what dismisses it.
+  // The test-only replay control above makes visible-onboarding boots
+  // deterministic even when a same-URL navigation preserves session atoms.
   const nudges = [
-    { view: null, control: "onboarding-refresh" },
     ...(fixtures.visible
       ? []
       : [
@@ -841,7 +851,7 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
         ]),
   ] as ReadonlyArray<{
     view: "home" | "automation" | "settings" | null;
-    control: string;
+    control: UiNudge;
   }>;
   for (let pass = 0; pass < 2; pass += 1) {
     for (const { view, control } of nudges) {
