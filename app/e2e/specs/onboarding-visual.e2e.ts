@@ -89,7 +89,7 @@ async function resizeTo(width: number, height: number): Promise<void> {
 }
 
 /** Asserts the no-scroll and flush-footer invariants for the current size. */
-async function assertFits(): Promise<void> {
+async function assertFits(): Promise<number> {
   const fit = await browser.execute(() => {
     const doc = document.documentElement;
     const flow = document.querySelector('[data-testid="onboarding"]');
@@ -97,9 +97,18 @@ async function assertFits(): Promise<void> {
     const footer = flow?.querySelector("footer");
     const copy = content?.querySelector("section p");
     const art = content?.querySelector('[data-testid^="demo-"]');
+    const progress = content?.querySelector('[data-testid="onboarding-progress"]');
+    const progressLabel = content?.querySelector("header > div");
+    const title = content?.querySelector("h1");
     const copyBottom = copy?.getBoundingClientRect().bottom ?? -1;
     const artTop = art?.getBoundingClientRect().top ?? -1;
     const artBottom = art?.getBoundingClientRect().bottom ?? -1;
+    const progressTop = progress?.getBoundingClientRect().top ?? -1;
+    const progressBottom = progress?.getBoundingClientRect().bottom ?? -1;
+    const progressLabelBottom =
+      progressLabel?.getBoundingClientRect().bottom ?? -1;
+    const titleTop = title?.getBoundingClientRect().top ?? -1;
+    const artWidth = art?.querySelector("svg")?.getBoundingClientRect().width ?? -1;
     const footerTop = footer?.getBoundingClientRect().top ?? -1;
     return {
       documentOverflowY: doc.scrollHeight - doc.clientHeight,
@@ -108,8 +117,11 @@ async function assertFits(): Promise<void> {
       contentOverflowY: content
         ? content.scrollHeight - content.clientHeight
         : -1,
+      labelProgressGap: progressTop - progressLabelBottom,
+      progressTitleGap: titleTop - progressBottom,
       copyArtGap: artTop - copyBottom,
       artFooterGap: footerTop - artBottom,
+      artWidth,
       footerGap: footer
         ? window.innerHeight - footer.getBoundingClientRect().bottom
         : -1,
@@ -119,16 +131,42 @@ async function assertFits(): Promise<void> {
   expect(fit.documentOverflowX).toBeLessThanOrEqual(0);
   expect(fit.flowOverflowY).toBeLessThanOrEqual(0);
   expect(fit.contentOverflowY).toBeLessThanOrEqual(0);
+  expect(fit.labelProgressGap).toBeGreaterThanOrEqual(20);
+  expect(fit.progressTitleGap).toBeGreaterThanOrEqual(16);
   expect(fit.copyArtGap).toBeGreaterThanOrEqual(16);
   expect(fit.copyArtGap).toBeLessThanOrEqual(32);
   expect(fit.artFooterGap).toBeGreaterThanOrEqual(0);
   expect(Math.abs(fit.footerGap)).toBeLessThanOrEqual(1);
+  return fit.artWidth;
+}
+
+async function assertProgress(stepNumber: number): Promise<void> {
+  const progress = await browser.execute(() => {
+    const root = document.querySelector(
+      '[data-testid="onboarding-progress"]',
+    );
+    const indicator = root?.querySelector<HTMLElement>(
+      '[data-slot="progress-indicator"]',
+    );
+    return {
+      value: root?.getAttribute("aria-valuenow"),
+      max: root?.getAttribute("aria-valuemax"),
+      transform: indicator?.style.transform,
+    };
+  });
+  expect(progress.value).toBe(String(stepNumber));
+  expect(progress.max).toBe(String(STEPS.length));
+  const offset = 100 - (stepNumber / STEPS.length) * 100;
+  expect(progress.transform).toBe(
+    `translateX(${offset === 0 ? 0 : -offset}%)`,
+  );
 }
 
 describe("onboarding visual pass", () => {
   it("renders every step at every width without scrolling", async () => {
     fs.mkdirSync(OUT, { recursive: true });
     await onboardingVisible();
+    let compactArtWidth = 0;
 
     for (const width of WIDTHS) {
       for (const height of HEIGHTS) {
@@ -144,7 +182,15 @@ describe("onboarding visual pass", () => {
           expect(
             await $(`[data-testid="${step.demo}"] svg`).isExisting(),
           ).toBe(true);
-          await assertFits();
+          await assertProgress(index + 1);
+          const artWidth = await assertFits();
+          if (width === WIDTHS[0] && height === HEIGHTS[0] && index === 0) {
+            compactArtWidth = artWidth;
+          }
+          if (width === WIDTHS[WIDTHS.length - 1] && height === HEIGHTS[1] && index === 0) {
+            expect(artWidth).toBeGreaterThan(380);
+            expect(artWidth).toBeGreaterThan(compactArtWidth);
+          }
           await browser.saveScreenshot(
             `${OUT}/step${index + 1}-${width}-${height}.png`,
           );

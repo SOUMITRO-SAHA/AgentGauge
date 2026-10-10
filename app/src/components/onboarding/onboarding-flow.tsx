@@ -185,7 +185,7 @@ function OnboardingBody({
         className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col justify-center gap-[clamp(1rem,3vw,2rem)] px-[clamp(1rem,4vw,1.5rem)] py-[clamp(1rem,4vw,2.5rem)]"
         data-testid="onboarding-content"
       >
-        <header className="flex flex-col gap-4">
+        <header className="flex flex-col gap-5">
           <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             <Sparkle className="size-3.5 shrink-0" aria-hidden="true" />
             <span className="tabular">
@@ -213,7 +213,7 @@ function OnboardingBody({
           className="flex items-center justify-center"
           data-testid={current.demo}
         >
-          <div className="h-[clamp(8rem,30vh,20rem)] w-full">
+          <div className="mx-auto aspect-[8/5] w-[min(100%,60vw,58vh)]">
             <current.Art />
           </div>
         </section>
