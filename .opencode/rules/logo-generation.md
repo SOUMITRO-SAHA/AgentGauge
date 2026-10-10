@@ -5,22 +5,26 @@ project (AgentGauge).
 
 ## Adopted brand direction — AgentGauge
 
-The user rejected the prior colorful gauge mark and directed a **monochrome SVG
-only** revision on 2026-10-10. The current SVG is a geometric `A` monogram with a
+The user rejected the prior colorful gauge mark and directed a **monochrome SVG**
+revision on 2026-10-10. The current master SVG is a geometric `A` monogram with a
 segmented crossbar suggesting measured usage. It uses one neutral foreground
 color per color scheme on a transparent canvas: graphite (`#17191D`) for light
-scheme and near-white (`#F4F4F5`) for dark scheme. It contains no gauge arc,
-needle, accent colors, background tile, or text baked into the artwork.
+scheme and near-white (`#F4F4F5`) for dark scheme. Do not add a background tile
+to the master SVG. Native desktop icons are a separate composition using only
+the approved monochrome theme: brand ink (`#111827`) full-bleed background and
+near-white (`#F4F4F5`) A mark, including its segmented meter bars. Do not add a
+teal accent to this icon theme.
 
 - Name: **AgentGauge**. Descriptor remains “A local usage and status dashboard
   for AI coding tools.”
 - Keep clear space around the mark of at least 12% of its canvas. Preserve the
   monogram and segmented crossbar at small sizes; do not add text.
 
-This SVG-only revision does not change the app's UI theme tokens or regenerate
-the existing PNG/ICNS/ICO app icons; the user requested only the SVG logo. Do not
-change the mark direction without confirming with the user. Do not restate
-another project's brand values.
+The monochrome master SVG revision does not change the app's UI theme tokens.
+The desktop icon generator adds its background only to a temporary SVG and then
+uses Tauri to generate the complete packaged icon set. Do not change the mark
+direction without confirming with the user. Do not restate another project's
+brand values.
 
 ## Design constraints (unless the user overrides)
 

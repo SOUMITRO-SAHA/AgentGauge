@@ -9,6 +9,7 @@ import {
   copyDesktopIcons,
   desktopIconBackground,
   desktopIconFiles,
+  desktopIconMarkColor,
 } from "../../scripts/generate-icons";
 
 const temporaryDirectories: string[] = [];
@@ -26,14 +27,18 @@ afterEach(() => {
 });
 
 describe("desktop icon generation", () => {
-  it("adds an opaque brand background and high-contrast foreground without changing the mark", () => {
-    const source = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><style>.mark{fill:#17191d}</style><path class="mark" d="M1 2z"/></svg>';
+  it("uses only the ink background and monochrome near-white mark", () => {
+    const source = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><style>.mark{fill:#17191d}</style><path class="mark" d="M1 2z"/><g class="mark"><path d="M1 2z"/></g></svg>';
 
     const composed = composeDesktopIconSvg(source);
 
+    expect(desktopIconBackground).toBe("#111827");
+    expect(desktopIconMarkColor).toBe("#F4F4F5");
     expect(composed).toContain(`<rect width="100%" height="100%" fill="${desktopIconBackground}"/>`);
-    expect(composed).toContain(".mark{fill:#F4F4F5!important}");
+    expect(composed).toContain(`.mark{fill:${desktopIconMarkColor}!important}`);
     expect(composed).toContain('<path class="mark" d="M1 2z"/>');
+    expect(composed).toContain('<g class="mark">');
+    expect(composed).not.toContain("#25C6B7");
   });
 
   it("copies all desktop icon files and excludes mobile outputs", () => {

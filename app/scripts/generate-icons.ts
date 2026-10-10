@@ -34,7 +34,8 @@ export const desktopIconFiles = [
   "Square310x310Logo.png",
 ] as const;
 
-export const desktopIconBackground = "#0F766E";
+export const desktopIconBackground = "#111827";
+export const desktopIconMarkColor = "#F4F4F5";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -46,7 +47,7 @@ export function composeDesktopIconSvg(sourceSvg: string) {
   return sourceSvg.replace(
     /<svg\b[^>]*>/i,
     (svgTag) =>
-      `${svgTag}<style>.mark{fill:#F4F4F5!important}</style><rect width="100%" height="100%" fill="${desktopIconBackground}"/>`,
+      `${svgTag}<style>.mark{fill:${desktopIconMarkColor}!important}</style><rect width="100%" height="100%" fill="${desktopIconBackground}"/>`,
   );
 }
 
