@@ -40,18 +40,13 @@ fn needs_manual_icon(exe: &Path) -> bool {
 
 /// Gives the running process its Dock tile, if it does not already have one.
 ///
-/// Called from the composition root's `setup`, which runs on the main thread;
-/// `apply` re-checks that rather than trusting the caller.
+/// Called from the composition root on `RunEvent::Ready`, which is the first
+/// point at which the Dock tile exists; `apply` re-checks the thread rather
+/// than trusting the caller.
 pub fn install() {
     let Ok(exe) = std::env::current_exe() else {
-        eprintln!("[diag] current_exe failed");
         return;
     };
-    eprintln!(
-        "[diag] install() exe={} needs_manual_icon={}",
-        exe.display(),
-        needs_manual_icon(&exe)
-    );
     if needs_manual_icon(&exe) {
         apply(ICON);
     }
@@ -59,22 +54,16 @@ pub fn install() {
 
 /// Hands the icon bytes to `NSApplication`, which is what the Dock tile reads.
 fn apply(icon: &[u8]) {
-    eprintln!("[diag] apply() entered, bytes={}", icon.len());
     let Some(marker) = MainThreadMarker::new() else {
-        eprintln!("[diag] NOT on main thread, bailing");
         return;
     };
-    eprintln!("[diag] on main thread");
     let Some(image) = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(icon)) else {
-        eprintln!("[diag] NSImage::initWithData returned None");
         return;
     };
-    eprintln!("[diag] NSImage built size={:?}", image.size());
     let app = NSApplication::sharedApplication(marker);
     // SAFETY: `image` is a retained `NSImage` outliving this call, and
     // `setApplicationIconImage:` only reads it.
     unsafe { app.setApplicationIconImage(Some(&image)) };
-    eprintln!("[diag] setApplicationIconImage done");
 }
 
 #[cfg(test)]

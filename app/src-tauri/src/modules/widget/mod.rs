@@ -37,6 +37,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::shared::bundle::bundle_root;
 use crate::shared::domain::{Freshness, UsageSnapshot};
 use crate::shared::error::Error;
 
@@ -471,27 +472,6 @@ pub fn parse_version(version: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
-/// The `.app` root for a running executable.
-///
-/// A bundled executable lives at `<App>.app/Contents/MacOS/<name>`, so the root is
-/// two levels up. `None` for an unbundled binary, which is what `tauri dev`
-/// runs.
-pub fn bundle_root(exe: &Path) -> Option<PathBuf> {
-    let macos_dir = exe.parent()?;
-    if macos_dir.file_name()? != "MacOS" {
-        return None;
-    }
-    let contents = macos_dir.parent()?;
-    if contents.file_name()? != "Contents" {
-        return None;
-    }
-    let root = contents.parent()?;
-    if root.extension()?.to_str()? != "app" {
-        return None;
-    }
-    Some(root.to_path_buf())
-}
-
 /// Whether the widget extension is inside the bundle of the running binary.
 pub fn extension_is_embedded() -> bool {
     std::env::current_exe()
@@ -713,18 +693,5 @@ mod tests {
         assert_eq!(parse_version("27.0.1"), Some((27, 0)));
         assert_eq!(parse_version("26"), Some((26, 0)));
         assert_eq!(parse_version("beta"), None);
-    }
-
-    #[test]
-    fn a_bundled_executable_is_recognised_and_a_dev_binary_is_not() {
-        let bundled = Path::new("/Applications/AgentGauge.app/Contents/MacOS/agentgauge-daemon");
-        assert_eq!(
-            bundle_root(bundled),
-            Some(PathBuf::from("/Applications/AgentGauge.app"))
-        );
-
-        // `tauri dev` runs the raw binary with no bundle around it.
-        let unbundled = Path::new("/repo/target/debug/agentgauge-daemon");
-        assert_eq!(bundle_root(unbundled), None);
     }
 }
