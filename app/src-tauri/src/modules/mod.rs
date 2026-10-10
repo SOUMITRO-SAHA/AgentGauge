@@ -4,10 +4,13 @@
 //! stay private so they can be replaced without touching callers. Sibling
 //! modules never import each other — they meet at the traits in `shared/`.
 
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub mod app_icon;
 pub mod automation;
 pub mod cli_detection;
 pub mod commands;
 pub mod onboarding;
+pub mod opencode;
 pub mod providers;
 pub mod settings;
 pub mod widget;

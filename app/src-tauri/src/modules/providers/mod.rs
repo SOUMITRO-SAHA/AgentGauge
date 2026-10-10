@@ -15,12 +15,21 @@ pub(crate) mod codex;
 #[cfg(not(any(test, feature = "testkit")))]
 mod codex;
 
+pub(crate) mod coding_plan;
+pub(crate) mod http;
+pub(crate) mod kimi;
+pub(crate) mod minimax;
+pub(crate) mod zai;
+
 use crate::shared::domain::{AccountUsage, PlanKind, ProviderKind, UsageSnapshot};
 use crate::shared::error::{Error, ErrorKind};
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
 
 use codex::CODEX_EXECUTABLE;
 pub use codex::{CodexProvider, PING_PROMPT};
+use kimi::KimiProvider;
+use minimax::MinimaxProvider;
+use zai::ZaiProvider;
 
 /// Resolves a provider by kind and owns its lifetime.
 ///
@@ -34,10 +43,16 @@ impl ProviderRegistry {
     ///
     /// The Codex executable is resolved lazily on first use, so launching the
     /// app without Codex installed still yields a usable "not installed"
-    /// state rather than a failed start-up.
+    /// state rather than a failed start-up. The coding-plan providers are the
+    /// same: they ask OpenCode what is connected only when read.
     pub fn new(now_ms: i64) -> Self {
         Self {
-            providers: vec![Box::new(CodexProvider::new(CODEX_EXECUTABLE, now_ms))],
+            providers: vec![
+                Box::new(CodexProvider::new(CODEX_EXECUTABLE, now_ms)),
+                Box::new(ZaiProvider::new(now_ms)),
+                Box::new(MinimaxProvider::new(now_ms)),
+                Box::new(KimiProvider::new(now_ms)),
+            ],
         }
     }
 
@@ -99,23 +114,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registers_codex() {
+    fn registers_every_supported_provider() {
         let registry = ProviderRegistry::new(0);
-        assert_eq!(registry.kinds(), vec![ProviderKind::Codex]);
+        assert_eq!(
+            registry.kinds(),
+            vec![
+                ProviderKind::Codex,
+                ProviderKind::Zai,
+                ProviderKind::Minimax,
+                ProviderKind::Kimi,
+            ]
+        );
     }
 
     #[test]
     fn reports_status_for_every_provider() {
         let registry = ProviderRegistry::new(0);
-        assert_eq!(registry.status().len(), 1);
+        assert_eq!(registry.status().len(), 4);
+    }
+
+    #[test]
+    fn every_registered_status_speaks_for_its_own_kind() {
+        // A status row must never describe another provider's transport.
+        let registry = ProviderRegistry::new(0);
+        for status in registry.status() {
+            assert_eq!(
+                registry.find(status.kind).is_ok(),
+                true,
+                "{} reported a status without a provider",
+                status.kind.as_str()
+            );
+        }
     }
 
     #[test]
     fn rejects_an_unknown_provider_kind() {
-        // Only one variant exists, so this exercises the guard itself through
-        // the registry rather than a fabricated kind.
+        // The registry guard itself is exercised through a kind that exists;
+        // an unknown kind cannot be constructed because ProviderKind is a
+        // closed enum whose every variant is registered above.
         let registry = ProviderRegistry::new(0);
-        let found = registry.find(ProviderKind::Codex);
-        assert!(found.is_ok());
+        for kind in registry.kinds() {
+            assert!(registry.find(kind).is_ok());
+        }
     }
 }

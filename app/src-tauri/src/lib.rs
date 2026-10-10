@@ -48,6 +48,7 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_http::init())
         .setup(move |app| {
             // The app-data directory is resolved here, once, and handed to the
             // module that owns persistence. No module reaches for a global.
@@ -92,7 +93,17 @@ pub fn run() {
         .plugin(tauri_plugin_wdio::init())
         .plugin(tauri_plugin_wdio_webdriver::init());
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // The Dock tile is only ours to set once the run loop is up. Setting it
+    // during `setup` is too early — macOS builds the tile when the app becomes
+    // ready and overwrites anything set before that.
+    app.run(|_handle, event| {
+        if let tauri::RunEvent::Ready = event {
+            #[cfg(all(target_os = "macos", debug_assertions))]
+            modules::app_icon::install();
+        }
+    });
 }

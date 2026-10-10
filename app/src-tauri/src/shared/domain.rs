@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
     Codex,
+    Zai,
+    Minimax,
+    Kimi,
 }
 
 impl ProviderKind {
@@ -19,6 +22,29 @@ impl ProviderKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Codex => "codex",
+            Self::Zai => "zai",
+            Self::Minimax => "minimax",
+            Self::Kimi => "kimi",
+        }
+    }
+
+    /// The short name a tab or label renders for this provider.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Codex => "Codex",
+            Self::Zai => "Z.AI",
+            Self::Minimax => "MiniMax",
+            Self::Kimi => "Kimi",
+        }
+    }
+
+    /// The provenance string stamped on this provider's readings.
+    pub const fn source(self) -> &'static str {
+        match self {
+            Self::Codex => SOURCE_APP_SERVER,
+            Self::Zai => "z.ai coding plan",
+            Self::Minimax => "minimax token plan",
+            Self::Kimi => "kimi code plan",
         }
     }
 }
@@ -124,6 +150,10 @@ pub enum PlanKind {
     Pro,
     ProLite,
     ProMax,
+    /// The Z.AI coding plan's `lite` tier, distinct from OpenAI's `proLite`.
+    Lite,
+    /// The Z.AI coding plan's `max` tier.
+    Max,
     Team,
     Business,
     Enterprise,
@@ -143,6 +173,8 @@ impl PlanKind {
             "pro" => Self::Pro,
             "prolite" => Self::ProLite,
             "promax" => Self::ProMax,
+            "lite" => Self::Lite,
+            "max" => Self::Max,
             "team" => Self::Team,
             "business"
             | "self_serve_business_prolite"
@@ -201,7 +233,7 @@ impl UsageSnapshot {
             provider,
             freshness: Freshness::Unavailable,
             fetched_at: None,
-            source: SOURCE_APP_SERVER.to_string(),
+            source: provider.source().to_string(),
             reason: Some(reason.into()),
             plan: None,
             permission: UsagePermission::Unknown,
@@ -214,6 +246,44 @@ impl UsageSnapshot {
 
 /// Canonical origin string for provider readings.
 pub const SOURCE_APP_SERVER: &str = "codex app-server";
+
+/// Where a subscription's credential reached this machine.
+///
+/// Read from OpenCode's own stores; this app never holds or writes a
+/// credential itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CredentialOrigin {
+    /// A credential row in OpenCode's store.
+    Stored,
+    /// A live environment variable named by the provider catalog.
+    Environment,
+    /// OpenCode reports the provider as available without a stored credential;
+    /// the exact origin was not determined.
+    Unknown,
+}
+
+/// A coding subscription the user connected through OpenCode.
+///
+/// Describes what OpenCode itself reports — this app adds no credential
+/// handling of its own. `integration` is `None` for a connected plan this build
+/// cannot read usage for, which the UI must render as "no reading" rather than
+/// fabricating a number.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodingSubscription {
+    /// The models.dev catalog id, e.g. `"zai-coding-plan"`.
+    pub provider_id: String,
+    /// The catalog's full display name, e.g. `"Z.AI Coding Plan"`.
+    pub name: String,
+    /// The short label a tab renders, e.g. `"Z.AI"`.
+    pub label: String,
+    /// The usage-reading integration for this plan, when one exists.
+    pub integration: Option<ProviderKind>,
+    pub credential: CredentialOrigin,
+    /// The plan's API base URL, when the catalog carries one.
+    pub api_base: Option<String>,
+}
 
 /// Classifies a window by duration, mirroring the fuzzy buckets Codex's own
 /// status line uses (`codex-rs/tui/src/chatwidget/rate_limits.rs`).
@@ -352,6 +422,8 @@ mod tests {
     fn maps_known_plans() {
         assert_eq!(PlanKind::from_wire("pro"), PlanKind::Pro);
         assert_eq!(PlanKind::from_wire("team"), PlanKind::Team);
+        assert_eq!(PlanKind::from_wire("lite"), PlanKind::Lite);
+        assert_eq!(PlanKind::from_wire("max"), PlanKind::Max);
     }
 
     #[test]
@@ -381,6 +453,43 @@ mod tests {
         let json = serde_json::to_value(ProviderKind::Codex).expect("serializes");
         assert_eq!(json, serde_json::json!("codex"));
         assert_eq!(ProviderKind::Codex.as_str(), "codex");
+    }
+
+    #[test]
+    fn every_provider_tag_matches_the_serde_wire_value() {
+        for kind in [ProviderKind::Zai, ProviderKind::Minimax, ProviderKind::Kimi] {
+            assert_eq!(
+                serde_json::to_value(kind).expect("serializes"),
+                serde_json::json!(kind.as_str()),
+                "{} disagreed with serde",
+                kind.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn an_unavailable_snapshot_names_its_own_source() {
+        // A provider that never spoke must not claim it read a different
+        // provider's transport.
+        let snapshot = UsageSnapshot::unavailable(ProviderKind::Zai, "not connected");
+        assert_eq!(snapshot.source, ProviderKind::Zai.source());
+        assert_ne!(snapshot.source, ProviderKind::Codex.source());
+    }
+
+    #[test]
+    fn subscription_round_trips_camel_cased() {
+        let subscription = CodingSubscription {
+            provider_id: "zai-coding-plan".to_string(),
+            name: "Z.AI Coding Plan".to_string(),
+            label: "Z.AI".to_string(),
+            integration: Some(ProviderKind::Zai),
+            credential: CredentialOrigin::Stored,
+            api_base: Some("https://api.z.ai/api/coding/paas/v4".to_string()),
+        };
+        let json = serde_json::to_value(&subscription).expect("serializes");
+        assert_eq!(json["providerId"], "zai-coding-plan");
+        assert_eq!(json["credential"], "stored");
+        assert_eq!(json["integration"], "zai");
     }
 
     #[test]

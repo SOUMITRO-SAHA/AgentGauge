@@ -93,8 +93,46 @@ async function invoke(
 // Domain types
 // ---------------------------------------------------------------------------
 
-export const ProviderKind = Schema.Literals(["codex"]);
+export const PROVIDER_KINDS = ["codex", "zai", "minimax", "kimi"] as const;
+export const ProviderKind = Schema.Literals([...PROVIDER_KINDS]);
 export type ProviderKind = typeof ProviderKind.Type;
+
+/**
+ * Whether a tab value selects a provider this build can read.
+ *
+ * A connected plan with no reader uses its catalog id as the tab value, so
+ * this guard is what keeps a fetch from being attempted for it.
+ */
+export function isProviderKind(value: string): value is ProviderKind {
+  return (PROVIDER_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Where a subscription's credential reached the machine, as OpenCode reports
+ * it. The credential itself never crosses this boundary.
+ */
+export const CredentialOrigin = Schema.Literals([
+  "stored",
+  "environment",
+  "unknown",
+]);
+export type CredentialOrigin = typeof CredentialOrigin.Type;
+
+/**
+ * A coding subscription the user connected through OpenCode.
+ *
+ * `integration` is absent when this build cannot read that plan's usage; the
+ * tab for it must say so rather than render an invented number.
+ */
+export const CodingSubscription = Schema.Struct({
+  providerId: Schema.String,
+  name: Schema.String,
+  label: Schema.String,
+  integration: Schema.NullOr(ProviderKind),
+  credential: CredentialOrigin,
+  apiBase: Schema.NullOr(Schema.String),
+});
+export type CodingSubscription = typeof CodingSubscription.Type;
 
 export const CliToolStatus = Schema.Struct({
   tool: Schema.Literals(["codex", "openCode"]),
@@ -293,6 +331,7 @@ export const AppRequest = Schema.Union([
   Schema.Struct({ type: Schema.Literal("hello") }),
   Schema.Struct({ type: Schema.Literal("providerStatus") }),
   Schema.Struct({ type: Schema.Literal("cliDetection") }),
+  Schema.Struct({ type: Schema.Literal("openCodeSubscriptions") }),
   Schema.Struct({ type: Schema.Literal("readUsage") }),
   Schema.Struct({ type: Schema.Literal("readUsageFor"), provider: ProviderKind }),
   Schema.Struct({ type: Schema.Literal("readAccountUsage"), provider: ProviderKind }),
@@ -339,6 +378,10 @@ export const AppResponse = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("cliDetections"),
     tools: Schema.Array(CliToolStatus),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("openCodeSubscriptions"),
+    subscriptions: Schema.Array(CodingSubscription),
   }),
   Schema.Struct({
     type: Schema.Literal("usage"),
@@ -447,6 +490,19 @@ export const getProviderStatus = () =>
 export const getCliDetection = () =>
   request({ type: "cliDetection" }).pipe(
     Effect.map((response) => expectType(response, "cliDetections").tools),
+  );
+
+/**
+ * Lists the coding subscriptions the user connected through OpenCode.
+ *
+ * An empty list is a real answer — OpenCode absent, or nothing connected —
+ * not an error, so the Codex tab stays usable either way.
+ */
+export const getOpenCodeSubscriptions = () =>
+  request({ type: "openCodeSubscriptions" }).pipe(
+    Effect.map(
+      (response) => expectType(response, "openCodeSubscriptions").subscriptions,
+    ),
   );
 
 /**

@@ -4,6 +4,7 @@
 //! the provider trait, and the clock. It never imports from `modules/`, and it
 //! holds no capability of its own.
 
+pub mod bundle;
 pub mod clock;
 pub mod domain;
 pub mod error;

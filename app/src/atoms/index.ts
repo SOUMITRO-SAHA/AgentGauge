@@ -11,6 +11,7 @@
  */
 
 import * as Atom from "effect/unstable/reactivity/Atom";
+import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as Ipc from "~/lib/ipc";
@@ -29,12 +30,30 @@ const runtime = Atom.runtime(Layer.empty);
 export const cliDetectionAtom = runtime.atom(Ipc.getCliDetection);
 
 /**
- * Reads usage for every provider.
- *
- * A provider that fails becomes an `unavailable` snapshot in Rust, so one broken
- * provider never blanks the dashboard.
+ * The coding subscriptions OpenCode reports, which decide which tabs exist
+ * beside Codex on the Home usage panel.
  */
-export const usageAtom = runtime.atom(Ipc.getUsage);
+export const subscriptionsAtom = runtime.atom(Ipc.getOpenCodeSubscriptions);
+
+/**
+ * Which usage tab is showing — a `ProviderKind` value, or the catalog id of a
+ * connected plan this build cannot read.
+ */
+export const selectedTabAtom = Atom.make("codex");
+
+/**
+ * The usage for whichever tab is showing.
+ *
+ * Reads the selection, so a tab switch re-runs this atom and fetches that one
+ * provider. A tab with no reader never fetches; its panel renders the honest
+ * "cannot read this yet" state instead.
+ */
+export const selectedUsageAtom = runtime.atom((get) => {
+  const tab = get(selectedTabAtom);
+  return Ipc.isProviderKind(tab)
+    ? Ipc.getUsageFor(tab)
+    : Effect.succeed<readonly Ipc.UsageSnapshot[]>([]);
+});
 
 /** Codex account activity; callers must gate reads behind explicit consent. */
 export const accountUsageAtom = runtime.atom(Ipc.getAccountUsage);

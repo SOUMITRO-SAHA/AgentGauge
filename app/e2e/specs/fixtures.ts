@@ -48,8 +48,9 @@ import { expect, browser, $, $$ } from "@wdio/globals";
 /** Stores fixture data in the page, readable by the closure-free mock. */
 async function storeFixtures(fixtures: DispatchFixtures): Promise<boolean> {
   return browser.execute((data) => {
-    (window as unknown as { __ismFixtures__?: DispatchFixtures })
-      .__ismFixtures__ = data;
+    (
+      window as unknown as { __ismFixtures__?: DispatchFixtures }
+    ).__ismFixtures__ = data;
     return true;
   }, fixtures);
 }
@@ -219,15 +220,15 @@ export async function expectDisplayed(
   timeoutMs = 10_000,
 ): Promise<void> {
   if (await pollForDisplayed(selector, timeoutMs)) return;
-  throw new Error(
-    `expected ${selector} to be displayed within ${timeoutMs}ms`,
-  );
+  throw new Error(`expected ${selector} to be displayed within ${timeoutMs}ms`);
 }
 
 /** Resolves once the native window is listed, retrying while it is absent. */
 async function waitForWindow(): Promise<void> {
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const windows = await browser.getWindowHandles().catch(() => [] as string[]);
+    const windows = await browser
+      .getWindowHandles()
+      .catch(() => [] as string[]);
     if (windows.length > 0) return;
     await browser.pause(500);
   }
@@ -266,7 +267,9 @@ export function seedOnboardingStore(visible: boolean): void {
   fs.writeFileSync(
     file,
     JSON.stringify(
-      visible ? { step: "welcome", dismissed: false } : { step: "done", dismissed: true },
+      visible
+        ? { step: "welcome", dismissed: false }
+        : { step: "done", dismissed: true },
     ),
   );
 }
@@ -350,11 +353,74 @@ export function unavailableSnapshot() {
   };
 }
 
+/** A connected coding plan, as OpenCode would report it. */
+export function subscription(overrides: Record<string, unknown> = {}) {
+  return {
+    providerId: "zai-coding-plan",
+    name: "Z.AI Coding Plan",
+    label: "Z.AI",
+    integration: "zai",
+    credential: "stored",
+    apiBase: "https://api.z.ai/api/coding/paas/v4",
+    ...overrides,
+  };
+}
+
+/** A live-looking Z.AI reading: 16% used of the 5-hour window. */
+export function zaiSnapshot(overrides: Record<string, unknown> = {}) {
+  const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+  const fiveHour = {
+    label: "5h",
+    usedPercent: 16,
+    durationMins: 300,
+    resetsAt,
+    remainingPercent: 84,
+  };
+  return {
+    provider: "zai",
+    freshness: "live",
+    fetchedAt: Date.now(),
+    source: "z.ai coding plan",
+    reason: null,
+    plan: "pro",
+    permission: "unknown",
+    windows: [
+      fiveHour,
+      {
+        label: "weekly",
+        usedPercent: 35,
+        durationMins: 10080,
+        resetsAt: Math.floor(Date.now() / 1000) + 86400,
+        remainingPercent: 65,
+      },
+    ],
+    fiveHour,
+    weekly: {
+      label: "weekly",
+      usedPercent: 35,
+      durationMins: 10080,
+      resetsAt: Math.floor(Date.now() / 1000) + 86400,
+      remainingPercent: 65,
+    },
+    ...overrides,
+  };
+}
+
 export interface DispatchFixtures {
   readonly visible: boolean;
   readonly usage: Record<string, unknown>;
   readonly installed: boolean;
   readonly version: string | null;
+  /**
+   * Coding subscriptions OpenCode reports, as the `openCodeSubscriptions`
+   * reply would carry them. Absent means "none connected" — Codex only.
+   */
+  readonly subscriptions?: readonly Record<string, unknown>[];
+  /**
+   * Per-provider usage replies for `readUsageFor`, keyed by provider kind.
+   * `codex` is not needed here: the single `usage` fixture serves it.
+   */
+  readonly usageByProvider?: Record<string, Record<string, unknown>>;
   /**
    * Whether this build contains the widget extension.
    *
@@ -444,9 +510,9 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       dismissed: !f().visible,
     };
     w.__ismAnalyticsEnabled__ = f().analyticsEnabled === true;
-    const dispatcher = async (
-      args?: { request?: Record<string, unknown> },
-    ): Promise<Record<string, unknown>> => {
+    const dispatcher = async (args?: {
+      request?: Record<string, unknown>;
+    }): Promise<Record<string, unknown>> => {
       const request = args?.request;
       record(request);
       const data = f();
@@ -456,8 +522,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
           if (request.type === "setOnboardingStep" && w.__ismOnboarding__) {
             w.__ismOnboarding__ = {
               step: (request.step as string) ?? "welcome",
-              dismissed:
-                request.dismissed === true || request.step === "done",
+              dismissed: request.dismissed === true || request.step === "done",
             };
           }
           const state = w.__ismOnboarding__ ?? {
@@ -481,6 +546,11 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
         }
         case "readUsage":
           return { type: "usage", snapshots: [data.usage] };
+        case "openCodeSubscriptions":
+          return {
+            type: "openCodeSubscriptions",
+            subscriptions: data.subscriptions ?? [],
+          };
         case "readAccountUsage":
           return {
             type: "accountUsage",
@@ -525,7 +595,9 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                 executable: "codex",
                 installed: data.installed,
                 version: data.version ?? null,
-                reason: data.installed ? null : "`codex` is not available on this system.",
+                reason: data.installed
+                  ? null
+                  : "`codex` is not available on this system.",
               },
               {
                 tool: "openCode",
@@ -606,8 +678,14 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
           }
           return { type: "protocol", version: 1 };
         case "readPlan":
-        case "readUsageFor":
-          // Same boundary as Rust: only Codex is a registered provider.
+        case "readUsageFor": {
+          const perProvider = data.usageByProvider?.[
+            request.provider as string
+          ] as Record<string, unknown> | undefined;
+          if (request.type === "readUsageFor" && perProvider) {
+            return { type: "usage", snapshots: [perProvider] };
+          }
+          // Same boundary as Rust: only a registered provider may be read.
           if (request.provider !== "codex") {
             return {
               type: "failure",
@@ -620,9 +698,10 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
           return {
             type: "readPlan" === request.type ? "plan" : "usage",
             ...(request.type === "readPlan"
-              ? { plan: ((f().usage as { plan?: string })?.plan ?? null) }
+              ? { plan: (f().usage as { plan?: string })?.plan ?? null }
               : { snapshots: [f().usage] }),
           };
+        }
         case "uiState":
         case "setUiState":
           // The route write is a deliberate no-op: a spec must never write the
@@ -674,7 +753,9 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       const usage = response as { snapshots?: unknown[] } | undefined;
       return {
         type: response?.type ?? null,
-        snapshots: Array.isArray(usage?.snapshots) ? usage.snapshots.length : -1,
+        snapshots: Array.isArray(usage?.snapshots)
+          ? usage.snapshots.length
+          : -1,
         fixtures: w.__ismFixtures__ != null,
         registry: Object.keys(w.__wdio_mocks__ ?? {}),
       };
@@ -688,10 +769,12 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
     registry?: string[];
     threw?: string;
   };
-  if (proof.type !== "usage" || (proof.snapshots ?? -1) < 1 || !proof.fixtures) {
-    throw new Error(
-      `interception self-check failed: ${JSON.stringify(proof)}`,
-    );
+  if (
+    proof.type !== "usage" ||
+    (proof.snapshots ?? -1) < 1 ||
+    !proof.fixtures
+  ) {
+    throw new Error(`interception self-check failed: ${JSON.stringify(proof)}`);
   }
 }
 
@@ -768,14 +851,14 @@ export async function gotoView(
  * The call log lives in the page next to the mock, so a spec can assert on
  * writes (does a navigation persist?) without touching the on-disk files.
  */
-export async function dispatchCalls(): Promise<
-  Array<Record<string, unknown>>
-> {
+export async function dispatchCalls(): Promise<Array<Record<string, unknown>>> {
   return browser.execute(
     () =>
-      (window as unknown as {
-        __ismMockCalls__?: Array<Record<string, unknown>>;
-      }).__ismMockCalls__ ?? [],
+      (
+        window as unknown as {
+          __ismMockCalls__?: Array<Record<string, unknown>>;
+        }
+      ).__ismMockCalls__ ?? [],
   );
 }
 
@@ -868,6 +951,17 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
     }
   }
 
+  // The nudge trail above ends on the last visited destination, but every
+  // spec asserts against Home's panels; leave the app where the assertions
+  // are, so "displayed" means what the spec says and not wherever the last
+  // nudge happened to land.
+  try {
+    await gotoView("home");
+  } catch {
+    // A navigation failure here is the suite's problem to surface, not a
+    // reason to hide the surface the fixtures describe.
+  }
+
   await waitForSurface(fixtures);
 }
 /** Waits for either surface to have rendered. */
@@ -899,7 +993,8 @@ async function waitForSurface(fixtures: DispatchFixtures): Promise<void> {
         return {
           onboarding: !!document.querySelector('[data-testid="onboarding"]'),
           shellClass: shell?.className ?? null,
-          heading: document.querySelector("h1")?.textContent?.slice(0, 40) ?? null,
+          heading:
+            document.querySelector("h1")?.textContent?.slice(0, 40) ?? null,
         };
       })
       .catch(() => null);
@@ -941,6 +1036,33 @@ export async function dashboardLive(): Promise<void> {
   await boot({
     visible: false,
     usage: liveSnapshot(),
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+  });
+}
+
+/**
+ * Onboarding dismissed, with a Z.AI plan and an unreadable Alibaba plan
+ * connected through OpenCode beside Codex.
+ */
+export async function dashboardWithPlans(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    subscriptions: [
+      subscription(),
+      subscription({
+        providerId: "alibaba-coding-plan",
+        name: "Alibaba Coding Plan",
+        label: "Alibaba Coding Plan",
+        integration: null,
+        apiBase: null,
+      }),
+    ],
+    usageByProvider: { zai: zaiSnapshot() },
     installed: true,
     version: "codex-cli 0.159.0",
     widgetEmbedded: true,

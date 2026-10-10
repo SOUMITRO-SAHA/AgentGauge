@@ -29,12 +29,26 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+# The app's only HTTP client: the plugin's vetted reqwest stack, used for the
+# coding-plan usage endpoints. No hand-rolled transport anywhere.
+tauri-plugin-http = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # E2E testing plugins. Registered only under #[cfg(debug_assertions)] in
 # src/lib.rs, so they are compiled into debug builds but never activated in release.
 tauri-plugin-wdio = "1"
 tauri-plugin-wdio-webdriver = "1"
+
+# macOS Dock tile for unbundled debug runs. `tauri dev` gets this from Tauri's
+# own `cfg(dev)` path, but the e2e binary is a plain `cargo build` and would
+# otherwise show the generic `exec` tile. These three crates are already in the
+# graph via `tauri` at these exact versions, so no new crate is compiled; they
+# are named directly only because Rust requires a direct declaration to `use`.
+# `default-features = false` keeps each one to the single type we call.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", default-features = false, features = ["std"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSApplication", "NSImage"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSData"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

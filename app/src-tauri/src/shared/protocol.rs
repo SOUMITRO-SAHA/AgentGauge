@@ -17,7 +17,9 @@ use crate::modules::automation::AutomationState;
 use crate::modules::cli_detection::CliToolStatus;
 use crate::modules::onboarding::{OnboardingProgress, OnboardingStep};
 use crate::modules::widget::SystemWidgetStatus;
-use crate::shared::domain::{AccountUsage, PlanKind, ProviderKind, UsageSnapshot};
+use crate::shared::domain::{
+    AccountUsage, CodingSubscription, PlanKind, ProviderKind, UsageSnapshot,
+};
 use crate::shared::error::Error;
 use crate::shared::provider::{PingOutcome, ProviderStatus};
 
@@ -38,6 +40,11 @@ pub enum AppRequest {
     ProviderStatus,
     /// Detects supported coding-agent CLIs without starting sessions.
     CliDetection,
+    /// Lists the coding subscriptions the user connected through OpenCode.
+    ///
+    /// Read-only: asks OpenCode itself what is connected, and never touches a
+    /// credential beyond asking whether one exists.
+    OpenCodeSubscriptions,
     /// Reads usage for every provider.
     ReadUsage,
     /// Reads usage for one provider, propagating its failure.
@@ -101,6 +108,7 @@ impl AppRequest {
             Self::Hello => "hello",
             Self::ProviderStatus => "providerStatus",
             Self::CliDetection => "cliDetection",
+            Self::OpenCodeSubscriptions => "openCodeSubscriptions",
             Self::ReadUsage => "readUsage",
             Self::ReadUsageFor { .. } => "readUsageFor",
             Self::ReadAccountUsage { .. } => "readAccountUsage",
@@ -138,6 +146,9 @@ pub enum AppResponse {
     CliDetections {
         tools: Vec<CliToolStatus>,
     },
+    OpenCodeSubscriptions {
+        subscriptions: Vec<CodingSubscription>,
+    },
     Usage {
         snapshots: Vec<UsageSnapshot>,
     },
@@ -172,6 +183,7 @@ pub enum AppResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::domain::CredentialOrigin;
     use crate::shared::error::ErrorKind;
 
     #[test]
@@ -288,6 +300,7 @@ mod tests {
             AppRequest::StopAutomation,
             AppRequest::AcknowledgeRollover,
             AppRequest::OnboardingProgress,
+            AppRequest::OpenCodeSubscriptions,
             AppRequest::SetOnboardingStep {
                 step: OnboardingStep::Done,
                 dismissed: false,
@@ -333,5 +346,68 @@ mod tests {
         let decoded: AppResponse = serde_json::from_str(&json).expect("deserializes");
         assert_eq!(decoded, response);
         assert!(json.contains("\"freshness\":\"unavailable\""));
+    }
+
+    #[test]
+    fn every_request_name_matches_the_serde_tag() {
+        // `name()` doubles as the wire discriminator in logs; if it ever
+        // disagrees with serde's tag, a client would send a tag the backend
+        // rejects — an error that mocks cannot catch, because they match the
+        // literal string rather than going through serde.
+        let all = [
+            AppRequest::Hello,
+            AppRequest::ProviderStatus,
+            AppRequest::ReadUsage,
+            AppRequest::ReadUsageFor {
+                provider: ProviderKind::Codex,
+            },
+            AppRequest::ReadAccountUsage {
+                provider: ProviderKind::Codex,
+            },
+            AppRequest::ReadPlan {
+                provider: ProviderKind::Codex,
+            },
+            AppRequest::SendPing { prompt: None },
+            AppRequest::AutomationState,
+            AppRequest::StartAutomation,
+            AppRequest::StopAutomation,
+            AppRequest::AcknowledgeRollover,
+            AppRequest::OnboardingProgress,
+            AppRequest::OpenCodeSubscriptions,
+            AppRequest::SetOnboardingStep {
+                step: OnboardingStep::Done,
+                dismissed: false,
+            },
+            AppRequest::SetAnalyticsConsent { enabled: true },
+            AppRequest::SystemWidgetStatus,
+        ];
+        for request in &all {
+            let json = serde_json::to_value(request).expect("serializes");
+            assert_eq!(
+                json["type"],
+                request.name(),
+                "{} disagreed with its serde tag",
+                request.name()
+            );
+        }
+    }
+
+    #[test]
+    fn subscription_listing_round_trips() {
+        let response = AppResponse::OpenCodeSubscriptions {
+            subscriptions: vec![CodingSubscription {
+                provider_id: "zai-coding-plan".to_string(),
+                name: "Z.AI Coding Plan".to_string(),
+                label: "Z.AI".to_string(),
+                integration: Some(ProviderKind::Zai),
+                credential: CredentialOrigin::Stored,
+                api_base: Some("https://api.z.ai/api/coding/paas/v4".to_string()),
+            }],
+        };
+        let json = serde_json::to_value(&response).expect("serializes");
+        assert_eq!(json["type"], "openCodeSubscriptions");
+        assert_eq!(json["subscriptions"][0]["integration"], "zai");
+        let decoded: AppResponse = serde_json::from_value(json).expect("deserializes");
+        assert_eq!(decoded, response);
     }
 }

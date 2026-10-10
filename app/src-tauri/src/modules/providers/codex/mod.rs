@@ -17,6 +17,7 @@ use crate::shared::domain::{PlanKind, ProviderKind, UsageSnapshot};
 use crate::shared::error::{Error, ErrorKind};
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
 
+pub(crate) use transport::probe;
 pub(crate) use transport::AppServer;
 /// Re-exported so the registry does not reach into this module's internals.
 pub use transport::CODEX_EXECUTABLE;

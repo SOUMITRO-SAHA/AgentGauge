@@ -17,10 +17,11 @@ use crate::modules::cli_detection;
 use crate::modules::onboarding::{
     OnboardingProgress, OnboardingState, OnboardingStep, OnboardingStore,
 };
+use crate::modules::opencode::OpenCodeCatalog;
 use crate::modules::providers::{ProviderRegistry, PING_PROMPT};
 use crate::modules::settings::SettingsStore;
 use crate::modules::widget::{now_secs, SnapshotStore, SystemWidgetStatus, WidgetSnapshot};
-use crate::shared::domain::{ProviderKind, UsageSnapshot};
+use crate::shared::domain::{CodingSubscription, ProviderKind, UsageSnapshot};
 use crate::shared::error::Error;
 use crate::shared::protocol::{AppRequest, AppResponse, PROTOCOL_VERSION};
 
@@ -66,6 +67,10 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
 
         AppRequest::CliDetection => Ok(AppResponse::CliDetections {
             tools: cli_detection::detect(),
+        }),
+
+        AppRequest::OpenCodeSubscriptions => Ok(AppResponse::OpenCodeSubscriptions {
+            subscriptions: opencode_subscriptions(state),
         }),
 
         AppRequest::ReadUsage => {
@@ -172,6 +177,27 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
 
 /// Longest ping message accepted, in characters.
 const MAX_PROMPT_CHARS: usize = 280;
+
+/// Lists the coding subscriptions OpenCode reports.
+///
+/// A failure to reach OpenCode is an empty list rather than a rejected
+/// request: the Codex tab does not depend on OpenCode being installed, and
+/// the renderer shows the connect hint from the provider status instead.
+fn opencode_subscriptions(_state: &AppState) -> Vec<CodingSubscription> {
+    match OpenCodeCatalog::read() {
+        Ok(catalog) => catalog.subscriptions(),
+        Err(error) => {
+            // Reported rather than propagated: the renderer still has the
+            // OpenCode CLI status to explain an empty list, and a missing
+            // OpenCode must not blank the Codex reading.
+            eprintln!(
+                "agentgauge: could not list OpenCode subscriptions: {}",
+                error.message
+            );
+            Vec::new()
+        }
+    }
+}
 
 /// Reads every provider, turning a per-provider failure into an explicit
 /// `unavailable` snapshot so one broken provider cannot blank the dashboard.
