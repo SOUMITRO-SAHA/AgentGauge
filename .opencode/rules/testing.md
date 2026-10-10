@@ -7,8 +7,10 @@ Two rules apply to every change, with no exceptions for small or low-risk edits:
    for the intended reason, smallest production change, refactor while green.
    This covers UI work, IPC commands, provider modules, and pure helpers.
 2. **A UI change requires e2e coverage** — an e2e spec asserting the *rendered
-   result*, and `bun run e2e` must actually have been run. Type-checking is not
-   coverage.
+   result*, and that spec must actually have been run
+   (`bun run e2e --spec ./e2e/specs/<task>.e2e.ts`). Type-checking is not
+   coverage. Per task, run only the spec(s) tied to that task's change — the
+   full suite is not required.
 
 There is no CI and no pre-commit hook. The commands below, run locally, are the
 gate.
@@ -17,13 +19,17 @@ gate.
 
 | Change | Required (from `app/`) |
 | --- | --- |
-| Any client change | `bun run build` · `bun run test` · `bun run e2e` |
-| Effect code (atoms, services, layers) | `bun run build` · `bun run test` (vitest + `@effect/vitest`) · `bun run e2e` |
+| Any client change | `bun run build` · `bun run test` · `bun run e2e --spec <task spec>` |
+| Effect code (atoms, services, layers) | `bun run build` · `bun run test` (vitest + `@effect/vitest`) · `bun run e2e --spec <task spec>` |
 | UI change (layout, copy, state, navigation, data display) | all of the above, **plus a new/updated spec in `app/e2e/specs/`** |
-| IPC command / capability / plugin / `src-tauri` | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` · `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` · `cargo check --manifest-path src-tauri/Cargo.toml` · `bun run build` · `bun run test` · `bun run e2e` |
+| IPC command / capability / plugin / `src-tauri` | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` · `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` · `cargo check --manifest-path src-tauri/Cargo.toml` · `bun run build` · `bun run test` · `bun run e2e --spec <task spec>` |
 | New Rust module or crate | the Rust gates · `cargo test --manifest-path src-tauri/Cargo.toml` (`cargo test -p <crate>` for a crate) |
-| `tauri.conf.json`, icons, bundle, release profile | the Rust gates · `bun run tauri build` on the target OS · `bun run e2e` |
+| `tauri.conf.json`, icons, bundle, release profile | the Rust gates · `bun run tauri build` on the target OS · `bun run e2e --spec <task spec>` |
 | `website/` (once initialised) | its own Astro build — not part of the app build |
+
+`<task spec>` is the spec file covering the task's change (several may be
+listed). Only a change that cuts across the suite — boot, fixtures, harness —
+needs the full `bun run e2e`.
 
 Never finish with a compiler warning, a clippy warning, an unrun e2e suite, or a
 claim that a gate passed without having run it.
@@ -107,9 +113,10 @@ through its native webview.
   build constraint, mocking, and screenshot details. `app.e2e.ts` is the pattern.
 - `capabilities.e2e.ts` is a **harness self-test**. If it fails, the harness is
   broken and no other result in that run can be trusted.
-- Always go through `bun run e2e` (it owns the build). Never bare `wdio`, never a
-  bare `cargo build` — see the `custom-protocol` + `touch build.rs` constraint in
-  [`tauri.md`](tauri.md).
+- Always go through `bun run e2e` (it owns the build); `--spec` filtering still
+  counts — the point is the build step, not the suite scope. Never bare `wdio`,
+  never a bare `cargo build` — see the `custom-protocol` + `touch build.rs`
+  constraint in [`tauri.md`](tauri.md).
 - Assert the **rendered result**: the element, its text, and the state it is in.
   A spec that only proves the app compiled is not coverage.
 - Mock a Rust command with `browser.tauri.mock(...)` to drive renderer states
