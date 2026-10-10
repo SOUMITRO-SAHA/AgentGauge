@@ -65,7 +65,7 @@ violated — see below.
 ## `bun run e2e:build` did not switch the binary to the embedded frontend
 
 `tauri-build` caches generated output, and that cache belongs to the
-`tauri-build` crate. `cargo clean -p agentgauge-daemon` does not remove it, so `--features
+`tauri-build` crate. `cargo clean -p agentgauge` does not remove it, so `--features
 custom-protocol` can be applied while the stale dev URL persists.
 
 The `touch src-tauri/build.rs` in `e2e:build` is what invalidates it. If you
@@ -76,7 +76,7 @@ bun run build && touch src-tauri/build.rs \
   && cargo build --manifest-path src-tauri/Cargo.toml --features custom-protocol
 ```
 
-**Do not verify this with `strings`.** `strings src-tauri/target/debug/agentgauge-daemon |
+**Do not verify this with `strings`.** `strings src-tauri/target/debug/agentgauge |
 grep localhost:1420` reports a match whether or not that URL is used at
 runtime, because `tauri.conf.json` is embedded in the binary regardless. Only
 `browser.getUrl()` reflects runtime behaviour. This proxy was actively

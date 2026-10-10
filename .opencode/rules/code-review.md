@@ -50,7 +50,7 @@ Check these first — they are the highest-risk surfaces here:
    `Layer.provide` where `provideMerge` was meant (or vice versa).
 4. **Rust tier boundaries** — an import that points upward
    (`shared/` → `modules/`), a sideways sibling-module import, or a crate that
-   needs `agentgauge-daemon`/`tauri` to build. See [`rust.md`](rust.md).
+   needs `agentgauge`/`tauri` to build. See [`rust.md`](rust.md).
 5. **Data honesty** — a usage/status value rendered without provenance or
    freshness; a `?? 0` / `-` placeholder that reads as real data; a nullable
    field instead of the four-state union; `waiting: true` shown as a fresh

@@ -120,7 +120,7 @@ impl AppServer {
         self.request(
             "initialize",
             Some(serde_json::json!({
-                "clientInfo": { "name": "agentgauge-daemon", "title": "AgentGauge", "version": env!("CARGO_PKG_VERSION") }
+                "clientInfo": { "name": "agentgauge", "title": "AgentGauge", "version": env!("CARGO_PKG_VERSION") }
             })),
         )?;
         // The server does not require this, but every reference client sends

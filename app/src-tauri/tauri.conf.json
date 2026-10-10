@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AgentGauge",
-  "mainBinaryName": "agentgauge-daemon",
+  "mainBinaryName": "agentgauge",
   "version": "0.1.0",
-  "identifier": "com.soumitrasaha.aism",
+  "identifier": "com.soumitrasaha.agentgauge",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",

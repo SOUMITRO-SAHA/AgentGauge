@@ -343,9 +343,9 @@ The application architecture consists of four layers:
 - Session/model/prompt executor, explicitly enabled only.
 - Later: permissioned local analytics importers.
 
-The packaged Rust process is named `agentgauge-daemon` for clear identification
-in process listings. It hosts the desktop app and its background polling; it is
-not a separately installed operating-system service.
+The packaged Rust process is named `agentgauge`. It hosts the desktop app and
+its background polling; it is not a separately installed operating-system
+service.
 
 **Harness adapters (no direct model-provider APIs)**
 

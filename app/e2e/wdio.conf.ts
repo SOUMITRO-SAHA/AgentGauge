@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const appBinaryPath = path.resolve(
   here,
   "..",
-  "src-tauri/target/debug/agentgauge-daemon",
+  "src-tauri/target/debug/agentgauge",
 );
 
 export const config: WebdriverIO.Config = {

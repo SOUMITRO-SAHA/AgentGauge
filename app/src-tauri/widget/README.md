@@ -116,7 +116,7 @@ Verified by running it on this machine (macOS 27.0, Xcode 27.0):
   field
 - `codesign --verify --deep --strict` passes on the embedded bundle
 - LaunchServices registers the host app and reports
-  `plugin Identifiers: com.soumitrasaha.aism.widget`
+  `plugin Identifiers: com.soumitrasaha.agentgauge.widget`
 - the Rust snapshot writer, and the agreement between the Rust JSON and the Swift
   `Snapshot` decoder
 

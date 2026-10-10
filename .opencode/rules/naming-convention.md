@@ -18,7 +18,7 @@ there are no project-specific overrides.
 - Types, traits, enums: `PascalCase` — `ProviderStatus`, `UsageSnapshot`, `RateLimitWindow`.
 - Functions, methods, variables, fields: `snake_case`.
 - Consts and statics: `SCREAMING_SNAKE_CASE`.
-- Crates: the app package is `agentgauge-daemon` (lib `agentgauge_daemon_lib`). A crate in
+- Crates: the app package is `agentgauge` (lib `agentgauge_lib`). A crate in
   `app/src-tauri/crates/` takes the short name of the concern it owns —
   `http_retry`, `keychain`, `usage_model` — so name it for the concern, never
   for the layer (`utils`, `helpers`, `common` are not crate names). The

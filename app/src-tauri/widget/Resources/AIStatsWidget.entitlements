@@ -10,7 +10,7 @@
 	  Group is a plain file in the user's home directory. Sandboxing would
 	  block that read.
 
-	  An App Group (`group.<team>.com.soumitrasaha.aism`) is the production
+	  An App Group (`group.<team>.com.soumitrasaha.agentgauge`) is the production
 	  answer, but it has to be registered on the developer portal first and
 	  then signed with a real Team ID. See widget/README.md.
 	-->

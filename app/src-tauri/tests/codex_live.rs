@@ -14,8 +14,8 @@
 use std::time::Duration;
 
 /// Spawns the app-server and returns it, or `None` when Codex is not installed.
-fn server() -> Option<agentgauge_daemon_lib::testkit::AppServer> {
-    let server = agentgauge_daemon_lib::testkit::AppServer::spawn("codex").ok()?;
+fn server() -> Option<agentgauge_lib::testkit::AppServer> {
+    let server = agentgauge_lib::testkit::AppServer::spawn("codex").ok()?;
     Some(server)
 }
 
@@ -56,9 +56,9 @@ fn decodes_a_live_rate_limit_response() {
         )
         .expect("the app-server answers a rate-limit read");
 
-    let snapshot = agentgauge_daemon_lib::testkit::decode_rate_limits(
+    let snapshot = agentgauge_lib::testkit::decode_rate_limits(
         &payload,
-        agentgauge_daemon_lib::testkit::ProviderKind::Codex,
+        agentgauge_lib::testkit::ProviderKind::Codex,
         0,
     )
     .expect("decodes");
@@ -97,7 +97,7 @@ fn rejects_a_second_initialize() {
         .request(
             "initialize",
             Some(serde_json::json!({
-                "clientInfo": { "name": "agentgauge-daemon", "title": "AgentGauge", "version": "0.1.0" }
+                "clientInfo": { "name": "agentgauge", "title": "AgentGauge", "version": "0.1.0" }
             })),
         )
         .expect_err("a second initialize must be refused");
@@ -128,7 +128,7 @@ fn a_second_process_can_be_spawned_independently() {
         return;
     };
     let second =
-        agentgauge_daemon_lib::testkit::AppServer::spawn("codex").expect("a second server spawns");
+        agentgauge_lib::testkit::AppServer::spawn("codex").expect("a second server spawns");
 
     assert!(first
         .request("account/read", Some(serde_json::json!({})))

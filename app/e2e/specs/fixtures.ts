@@ -79,7 +79,7 @@ function settingsStorePath(): string {
     os.homedir(),
     "Library",
     "Application Support",
-    "com.soumitrasaha.aism",
+    "com.soumitrasaha.agentgauge",
     "settings.json",
   );
 }
@@ -239,7 +239,7 @@ function onboardingStorePath(): string {
     os.homedir(),
     "Library",
     "Application Support",
-    "com.soumitrasaha.aism",
+    "com.soumitrasaha.agentgauge",
     "onboarding.json",
   );
 }

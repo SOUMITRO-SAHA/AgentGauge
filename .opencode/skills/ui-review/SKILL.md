@@ -6,7 +6,7 @@ description: Visually and behaviourally review the ism desktop app UI using the 
 # UI Review
 
 The `app/e2e` WebdriverIO suite is the **only** UI engine for this project. It
-drives the real compiled binary (`src-tauri/target/debug/agentgauge-daemon`) through its
+drives the real compiled binary (`src-tauri/target/debug/agentgauge`) through its
 native webview: the Rust backend runs, IPC crosses the process boundary, and a
 real OS window exists.
 
