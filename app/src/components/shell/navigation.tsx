@@ -148,7 +148,7 @@ function FloatingTabs({
     <nav
       data-testid="nav"
       aria-label="Destinations"
-      className="glass fixed inset-x-0 bottom-0 z-40 mx-auto flex w-fit max-w-[calc(100vw-1.5rem)] items-stretch gap-0.5 rounded-full p-1.5 shadow-lg"
+      className="glass fixed inset-x-0 bottom-2 z-40 mx-auto flex w-fit max-w-[calc(100vw-1.5rem)] items-stretch gap-0.5 rounded-full p-1.5 shadow-lg"
     >
       {ROUTES.map((definition) => {
         const active = route === definition.id;

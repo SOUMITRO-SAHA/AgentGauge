@@ -89,80 +89,84 @@ describe("onboarding flow", () => {
     await expect($('[data-testid="onboarding"]')).toHaveText(
       expect.stringContaining("AgentGauge shows the usage and status information"),
     );
+    await expectDisplayed('[data-testid="demo-welcome"]');
   });
 
-  it("renders the detected Codex version on the status step", async () => {
-    // This step is what proves the app reads the local install rather than
-    // showing a picture of one.
+  it("renders an illustration on the status step, not live provider UI", async () => {
     await clickDisplayed('[data-testid="onboarding-next"]');
     await expectDisplayed('[data-testid="demo-status"]');
 
-    await expectDisplayed('[data-testid="provider-status"]');
-    await expect($('[data-testid="codex-version"]')).toHaveText(
-      "codex-cli 0.159.0",
-    );
-    await expectDisplayed('[data-testid="cli-opencode"]');
-    await expect($('[data-testid="opencode-version"]')).toHaveText(
-      "opencode 1.0.0",
-    );
-    await expect($('[data-testid="provider-status"]')).toHaveText(
-      expect.stringContaining("Detecting another CLI does not enable its usage integration."),
-    );
+    expect(await $('[data-testid="demo-status"] svg').isExisting()).toBe(true);
+    // The step tells a story; it must not render a real reading. Both
+    // selectors are scoped to the flow because the hidden shell keeps its own
+    // live panels mounted behind it, and `$` answers for the first match in
+    // document order.
+    expect(
+      await $('[data-testid="onboarding"] [data-testid="provider-status"]')
+        .isExisting(),
+    ).toBe(false);
+    expect(
+      await $('[data-testid="onboarding"] [data-testid="window-bar"]')
+        .isExisting(),
+    ).toBe(false);
   });
 
-  it("renders the 5-hour window with its percentage and reset countdown", async () => {
+  it("renders an illustration on the rollover step", async () => {
     await clickDisplayed('[data-testid="onboarding-next"]');
-    await expectDisplayed('[data-testid="demo-status"]');
-
-    // The bar renders REMAINING: 88% of the window is left.
-    await expect($('[data-testid="window-bar"]')).toHaveAttribute(
-      "data-tone",
-      "healthy",
-    );
-    await expect($('[data-testid="window-reset"]')).toHaveText(
-      expect.stringContaining("Resets in"),
-    );
+    await clickDisplayed('[data-testid="onboarding-next"]');
+    await expectDisplayed('[data-testid="demo-rollover"]');
+    expect(await $('[data-testid="demo-rollover"] svg').isExisting()).toBe(true);
+    expect(
+      await $('[data-testid="onboarding"] [data-testid="window-bar"]')
+        .isExisting(),
+    ).toBe(false);
   });
 
-  it("explains the system widget instead of offering to install it", async () => {
+  it("explains the system widget without offering to install it", async () => {
     for (let step = 0; step < 3; step += 1) {
       await clickDisplayed('[data-testid="onboarding-next"]');
     }
     await expectDisplayed('[data-testid="demo-widget"]');
+    expect(await $('[data-testid="demo-widget"] svg').isExisting()).toBe(true);
 
-    // macOS owns widget placement: the user adds it from the system gallery, so
-    // an install button would be a lie. There must be no such control.
-    expect(await $('[data-testid="widget-setup"]').isExisting()).toBe(false);
-    await expectDisplayed('[data-testid="widget-steps"]');
+    // macOS owns widget placement: the user adds it from the system gallery,
+    // so an install control would be a lie. There must be no such control.
+    expect(await $('[data-testid="widget-toggle"]').isExisting()).toBe(false);
+    expect(
+      await $('[data-testid="onboarding"] [data-testid="widget-setup"]')
+        .isExisting(),
+    ).toBe(false);
   });
 
-  it("names both windows the widget will show", async () => {
+  it("keeps real widget status out of the flow", async () => {
     for (let step = 0; step < 3; step += 1) {
       await clickDisplayed('[data-testid="onboarding-next"]');
     }
     await expectDisplayed('[data-testid="demo-widget"]');
-
-    // The user added this asking about two windows; the step must answer that
-    // rather than only saying "add a widget somewhere".
-    await expect($('[data-testid="demo-widget"]')).toHaveText(
-      expect.stringContaining("5-hour window"),
-    );
-    await expect($('[data-testid="demo-widget"]')).toHaveText(
-      expect.stringContaining("weekly limit"),
-    );
+    expect(
+      await $('[data-testid="onboarding"] [data-testid="widget-status"]')
+        .isExisting(),
+    ).toBe(false);
   });
 
-  it("reports that the monitor is already running", async () => {
+  it("shows the monitor step as an illustration with no start control", async () => {
     for (let step = 0; step < 4; step += 1) {
       await clickDisplayed('[data-testid="onboarding-next"]');
     }
-    await expect($('[data-testid="demo-automation"]')).toHaveText(
-      expect.stringContaining("already running"),
+    await expectDisplayed('[data-testid="demo-automation"]');
+    expect(await $('[data-testid="demo-automation"] svg').isExisting()).toBe(
+      true,
     );
+    // Starting the monitor is a dashboard action (Automation view); a
+    // decorative step must not carry it.
+    expect(
+      await $('[data-testid="onboarding"] [data-testid="automation-start"]')
+        .isExisting(),
+    ).toBe(false);
   });
 
   it("reaches the finish step", async () => {
-    for (let step = 0; step < 5; step += 1) {
+    for (let step = 0; step < 4; step += 1) {
       await clickDisplayed('[data-testid="onboarding-next"]');
     }
     await expect($('[data-testid="onboarding"] h1')).toHaveText(
@@ -170,6 +174,16 @@ describe("onboarding flow", () => {
     );
     await expect($('[data-testid="onboarding-next"]')).toHaveText(
       expect.stringContaining("Finish"),
+    );
+  });
+
+  it("walks back to an earlier step without dismissing the flow", async () => {
+    await clickDisplayed('[data-testid="onboarding-next"]');
+    await expectDisplayed('[data-testid="demo-status"]');
+    await clickDisplayed('[data-testid="onboarding-back"]');
+    await expectDisplayed('[data-testid="demo-welcome"]');
+    await expect($('[data-testid="onboarding"] h1')).toHaveText(
+      "A clear view of your coding tools",
     );
   });
 
@@ -202,38 +216,31 @@ describe("onboarding when nothing can be read", () => {
     await onboardingWithNoData();
   });
 
-  it("states that Codex is not found rather than showing an empty dashboard", async () => {
+  it("renders the same steps when Codex is missing", async () => {
+    await expectDisplayed('[data-testid="demo-welcome"]');
     await clickDisplayed('[data-testid="onboarding-next"]');
     await expectDisplayed('[data-testid="demo-status"]');
-
-    await expect($('[data-testid="provider-status"]')).toHaveText(
-      expect.stringContaining("Codex CLI not found"),
-    );
-    // The install command is shown, so the user is not left guessing.
-    await expect($('[data-testid="provider-status"]')).toHaveText(
-      expect.stringContaining("npm install -g @openai/codex"),
+    await expect($('[data-testid="onboarding"] h1')).toHaveText(
+      "Live status, with its source attached",
     );
   });
 
-  it("renders an explicit unavailable state, never a zero", async () => {
-    await clickDisplayed('[data-testid="onboarding-next"]');
-    await expectDisplayed('[data-testid="demo-status"]');
-
-    // The reason must be visible. A `0% used` here would be a fabrication.
-    await expectDisplayed('[data-testid="window-unavailable"]');
-    await expect($('[data-testid="window-unavailable"]')).toHaveText(
-      expect.stringContaining("codex login"),
-    );
-  });
-
-  it("still explains the widget when no usage could be read", async () => {
-    // The widget is independent of whether Codex is reachable, so its guidance
-    // must survive an unavailable reading.
-    for (let step = 0; step < 3; step += 1) {
-      await clickDisplayed('[data-testid="onboarding-next"]');
-    }
-    await expectDisplayed('[data-testid="demo-widget"]');
-    await expectDisplayed('[data-testid="widget-steps"]');
+  it("never renders a fabricated reading inside the flow", async () => {
+    // No data arrived, so no number may appear: the steps are illustrations
+    // and copy only. Scoped to the flow; the hidden shell renders its own
+    // explicit unavailable state behind it.
+    expect(
+      await $('[data-testid="onboarding"] [data-testid="window-bar"]')
+        .isExisting(),
+    ).toBe(false);
+    expect(
+      await $('[data-testid="onboarding"] [data-testid="window-unavailable"]')
+        .isExisting(),
+    ).toBe(false);
+    expect(
+      await $('[data-testid="onboarding"] [data-testid="provider-status"]')
+        .isExisting(),
+    ).toBe(false);
   });
 });
 
@@ -704,6 +711,11 @@ describe("navigation", () => {
     const pill = await navShape();
     expect(pill).not.toBeNull();
     expect(pill!.bottom).toBeGreaterThanOrEqual(pill!.innerHeight - 48);
+    // The pill floats: a visible gap below it, not flush with the window
+    // edge — but never so much that it reads as detached.
+    const pillGap = pill!.innerHeight - pill!.bottom;
+    expect(pillGap).toBeGreaterThanOrEqual(4);
+    expect(pillGap).toBeLessThanOrEqual(24);
 
     await resizeUntil(1200, (w) => w >= 900, "sidebar");
     const sidebar = await navShape();
