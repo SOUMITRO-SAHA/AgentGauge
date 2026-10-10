@@ -138,6 +138,22 @@ pattern-match on.
 - Place Rust code in the tier that owns it: a single caller's helper stays private in its module, 2+ consumers' primitives go in `src/shared/`, and reusable or dependency-heavy logic becomes a crate under `app/src-tauri/crates/`. Full architecture rules: [`rust.md`](.opencode/rules/rust.md).
 - Keep `app/bun.lock` and `app/src-tauri/Cargo.lock` in sync with dependency changes.
 
+## Documentation and commits (strict)
+
+Binding on every task, with no exceptions beyond those named here:
+
+- **No inline comments by default** — not `//` in TypeScript/Rust, not `#` in
+  config. Written only when genuinely critical: `// SAFETY:` blocks,
+  non-obvious platform/vendor workarounds, security constraints, and ordering
+  invariants the compiler cannot check. If code needs a comment, refactor the
+  code first. Full rules: [`documentation.md`](.opencode/rules/documentation.md).
+- **Exactly one documentation format per language — nothing else:** JSDoc
+  (`/** … */`) for TypeScript/React, rustdoc (`///` and `//!`) for Rust. Any
+  other doc style is removed on sight.
+- **Commit messages follow the standard commit convention:**
+  `type(scope): subject` (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`,
+  …), imperative mood, body explains why, no generated attribution footers.
+
 ## Development and verification
 
 Use Bun for JavaScript package operations:

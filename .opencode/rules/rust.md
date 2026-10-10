@@ -316,8 +316,9 @@ These are the mechanisms that keep the app scalable as providers multiply:
   for casing — `snake_case` functions/modules, `PascalCase` types, `SCREAMING_SNAKE_CASE`
   consts; see [`naming-convention.md`](naming-convention.md).
 - Comments follow [`documentation.md`](documentation.md): rustdoc `///` on public
-  items, `//!` for module docs, `//` only for a non-obvious *why* (including
-  the unreachable-invariant notes and `// SAFETY:` blocks).
+  items, `//!` for module docs — and no inline `//` comments except the
+  critical cases (unreachable-invariant notes, `// SAFETY:` blocks, non-obvious
+  platform workarounds).
 - Every module and crate gets a `//!` doc comment stating what it owns and,
   when it is not obvious, what it explicitly does **not** own.
 - Prefer iterators, slices, and early returns over index juggling and deep

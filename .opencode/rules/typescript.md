@@ -172,8 +172,8 @@ real data. See [`ui.md`](ui.md).
 
 - 2-space indent, double quotes, semicolons — match the surrounding file.
 - Comments follow [`documentation.md`](documentation.md): no narration of
-  _what_, doc comments only for real contracts. Effect-specific conventions
-  (span names on `Effect.fn`, why-comments on channel changes) are in
-  [`effect.md`](effect.md).
+  _what_, JSDoc only for real contracts, and no inline `//` comments except
+  the critical cases. Effect-specific conventions (span names on `Effect.fn`,
+  why-comments on channel changes) are in [`effect.md`](effect.md).
 - Named exports by default. Only entry points (`App.tsx`, `main.tsx`) use a
   default export, matching the Tauri scaffold.
