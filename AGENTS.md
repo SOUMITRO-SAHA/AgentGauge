@@ -123,6 +123,17 @@ pattern-match on.
 - `website/`: reserved for a future Astro landing page and documentation site. Do not add it to the app build.
 - Use the `~/` alias for imports from `app/src` (for example, `~/lib/utils`). Keep it aligned in `app/vite.config.ts`, `app/tsconfig.json`, and `app/components.json`.
 - Styling uses Tailwind CSS 4 through `@tailwindcss/vite`; do not add a Tailwind 3 config unless the project is deliberately migrated.
+- **shadcn-first, strictly.** If a component exists in the shadcn registry, it
+  must be used — research it with the shadcn MCP and install it with the
+  shadcn CLI; never hand-roll an equivalent. Custom components are the
+  exception: only when the registry genuinely lacks the primitive, built on
+  top of the vendored primitives and theme tokens, with the reason stated.
+  The visual language is fixed, not per-screen taste: theme tokens from
+  `app/src/index.css` only (no raw palette colours), 4px-grid spacing, macOS
+  standard border radius from the `--radius` scale (`rounded-lg` panels,
+  `rounded-md` controls, `rounded-xl` floating overlays), and the glossy
+  macOS material — `glass` for chrome, the shared `PANEL` treatment for
+  content. Full rules: [`ui.md`](.opencode/rules/ui.md).
 - Follow the surrounding TypeScript/React and Rust style. Keep provider-specific code modular rather than coupling provider behavior into general UI components.
 - Place Rust code in the tier that owns it: a single caller's helper stays private in its module, 2+ consumers' primitives go in `src/shared/`, and reusable or dependency-heavy logic becomes a crate under `app/src-tauri/crates/`. Full architecture rules: [`rust.md`](.opencode/rules/rust.md).
 - Keep `app/bun.lock` and `app/src-tauri/Cargo.lock` in sync with dependency changes.
