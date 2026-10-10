@@ -75,19 +75,17 @@ function SidebarNav({
 
   return (
     <Sidebar
-      collapsible="none"
-      // `floating` is shadcn's own detached-pane variant: it insets the sidebar
-      // from the window edge and gives it its own border, radius and shadow,
-      // rather than the full-bleed default. That is the macOS sidebar-pane look
-      // and it is a supported prop, not a hand-rolled margin.
+      // `none` would silently ignore `variant`: the primitive's none-branch
+      // returns a bare full-bleed column, so only `icon` renders the
+      // floating pane (inset, border, radius, shadow) and a live rail.
+      collapsible="icon"
       variant="floating"
       data-testid="nav"
-      className="backdrop-blur-xl"
     >
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1">
           <img
-            src="/agentgauge-mark.svg"
+            src="/logo.svg"
             alt=""
             aria-label="AgentGauge brand mark"
             role="img"

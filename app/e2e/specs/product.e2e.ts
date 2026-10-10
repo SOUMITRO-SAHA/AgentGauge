@@ -152,7 +152,7 @@ describe("onboarding flow", () => {
     );
   });
 
-  it("reports that the watcher is already running", async () => {
+  it("reports that the monitor is already running", async () => {
     for (let step = 0; step < 4; step += 1) {
       await clickDisplayed('[data-testid="onboarding-next"]');
     }
@@ -305,10 +305,33 @@ describe("dashboard", () => {
     );
   });
 
-  it("reports the watcher as running", async () => {
-    // The watcher moved to its own destination with the navigation.
+  it("reports the rollover monitor with the PRD framing", async () => {
+    // The monitor moved to its own destination with the navigation.
     await gotoView("automation");
     await expect($('[data-testid="automation-status"]')).toHaveText("Running");
+
+    // Named for the PRD's own capability ("rollover detection"), which the
+    // Rust core implements as the verified rollover detector — not "window
+    // watcher", a term the PRD does not use.
+    await expect($('[data-testid="automation-panel"] h2')).toHaveText(
+      "Rollover monitor",
+    );
+
+    // The two timestamps must each say what it is: the reset the source last
+    // reported, and the moment the app detected the transition. The old label
+    // ("Window reset observed at") dressed a reported value up as an observed
+    // event — the exact reported-vs-observed conflation the PRD forbids.
+    const rollover = $('[data-testid="automation-rollover"]');
+    await expect(rollover).toHaveText(
+      expect.stringContaining("Last reported reset"),
+    );
+    await expect(rollover).toHaveText(
+      expect.stringContaining("Rollover detected at"),
+    );
+
+    const schedule = $('[data-testid="automation-schedule"]');
+    await expect(schedule).toHaveText(expect.stringContaining("Last checked"));
+    await expect(schedule).toHaveText(expect.stringContaining("Next check"));
   });
 
   // This spec asserts the *real* Rust response rather than a fixture value:
@@ -530,9 +553,52 @@ describe("navigation", () => {
     await expect(
       $('[data-testid="brand-mark"]'),
     ).toHaveAttribute("aria-label", "AgentGauge brand mark");
-    await expect(
-      $('[data-testid="brand-mark"]'),
-    ).toHaveAttribute("src", "/agentgauge-mark.svg");
+    await expect($('[data-testid="brand-mark"]')).toHaveAttribute(
+      "src",
+      "/logo.svg",
+    );
+    // The asset must actually load: a broken src still renders an <img> box
+    // (the browser's fallback glyph), which is how a renamed file shipped
+    // with a question-mark badge in the sidebar header unnoticed.
+    const naturalWidth = await $("[data-testid='brand-mark']").getProperty(
+      "naturalWidth",
+    );
+    expect(Number(naturalWidth)).toBeGreaterThan(0);
+  });
+
+  it("presents the wide-window sidebar as an inset floating pane", async () => {
+    // `variant="floating"` exists only in the collapsible branch of the
+    // primitive; with `collapsible="none"` no pane slot renders at all.
+    await browser.setWindowRect(60, 60, 1200, 700);
+    try {
+      // macOS clamps setWindowRect asynchronously; wait until the viewport
+      // agrees before asserting, or the mobile pill can still be mounted.
+      await browser.waitUntil(async () => {
+        const width = await browser.execute(() => window.innerWidth);
+        return width >= 900;
+      }, { timeout: 8000, timeoutMsg: "window never reached the wide breakpoint" });
+
+      const pane = await $('[data-testid="nav"] [data-slot="sidebar-inner"]');
+      await expect(pane).toBeDisplayed();
+      const shape = await browser.execute(() => {
+        const el = document.querySelector(
+          '[data-testid="nav"] [data-slot="sidebar-inner"]',
+        );
+        if (!el) return null;
+        const cs = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return {
+          left: Math.round(rect.left),
+          radius: Number.parseFloat(cs.borderTopLeftRadius),
+        };
+      });
+      expect(shape).not.toBeNull();
+      expect(shape!.left).toBeGreaterThan(0);
+      expect(shape!.radius).toBeGreaterThan(0);
+    } finally {
+      // Leave the window where the reporter and later runs expect it.
+      await browser.setWindowRect(60, 60, 960, 700);
+    }
   });
 
   it("starts on Home with exactly the four destinations", async () => {

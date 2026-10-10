@@ -106,7 +106,9 @@ export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
     >
       <SidebarProvider>
         <Navigation onNavigate={navigate} />
-        <SidebarInset>
+        {/* Transparent: the body gradient must be the one backdrop for the
+            whole window, or the inset's flat token meets it in a seam. */}
+        <SidebarInset className="bg-transparent">
           <div className={PAGE}>
             <HomeView visible={route === "home"} />
             <AutomationView visible={route === "automation"} />

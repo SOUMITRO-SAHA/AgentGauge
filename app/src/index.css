@@ -119,9 +119,12 @@
   --chart-3: var(--color-blue-600);
   --chart-4: var(--color-blue-700);
   --chart-5: var(--color-blue-800);
-  /* Translucent so the sidebar reads as glass over the vibrancy layer; the
-     blur itself comes from the Sidebar's className. */
-  --sidebar: oklch(1 0 0 / 72%);
+  /*
+   * Solid, same reason as dark: translucency over the body gradient only
+   * tinted the composite; the pane separates by border and shadow, exactly
+   * as shadcn's own light theme does.
+   */
+  --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -170,8 +173,14 @@
   --chart-3: var(--color-blue-600);
   --chart-4: var(--color-blue-700);
   --chart-5: var(--color-blue-800);
-  /* Same translucency as light, on the app's own dark hue. */
-  --sidebar: oklch(0.21 0.008 265 / 65%);
+  /*
+   * Solid, like shadcn's own dark sidebar: one step lighter than the
+   * background is the relationship that makes it read as a pane. The old
+   * 65% translucency had nothing to refract — the window's vibrancy sits
+   * behind the opaque body — so it only muddied the composite. Glass
+   * character comes from the border, radius and shadow.
+   */
+  --sidebar: oklch(0.205 0.008 265);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
