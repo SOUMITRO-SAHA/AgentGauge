@@ -1,74 +1,51 @@
 # AI Subscription Stats
 
-A cross-platform desktop app and native-widget project for keeping track of AI subscriptions, usage statistics, service status, and related automations in one place.
+**AI Subscription Stats is a local-first desktop companion for AI coding harnesses.** It brings together the usage and reset information those harnesses actually expose, with planned, opt-in kickoff automation after a verified usage-window rollover.
 
-The goal is to support subscriptions and tools such as OpenAI Codex, Claude Code, and Z.ai, with an architecture that can grow to include other AI providers. The primary desktop targets are macOS, Windows, and Linux, with Linux distribution compatibility to be validated as the app develops.
+The app integrates with **coding harnesses, not model-provider platforms directly**. It uses harness-supported local interfaces such as app-server, ACP, CLI, SDK, or RPC. The harness remains responsible for sign-in, provider configuration, subscriptions, and credentials.
 
-> **Project status:** Working prototype. Codex is integrated: the app reads your
-> real 5-hour and weekly usage windows from the Codex CLI, watches for a window
-> rollover, and ships a desktop widget. Other providers (Z.ai, Claude Code) are
-> designed for but **not yet implemented**.
+> [!IMPORTANT]
+> **Current implementation: Codex only.** The app reads Codex five-hour and weekly usage windows, observes changes to the reported reset timestamp, and includes a manually initiated ping capability. **Automatic kickoff, model selection, OpenCode, Pi, later harnesses, local activity analytics, and multi-account support are not implemented today.** macOS is the only platform exercised so far.
 
-## Project goals
+## Product direction
 
-- Show a useful overview of AI subscription accounts, usage, limits, and renewal information.
-- Surface provider and service availability with clear source and freshness information.
-- Support practical automations around monitoring and subscription workflows.
-- Provide a compact native-widget experience alongside the full desktop app.
-- Keep provider integrations modular so additional services can be added over time.
-- Run on macOS, Windows, and Linux; validate packaging and behavior on each supported platform.
+The product has two pillars:
 
-Provider names above describe intended coverage, not a claim of an existing integration. Available data and automation will depend on each provider's supported APIs, local tools, and terms.
+- **Subscription observability:** Show supported harnesses, reported usage windows and reset times, status, data freshness, and capability gaps without inventing missing information.
+- **User-controlled kickoff automation:** Planned behavior is to send one minimal `Hi` prompt through a selected harness and user-selected available model, one minute after a verified usage-window rollover. It is off by default, consumes quota, and does not cause, reset, or extend the provider's window.
 
-## Repository layout
+### Integration priority
 
-```text
-app/       Tauri desktop application (React client and Rust backend)
-website/   Reserved for a future Astro landing page and documentation site
-```
+The planned order is fixed:
 
-The website is intentionally an uninitialized placeholder. It is separate from the desktop app and is not included in the app's build. All Tauri configuration and code lives under `app/`.
+1. **Codex** — current and first integration.
+2. **OpenCode** — second.
+3. **Pi** — third.
+4. **Claude Code, Kilo Code, Kimi Code, and other compatible coding harnesses** — evaluated individually afterward.
 
-## Technology
+An ACP connection or model catalog does not by itself provide subscription limits or prove that a model uses a particular subscription. Each harness capability must be verified independently. Multi-account support is deferred to the final roadmap phase; advanced activity analytics require separate research and explicit permission.
 
-- [Tauri 2](https://v2.tauri.app/) for the native desktop shell and Rust backend
-- React 19 and TypeScript for the client
-- [Effect](https://effect.website) 4 (beta) for state, async work, and Schema
-  decoding of every IPC payload
-- Vite 8 for development and production builds
-- Tailwind CSS 4 and shadcn/ui for styling and UI components
-- Bun for JavaScript dependencies and scripts
-- vitest for unit and component tests; WebdriverIO for end-to-end tests
+See the [Product Requirements Document](docs/PRD.md) for the full scope, capability requirements, safety rules, acceptance criteria, and roadmap.
 
-## Architecture
+## What works today
 
-The renderer and Rust speak **one** protocol: a tagged `AppRequest` in, a tagged
-`AppResponse` out, behind a single `dispatch` command. Both enums are
-exhaustive, so adding a capability is one variant rather than a new
-stringly-typed command name.
+- Codex usage is read through the locally installed `codex app-server`; the app does not call OpenAI's provider API or ask for API credentials.
+- The app displays the reported five-hour and weekly windows and freshness/status information.
+- The app observes changes in Codex's reported `resetsAt` value as a rollover-related signal. This is not yet the verified trigger for an automatic send.
+- A manually initiated `sendPing` capability exists and consumes quota. It is not an automatic post-rollover kickoff.
+- The macOS WidgetKit extension displays usage snapshots. The user adds it from the macOS widget gallery; the app cannot install it or check whether it was placed.
 
-```
-app/src/
-  lib/ipc.ts          # the ONLY place invoke() is called; Schema decodes every payload
-  lib/usage.ts        # pure display rules (freshness, tone, countdown)
-  atoms/              # every value the app renders
-  components/         # onboarding, dashboard, usage, widget
+The widget requires **macOS 14+ and Xcode 16+**. Build the macOS app and embed the extension with `bun run build:mac` from `app/`. See [`app/src-tauri/widget/README.md`](app/src-tauri/widget/README.md) before changing the extension or its build process.
 
-app/src-tauri/src/
-  shared/protocol.rs  # the request/response contract
-  shared/domain.rs    # provider-agnostic types carrying provenance
-  modules/            # providers, automation, widget, onboarding, commands
-  crates/             # (empty — no external crates are used yet)
-```
+OpenCode, Pi, Claude Code, Kilo Code, Kimi Code, automatic kickoff, user-selectable models, multi-account support, and local usage-history analytics are **planned or under investigation**, not shipped integrations or features.
 
-Data honesty is enforced by construction: a reading carries its freshness,
-source, and timestamp, and an unavailable reading always carries a reason. A
-missing value renders as an explicit state, never as `0`, `-`, or an empty
-string.
+## Usage-window behavior
+
+The provider controls its usage window and reported reset timestamp. A prompt cannot force, start, restart, or extend that window; a prompt consumes quota in the current window. The planned kickoff sends `Hi` only after a real rollover has been verified, so it becomes initial activity in the naturally available window. If the rollover or selected harness/model cannot be verified, the planned behavior is to skip rather than send speculatively.
 
 ## Development setup
 
-Install [Bun](https://bun.sh/) and the [Rust toolchain](https://www.rust-lang.org/tools/install). Tauri also requires platform-specific native build dependencies; see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your operating system and Linux distribution. Run app commands from `app/`:
+Install [Bun](https://bun.sh/), the [Rust toolchain](https://www.rust-lang.org/tools/install), and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your operating system. Run app commands from `app/`:
 
 ```sh
 cd app
@@ -80,118 +57,63 @@ Useful commands:
 
 ```sh
 cd app
-bun run dev          # Run the Vite client only
-bun run start        # Start the native Tauri app
-bun run restart      # Stop app-owned processes and restart the native app
-bun run build        # Type-check and build the client
-bun run clean        # Remove Rust and frontend build artifacts
-bun run clean:rust   # Remove Rust build artifacts only
-bun run clean:frontend # Remove frontend build artifacts only
-bun run tauri dev    # Run the native desktop app in development
-bun run tauri build  # Build a native package for the current target
+bun run dev            # Run the Vite client only
+bun run start          # Start the native Tauri app
+bun run build          # Type-check and build the client
+bun run test           # Run unit and component tests
+bun run e2e            # Build and test the real native app
+bun run tauri build    # Build a native package for the current target
+bun run build:mac      # Build the macOS app and WidgetKit extension
 ```
 
-Native packages should be built and tested on their target operating systems (or with a properly configured cross-compilation toolchain). A successful build on one platform does not verify support for every OS or Linux distribution.
-
-The app client uses `~/` as its source alias (for example, `~/components/ui/button`). Add shadcn/ui components from `app/` with:
-
-```sh
-bunx shadcn@latest add button
-```
+Native dependencies and packaging are platform-specific. A successful build on one operating system does not verify other operating systems or Linux distributions. macOS is currently the only exercised platform.
 
 ## Testing
 
-Work test-first. Write the smallest focused test that describes the new behaviour or reproduces the bug, watch it fail for the right reason, then implement.
-
-End-to-end tests drive the **real compiled app** through its native webview — the Rust backend runs and the OS window exists:
+Contributions should be test-first: write the smallest focused test, confirm it fails for the intended reason, then implement the change. Any UI change needs an end-to-end spec that checks the rendered behavior, and the suite must actually be run:
 
 ```sh
 cd app
+bun run build
+bun run test
 bun run e2e
 ```
-
-`bun run e2e` builds the frontend and the binary before running the suite, so the tests never run against a stale build. Use it instead of invoking `wdio` directly.
-
-**Any UI change requires e2e coverage** — layout, copy, state rendering, navigation, interaction, or data display. A passing type-check or build is not a substitute: neither can show that a screen renders the right value, handles a missing or stale response, or stays usable at narrow widths. There is no exemption for small or styling-only changes.
-
-E2E specs live in `app/e2e/specs/`. Run artifacts (screenshots and dumps) are written to `.temp/e2e/`, which is git-ignored.
 
 For Rust changes, also run:
 
 ```sh
 cargo fmt --manifest-path app/src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo check --manifest-path app/src-tauri/Cargo.toml
 ```
 
-The suite is currently verified on macOS only; Windows and Linux are configured but unproven. See [`AGENTS.md`](AGENTS.md) and [`.opencode/rules/testing.md`](.opencode/rules/testing.md) for the full policy.
+The e2e suite drives the compiled app in its native webview and is verified on macOS only. Read [CONTRIBUTING.md](CONTRIBUTING.md) for change-specific gates and PR expectations.
 
-## Integrations and credentials
+## Architecture
 
-### Codex
+The renderer and Rust backend communicate through a single tagged protocol: `AppRequest` and `AppResponse` behind one Tauri `dispatch` command. The renderer validates IPC payloads at the boundary. Rust modules own bounded capabilities; provider/harness-specific behavior stays modular.
 
-Codex is integrated by spawning `codex app-server --stdio` and speaking its
-JSON-RPC protocol over stdio. It requires **no API key and no secret storage**:
-the child process inherits the session you already created with `codex login`,
-so no token ever reaches this app, the renderer, or any file it writes.
-
-Usage is read with `account/rateLimits/read`, which returns the 5-hour and
-weekly windows as `{ usedPercent, windowDurationMins, resetsAt }`.
-
-### Rolling the 5-hour window — what actually happens
-
-The window is **not** something a prompt can restart. `resetsAt` is computed by
-the provider and is only ever read, never derived, anywhere in the Codex
-codebase. Sending a prompt **consumes** the current window rather than opening a
-fresh one.
-
-What the app does instead is **detect** the rollover: it polls on an interval
-and compares `resetsAt` across readings, raising a notice when the value moves
-forward. That is the only locally observable signal that a new window opened —
-the provider emits no reset event.
-
-A minimal "hi" prompt is implemented behind `sendPing`, but it is never fired on
-a timer. It spends quota, so the client only reaches it from a setting the user
-explicitly enabled.
-
-### The macOS system widget
-
-The widget is a WidgetKit app extension at `app/src-tauri/widget/`, embedded in
-the app bundle. The user places it from the system widget gallery and macOS owns
-its position, size, and refresh schedule. It shows the **5-hour window and the
-weekly limit** in every size.
-
-There is no floating window. The previous version opened a frameless
-always-on-top Tauri window that covered whatever the user was working in and
-could not be placed by the system; that is gone.
-
-The app cannot install the widget — macOS exposes no API for a host app to add one,
-and none for asking whether the user has placed it. The in-app panel therefore
-reports what is true about the build and shows the system's own procedure for
-this macOS release, instead of a button that would imply otherwise.
-
-```sh
-cd app
-bun run build:mac      # tauri build + build and embed the widget extension
+```text
+app/
+  src/                  React and TypeScript client
+    lib/ipc.ts          Single typed IPC boundary
+    atoms/              Client state
+    components/         App views and UI
+  src-tauri/
+    src/shared/         Shared domain types and protocol
+    src/modules/        Backend capabilities and integrations
+    widget/             macOS WidgetKit extension
+docs/PRD.md             Product requirements and roadmap
 ```
 
-Requires **macOS 14+** and **Xcode 16+**. Windows and Linux have no system widget
-implemented yet; the app says so rather than showing an empty panel.
+Read [`AGENTS.md`](AGENTS.md) and the rules under [`.opencode/rules/`](.opencode/rules/) before making architectural or testing changes. `website/` is reserved for a future site and is not part of the app build.
 
-`app/src-tauri/widget/README.md` records how the extension is built, the three
-traps that make it silently not work, and exactly what has and has not been
-verified.
+## Contributing
 
-### Other providers
+Bug reports, documentation improvements, tests, and focused implementation proposals are welcome. Before starting substantial work, read the PRD and [contribution guidelines](CONTRIBUTING.md). They explain the harness-first integration boundary, test requirements, privacy expectations, and the project's license.
 
-Z.ai and Claude Code are **not implemented**. The `Provider` trait and the
-registry exist so that adding one is a registration line plus a module — no
-change to `automation`, `widget`, or `lib.rs`.
-
-When adding providers, prefer documented and authorized provider interfaces,
-make the source and timestamp of status/usage data visible, and handle missing
-or stale data explicitly. Never commit API keys, session tokens, account data,
-or local environment files.
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for contributor recognition.
 
 ## License
 
-This project uses a custom license based on Apache License 2.0 with an additional restriction prohibiting redistribution for commercial advantage or monetary compensation. See [`LICENSE`](LICENSE) for the complete terms. This is not the unmodified Apache-2.0 license or an OSI-approved open-source license; do not label it `Apache-2.0`. Third-party dependencies remain under their respective licenses.
+This repository uses a **custom license based on Apache License 2.0 with an additional restriction on commercial redistribution**. It is not the unmodified Apache-2.0 license and is not an OSI-approved open-source license. Review [`LICENSE`](LICENSE) before using, modifying, or redistributing the project. Third-party dependencies are governed by their respective licenses.
