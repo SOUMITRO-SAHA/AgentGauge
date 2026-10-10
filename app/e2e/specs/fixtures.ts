@@ -417,6 +417,11 @@ export interface DispatchFixtures {
    */
   readonly subscriptions?: readonly Record<string, unknown>[];
   /**
+   * When set, the subscription read fails instead of answering, so specs can
+   * cover the "OpenCode could not be asked" state.
+   */
+  readonly subscriptionsFailing?: boolean;
+  /**
    * Per-provider usage replies for `readUsageFor`, keyed by provider kind.
    * `codex` is not needed here: the single `usage` fixture serves it.
    */
@@ -547,6 +552,15 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
         case "readUsage":
           return { type: "usage", snapshots: [data.usage] };
         case "openCodeSubscriptions":
+          if (data.subscriptionsFailing) {
+            return {
+              type: "failure",
+              error: {
+                kind: "providerMissing",
+                message: "The `opencode` executable was not found on PATH.",
+              },
+            };
+          }
           return {
             type: "openCodeSubscriptions",
             subscriptions: data.subscriptions ?? [],
@@ -1063,6 +1077,20 @@ export async function dashboardWithPlans(): Promise<void> {
       }),
     ],
     usageByProvider: { zai: zaiSnapshot() },
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+  });
+}
+
+/** Onboarding dismissed, the subscription read itself fails. */
+export async function dashboardSubscriptionsUnavailable(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    subscriptionsFailing: true,
     installed: true,
     version: "codex-cli 0.159.0",
     widgetEmbedded: true,

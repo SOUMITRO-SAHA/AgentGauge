@@ -3,6 +3,7 @@ import { expect } from "@wdio/globals";
 import {
   clickDisplayed,
   dashboardLive,
+  dashboardSubscriptionsUnavailable,
   dashboardWithPlans,
   dispatchCalls,
   expectDisplayed,
@@ -99,5 +100,16 @@ describe("usage tabs", () => {
     await expectDisplayed('[data-testid="usage-plan-unreadable"]');
     const remaining = await $$('[data-testid="home-remaining"]');
     expect(remaining).toHaveLength(0);
+  });
+
+  it("says when OpenCode could not be asked, instead of implying nothing is connected", async () => {
+    await bootOnHome(dashboardSubscriptionsUnavailable);
+
+    await expectDisplayed('[data-testid="subscriptions-unavailable"]');
+    const tabs = await $$('[data-testid^="usage-tab-"]');
+    expect(tabs).toHaveLength(1);
+    await expect($('[data-testid="subscriptions-unavailable"]')).toHaveText(
+      expect.stringContaining("only Codex is shown"),
+    );
   });
 });

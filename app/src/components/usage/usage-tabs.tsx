@@ -18,7 +18,7 @@ import { selectedTabAtom, selectedUsageAtom, subscriptionsAtom } from "~/atoms";
 import { PanelHeader } from "~/components/dashboard/panel";
 import { FreshnessPill } from "~/components/usage/provider-status-card";
 import { UsageWindowList } from "~/components/usage/usage-window-row";
-import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import type * as Ipc from "~/lib/ipc";
 import {
   formatCountdown,
@@ -112,15 +112,61 @@ export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
           ))}
         </TabsList>
 
-        <SelectedPlanBody
-          tab={tabs.find((tab) => tab.value === active) ?? CODEX_TAB}
-          usage={usage}
-          nowMs={nowMs}
-          onRefresh={refresh}
-        />
+        {tabs.map((tab) => (
+          <TabsContent key={tab.value} value={tab.value}>
+            <SelectedPlanBody
+              tab={tab}
+              usage={usage}
+              nowMs={nowMs}
+              onRefresh={refresh}
+            />
+          </TabsContent>
+        ))}
       </Tabs>
+
+      <SubscriptionsNotice subscriptions={subscriptions} onRefresh={refresh} />
     </div>
   );
+}
+
+/**
+ * The state between "no other plan is connected" and "we could not ask".
+ *
+ * An empty successful list is a real answer and renders nothing extra. A
+ * failed read must not collapse to a Codex-only panel as though the user had
+ * nothing connected — that is exactly how a connected plan silently
+ * disappears.
+ */
+function SubscriptionsNotice({
+  subscriptions,
+  onRefresh,
+}: {
+  readonly subscriptions: AsyncResult.AsyncResult<
+    readonly Ipc.CodingSubscription[],
+    Ipc.AppError
+  >;
+  readonly onRefresh: () => void;
+}) {
+  return AsyncResult.match(subscriptions, {
+    onInitial: () => null,
+    onSuccess: () => null,
+    onFailure: () => (
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="subscriptions-unavailable"
+      >
+        OpenCode could not be asked which plans are connected, so only Codex is
+        shown.{" "}
+        <button
+          type="button"
+          className="underline underline-offset-2"
+          onClick={onRefresh}
+        >
+          Try again
+        </button>
+      </p>
+    ),
+  });
 }
 
 /**

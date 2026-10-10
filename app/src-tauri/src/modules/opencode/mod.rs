@@ -32,6 +32,21 @@ use crate::shared::error::{Error, ErrorKind};
 /// usage read with it.
 const CLI_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How many extra reads to make when OpenCode answers with an empty list.
+///
+/// Verified against OpenCode's source: the daemon answers `/api/provider`
+/// with HTTP 200 and an empty set while a location's services are still
+/// booting — catalog reads are not gated on the forked boot fiber and the
+/// initial catalog state is empty. An empty answer on a cold daemon therefore
+/// means "not warm yet", not "nothing is connected", and settling on it would
+/// hide connected plans until a manual refresh. The retries are bounded, and
+/// a warm daemon answers in well under a second, so a user with genuinely
+/// nothing connected pays at most a few seconds once.
+const EMPTY_LIST_RETRIES: usize = 4;
+
+/// Pause between empty-list retries, chosen to span the daemon's boot.
+const EMPTY_RETRY_PAUSE: Duration = Duration::from_millis(750);
+
 /// The executable resolved the same way the Codex provider resolves `codex`.
 pub const OPENCODE_EXECUTABLE: &str = "opencode";
 
@@ -90,8 +105,26 @@ impl OpenCodeCatalog {
     /// Reads both payloads. The export call is what carries secrets, so its
     /// failure paths are indistinguishable from "no file" on purpose.
     pub fn read() -> Result<Self, Error> {
-        let listing = run_json::<ListingResponse>(&["api", "provider.list"])?;
-        let entries = run_json::<Vec<ExportEntry>>(&["auth", "export"])?;
+        Self::read_via(|args| run_capture(args, CLI_TIMEOUT))
+    }
+
+    /// Same read, over an injectable fetch, so the empty-answer retry rule is
+    /// testable without spawning the CLI.
+    fn read_via<T>(fetch: T) -> Result<Self, Error>
+    where
+        T: FnMut(&[&str]) -> Result<String, Error>,
+    {
+        Self::read_with_retry_pause(fetch, EMPTY_RETRY_PAUSE)
+    }
+
+    /// The same read with an explicit retry pause, so tests exercise the
+    /// retry rule without waiting out real boot pauses.
+    fn read_with_retry_pause<T>(mut fetch: T, pause: Duration) -> Result<Self, Error>
+    where
+        T: FnMut(&[&str]) -> Result<String, Error>,
+    {
+        let listing = read_listing_with_retry(&mut fetch, pause)?;
+        let entries: Vec<ExportEntry> = decode(&fetch(&["auth", "export"])?)?;
         Ok(Self {
             connected: listing.data.iter().map(|item| item.id.clone()).collect(),
             details: listing.data,
@@ -158,18 +191,57 @@ impl OpenCodeCatalog {
     }
 }
 
-/// Runs the CLI and decodes stdout as JSON, on a deadline.
-///
-/// The child is killed on timeout rather than left to block a usage read; the
-/// error then says the tool hung instead of pretending there was no data.
-fn run_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> Result<T, Error> {
-    let stdout = run_capture(args, CLI_TIMEOUT)?;
-    serde_json::from_str(&stdout).map_err(|error| {
+/// Decodes CLI stdout as JSON.
+fn decode<T: serde::de::DeserializeOwned>(stdout: &str) -> Result<T, Error> {
+    serde_json::from_str(stdout).map_err(|error| {
         Error::new(
             ErrorKind::InvalidPayload,
             format!("OpenCode replied with a payload this app could not read ({error})."),
         )
     })
+}
+
+/// Reads the connected-provider listing, retrying an empty answer.
+///
+/// The invocation pins `location[directory]` to the user's home: OpenCode's
+/// default location is the daemon's own spawn directory, which is arbitrary
+/// from this app's perspective. The raw `get /api/provider` path is used
+/// because the operation-id spelling changed between OpenCode releases while
+/// the route itself did not.
+fn read_listing_with_retry<T>(fetch: T, pause: Duration) -> Result<ListingResponse, Error>
+where
+    T: FnMut(&[&str]) -> Result<String, Error>,
+{
+    let mut fetch = fetch;
+    let args = listing_args();
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        let listing: ListingResponse = decode(&fetch(&arg_refs)?)?;
+        if !listing.data.is_empty() || attempts > EMPTY_LIST_RETRIES {
+            return Ok(listing);
+        }
+        std::thread::sleep(pause);
+    }
+}
+
+/// The CLI arguments for the provider listing, with the home directory
+/// pinned as the location when the platform exposes one.
+fn listing_args() -> Vec<String> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok();
+    let mut args = vec![
+        "api".to_string(),
+        "get".to_string(),
+        "/api/provider".to_string(),
+    ];
+    if let Some(home) = home {
+        args.push("--param".to_string());
+        args.push(format!("location[directory]={home}"));
+    }
+    args
 }
 
 fn run_capture(args: &[&str], timeout: Duration) -> Result<String, Error> {
@@ -455,5 +527,61 @@ mod tests {
         catalog.entries[0].value.kind = "oauth".into();
         catalog.entries[0].value.key = None;
         assert_eq!(catalog.api_key("zai-coding-plan").expect("reads"), None);
+    }
+
+    #[test]
+    fn a_cold_daemons_empty_answer_is_retried_until_it_is_not() {
+        // OpenCode answers 200 with an empty set while a location boots; the
+        // second read must win or connected plans stay hidden.
+        let mut calls = 0;
+        let catalog = OpenCodeCatalog::read_with_retry_pause(
+            |args| {
+                if args[0] != "api" {
+                    return Ok("[]".to_string());
+                }
+                calls += 1;
+                if calls == 1 {
+                    Ok(r#"{"data":[]}"#.to_string())
+                } else {
+                    Ok(LISTING.to_string())
+                }
+            },
+            Duration::ZERO,
+        )
+        .expect("reads");
+        assert_eq!(calls, 2);
+        assert!(catalog
+            .subscriptions()
+            .iter()
+            .any(|sub| sub.provider_id == "zai-coding-plan"));
+    }
+
+    #[test]
+    fn an_empty_answer_settles_after_bounded_retries() {
+        // A user with nothing connected must not spin forever.
+        let mut calls = 0;
+        let catalog = OpenCodeCatalog::read_with_retry_pause(
+            |args| {
+                if args[0] != "api" {
+                    return Ok("[]".to_string());
+                }
+                calls += 1;
+                Ok(r#"{"data":[]}"#.to_string())
+            },
+            Duration::ZERO,
+        )
+        .expect("reads");
+        assert_eq!(calls, EMPTY_LIST_RETRIES + 1);
+        assert!(catalog.subscriptions().is_empty());
+    }
+
+    #[test]
+    fn the_listing_pins_the_home_location_and_raw_route() {
+        let args = listing_args();
+        assert!(args.contains(&"/api/provider".to_string()));
+        let pinned = args
+            .windows(2)
+            .any(|pair| pair[0] == "--param" && pair[1].starts_with("location[directory]="));
+        assert!(pinned, "location must be pinned, got {args:?}");
     }
 }
