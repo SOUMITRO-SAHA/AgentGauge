@@ -3,6 +3,7 @@ import { expect } from "@wdio/globals";
 import {
   clickDisplayed,
   dashboardLive,
+  dashboardWithSlowPlans,
   dashboardSubscriptionsUnavailable,
   dashboardWithPlans,
   dispatchCalls,
@@ -90,6 +91,38 @@ describe("usage tabs", () => {
 
     await clickDisplayed('[data-testid="usage-tab-codex"]');
     await expect($('[data-testid="plan"]')).toHaveText("Team");
+  });
+
+  it("shows a skeleton while a plan's first reading loads, never a blocked switch", async () => {
+    await bootOnHome(dashboardWithSlowPlans);
+
+    await clickDisplayed('[data-testid="usage-tab-zai"]');
+    await expectDisplayed('[data-testid="usage-skeleton"]');
+
+    await expect($('[data-testid="plan"]')).toHaveText("Pro");
+    const skeletonAfter = await $$('[data-testid="usage-skeleton"]');
+    expect(skeletonAfter).toHaveLength(0);
+  });
+
+  it("renders a revisited tab from its retained reading without reloading", async () => {
+    await bootOnHome(dashboardWithPlans);
+
+    await clickDisplayed('[data-testid="usage-tab-zai"]');
+    await expect($('[data-testid="plan"]')).toHaveText("Pro");
+
+    await clickDisplayed('[data-testid="usage-tab-codex"]');
+    // Read synchronously, not with a wait: a refetch would render the
+    // skeleton and leave `plan` absent; the retained reading is instant.
+    const planText = await browser.execute(
+      () => document.querySelector('[data-testid="plan"]')?.textContent,
+    );
+    expect(planText).toBe("Team");
+
+    await clickDisplayed('[data-testid="usage-tab-zai"]');
+    const planTextAgain = await browser.execute(
+      () => document.querySelector('[data-testid="plan"]')?.textContent,
+    );
+    expect(planTextAgain).toBe("Pro");
   });
 
   it("says when a connected plan cannot be read rather than inventing numbers", async () => {

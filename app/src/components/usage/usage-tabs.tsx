@@ -6,21 +6,34 @@
  * `integration` absent — still gets its tab, and says so, because hiding a
  * subscription the user pays for is worse than admitting it cannot be read.
  *
- * The tab set is deduplicated by integration: connecting both regional
- * variants of one vendor is one tab, not two.
+ * Switching is never blocked by a read: each provider's reading lives in its
+ * own session-retained atom, so a revisit renders immediately while a fresh
+ * read runs underneath, and only a provider seen for the first time shows the
+ * skeleton. The tab set is deduplicated by integration, so connecting both
+ * regional variants of one vendor is one tab, not two.
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import * as Cause from "effect/Cause";
+import { useEffect, useRef } from "react";
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 
-import { selectedTabAtom, selectedUsageAtom, subscriptionsAtom } from "~/atoms";
+import {
+  selectedTabAtom,
+  subscriptionsAtom,
+  usageForAtom,
+} from "~/atoms";
 import { PanelHeader } from "~/components/dashboard/panel";
 import { FreshnessPill } from "~/components/usage/provider-status-card";
-import { UsageWindowList } from "~/components/usage/usage-window-row";
+import {
+  UsageWindowList,
+  UsageWindowSkeleton,
+} from "~/components/usage/usage-window-row";
+import { Skeleton } from "~/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import type * as Ipc from "~/lib/ipc";
 import {
+  effectiveFreshness,
   formatCountdown,
   formatFreshness,
   formatPlan,
@@ -66,9 +79,12 @@ export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
   const subscriptions = useAtomValue(subscriptionsAtom);
   const selected = useAtomValue(selectedTabAtom);
   const setSelected = useAtomSet(selectedTabAtom);
-  const usage = useAtomValue(selectedUsageAtom);
-  const refreshUsage = useAtomRefresh(selectedUsageAtom);
   const refreshSubscriptions = useAtomRefresh(subscriptionsAtom);
+
+  // Only the active tab's body is mounted, so it is the one that registers
+  // its refresher here — the header's Refresh button then re-reads exactly
+  // what is on screen, plus the tab set itself.
+  const refreshers = useRef(new Map<string, () => void>());
 
   const tabs = tabsFrom(
     AsyncResult.match(subscriptions, {
@@ -84,7 +100,7 @@ export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
   // while the app was open appears on the next refresh, not on a relaunch.
   const refresh = () => {
     refreshSubscriptions();
-    refreshUsage();
+    refreshers.current.get(active)?.();
   };
 
   return (
@@ -113,13 +129,12 @@ export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
         </TabsList>
 
         {tabs.map((tab) => (
-          <TabsContent key={tab.value} value={tab.value}>
-            <SelectedPlanBody
-              tab={tab}
-              usage={usage}
-              nowMs={nowMs}
-              onRefresh={refresh}
-            />
+          <TabsContent
+            key={tab.value}
+            value={tab.value}
+            className="animate-in fade-in duration-200"
+          >
+            <PlanTabBody tab={tab} nowMs={nowMs} refreshers={refreshers} />
           </TabsContent>
         ))}
       </Tabs>
@@ -169,25 +184,19 @@ function SubscriptionsNotice({
   });
 }
 
-/**
- * What the selected tab shows: the plan's reading, or the honest reason there
- * is not one.
- */
-function SelectedPlanBody({
+/** What one plan's tab shows: its reading, or the honest reason there is none. */
+function PlanTabBody({
   tab,
-  usage,
   nowMs,
-  onRefresh,
+  refreshers,
 }: {
   readonly tab: Tab;
-  readonly usage: AsyncResult.AsyncResult<
-    readonly Ipc.UsageSnapshot[],
-    Ipc.AppError
-  >;
   readonly nowMs: number;
-  readonly onRefresh: () => void;
+  readonly refreshers: React.RefObject<Map<string, () => void>>;
 }) {
   if (tab.kind === null) {
+    // Nothing of this tab's own to re-read: whether a reader exists is a
+    // property of the build, and the header's refresh re-asks OpenCode.
     return (
       <p
         className="text-sm text-muted-foreground"
@@ -199,16 +208,62 @@ function SelectedPlanBody({
     );
   }
 
+  return (
+    <ProviderUsage
+      kind={tab.kind}
+      value={tab.value}
+      nowMs={nowMs}
+      refreshers={refreshers}
+    />
+  );
+}
+
+/**
+ * Registers the mounted tab's refresher under its own value.
+ *
+ * The register/unregister pair lives in an effect keyed by the ref object and
+ * the value — both stable for a tab's lifetime — so re-renders never touch the
+ * map. The refresher itself is read through a ref so a fresh identity does not
+ * re-run the effect either.
+ */
+function useRefRegister(
+  refreshers: React.RefObject<Map<string, () => void>>,
+  value: string,
+  refresh: () => void,
+) {
+  const invoker = useRef(refresh);
+  invoker.current = refresh;
+  useEffect(() => {
+    const map = refreshers.current;
+    if (map === null) return;
+    map.set(value, () => invoker.current());
+    return () => {
+      map.delete(value);
+    };
+  }, [refreshers, value]);
+}
+
+/** One provider's reading, in the states a reading can be in. */
+function ProviderUsage({
+  kind,
+  value,
+  nowMs,
+  refreshers,
+}: {
+  readonly kind: Ipc.ProviderKind;
+  readonly value: string;
+  readonly nowMs: number;
+  readonly refreshers: React.RefObject<Map<string, () => void>>;
+}) {
+  const usage = useAtomValue(usageForAtom(kind));
+  const refreshOwn = useAtomRefresh(usageForAtom(kind));
+
+  useRefRegister(refreshers, value, refreshOwn);
+
   return AsyncResult.match(usage, {
-    onInitial: () => (
-      <p className="text-sm text-muted-foreground" data-testid="usage-loading">
-        Reading your usage…
-      </p>
-    ),
+    onInitial: () => <UsageLoadingSkeleton />,
     onSuccess: (result) => {
-      const snapshot = result.value.find(
-        (item) => item.provider === tab.kind,
-      );
+      const snapshot = result.value.find((item) => item.provider === kind);
       if (!snapshot) {
         return (
           <p className="text-sm text-muted-foreground">
@@ -226,7 +281,7 @@ function SelectedPlanBody({
         <button
           type="button"
           className="text-xs text-muted-foreground underline underline-offset-2"
-          onClick={onRefresh}
+          onClick={refreshOwn}
         >
           Try again
         </button>
@@ -236,18 +291,19 @@ function SelectedPlanBody({
 }
 
 /**
- * The reason a read failed, phrased for the user.
- *
- * A protocol failure carries its own message; anything else is a defect in
- * this app's plumbing and is labelled as such rather than shown as a provider
- * problem.
+ * The shape of a reading while it is being read, so a first visit fills the
+ * space the reading will occupy instead of collapsing the panel to one line.
  */
-function failureMessage(cause: Cause.Cause<Ipc.AppError>): string {
-  const squashed = Cause.squash(cause);
-  if (squashed instanceof Error && squashed.message.length > 0) {
-    return squashed.message;
-  }
-  return "The app could not be reached.";
+function UsageLoadingSkeleton() {
+  return (
+    <div className="flex flex-col gap-4" data-testid="usage-skeleton">
+      <div className="flex items-center gap-2">
+        <Skeleton className="h-5 w-20 rounded-full" />
+        <Skeleton className="h-4 w-14" />
+      </div>
+      <UsageWindowSkeleton />
+    </div>
+  );
 }
 
 /** The reading itself: freshness, the one big number, every window. */
@@ -340,14 +396,15 @@ function SnapshotHeader({
   readonly snapshot: Ipc.UsageSnapshot;
   readonly nowMs: number;
 }) {
+  const freshness = effectiveFreshness(snapshot, nowMs);
   const freshnessLabel =
-    snapshot.freshness === "unavailable"
+    freshness === "unavailable"
       ? "Unavailable"
       : (formatFreshness(snapshot.fetchedAt, nowMs) ?? "Just now");
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <FreshnessPill freshness={snapshot.freshness} label={freshnessLabel} />
+      <FreshnessPill freshness={freshness} label={freshnessLabel} />
       <span className="text-xs text-muted-foreground" data-testid="plan">
         {formatPlan(snapshot.plan)}
       </span>
@@ -356,4 +413,19 @@ function SnapshotHeader({
       )}
     </div>
   );
+}
+
+/**
+ * The reason a read failed, phrased for the user.
+ *
+ * A protocol failure carries its own message; anything else is a defect in
+ * this app's plumbing and is labelled as such rather than shown as a provider
+ * problem.
+ */
+function failureMessage(cause: Cause.Cause<Ipc.AppError>): string {
+  const squashed = Cause.squash(cause);
+  if (squashed instanceof Error && squashed.message.length > 0) {
+    return squashed.message;
+  }
+  return "The app could not be reached.";
 }

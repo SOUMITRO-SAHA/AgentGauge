@@ -114,6 +114,26 @@ export function formatUsed(usedPercent: number): string {
   return `${Math.round(usedPercent)}% used`;
 }
 
+/**
+ * The freshness a reading should present right now.
+ *
+ * A provider stamps its reading `live` at the moment it was fetched, but a
+ * reading kept on screen while its tab is revisited ages — after the 15-minute
+ * threshold the Rust side uses (`STALE_THRESHOLD_MINS`), it must present as
+ * stale rather than keep claiming it is live.
+ */
+export function effectiveFreshness(
+  snapshot: { readonly freshness: string; readonly fetchedAt: number | null },
+  nowMs: number,
+): "live" | "stale" | "unavailable" {
+  if (snapshot.freshness === "unavailable") return "unavailable";
+  if (snapshot.fetchedAt === null) return "unavailable";
+  return nowMs - snapshot.fetchedAt > STALE_THRESHOLD_MS ? "stale" : "live";
+}
+
+/** Mirrors `STALE_THRESHOLD_MINS` in the Rust backend. */
+const STALE_THRESHOLD_MS = 15 * 60_000;
+
 /** A plan tier for display, or a neutral placeholder when there is none. */
 export function formatPlan(plan: string | null): string {
   if (plan === null || plan === "unknown") return "Unknown plan";

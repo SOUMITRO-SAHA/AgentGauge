@@ -429,6 +429,11 @@ export interface DispatchFixtures {
    */
   readonly usageByProvider?: Record<string, Record<string, unknown>>;
   /**
+   * Delays one provider's `readUsageFor` answer, so specs can observe the
+   * skeleton a first reading shows instead of a blocking switch.
+   */
+  readonly usageForDelay?: { readonly provider: string; readonly ms: number };
+  /**
    * Whether this build contains the widget extension.
    *
    * Replaces the old `widgetInstalled`, which meant "a floating window was open".
@@ -695,6 +700,14 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
           return { type: "protocol", version: 1 };
         case "readPlan":
         case "readUsageFor": {
+          if (
+            request.type === "readUsageFor" &&
+            data.usageForDelay?.provider === request.provider
+          ) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, data.usageForDelay?.ms ?? 0),
+            );
+          }
           const perProvider = data.usageByProvider?.[
             request.provider as string
           ] as Record<string, unknown> | undefined;
@@ -1079,6 +1092,31 @@ export async function dashboardWithPlans(): Promise<void> {
       }),
     ],
     usageByProvider: { zai: zaiSnapshot() },
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+  });
+}
+
+/** The same dashboard, with the Z.AI reading arriving late. */
+export async function dashboardWithSlowPlans(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    subscriptions: [
+      subscription(),
+      subscription({
+        providerId: "alibaba-coding-plan",
+        name: "Alibaba Coding Plan",
+        label: "Alibaba Coding Plan",
+        integration: null,
+        apiBase: null,
+      }),
+    ],
+    usageByProvider: { zai: zaiSnapshot() },
+    usageForDelay: { provider: "zai", ms: 800 },
     installed: true,
     version: "codex-cli 0.159.0",
     widgetEmbedded: true,

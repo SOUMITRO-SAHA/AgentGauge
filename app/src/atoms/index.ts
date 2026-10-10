@@ -11,7 +11,6 @@
  */
 
 import * as Atom from "effect/unstable/reactivity/Atom";
-import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as Ipc from "~/lib/ipc";
@@ -42,18 +41,34 @@ export const subscriptionsAtom = runtime.atom(Ipc.getOpenCodeSubscriptions);
 export const selectedTabAtom = Atom.make("codex");
 
 /**
- * The usage for whichever tab is showing.
+ * One usage atom per provider, retained for the session.
  *
- * Reads the selection, so a tab switch re-runs this atom and fetches that one
- * provider. A tab with no reader never fetches; its panel renders the honest
- * "cannot read this yet" state instead.
+ * Switching a tab must not wait on a read: the panel renders the provider's
+ * last reading immediately while a fresh one runs, and only a provider seen
+ * for the first time shows the skeleton. The infinite idle TTL is what holds
+ * the reading — the default disposes an atom the moment its tab unmounts,
+ * which would turn every revisit into a first visit.
  */
-export const selectedUsageAtom = runtime.atom((get) => {
-  const tab = get(selectedTabAtom);
-  return Ipc.isProviderKind(tab)
-    ? Ipc.getUsageFor(tab)
-    : Effect.succeed<readonly Ipc.UsageSnapshot[]>([]);
-});
+const usageByProvider = new Map<
+  Ipc.ProviderKind,
+  ReturnType<typeof makeUsageAtom>
+>();
+
+function makeUsageAtom(kind: Ipc.ProviderKind) {
+  return Atom.setIdleTTL(Infinity)(
+    runtime.atom(() => Ipc.getUsageFor(kind)),
+  );
+}
+
+/** The session-retained usage atom for one provider. */
+export function usageForAtom(kind: Ipc.ProviderKind) {
+  let atom = usageByProvider.get(kind);
+  if (atom === undefined) {
+    atom = makeUsageAtom(kind);
+    usageByProvider.set(kind, atom);
+  }
+  return atom;
+}
 
 /** Codex account activity; callers must gate reads behind explicit consent. */
 export const accountUsageAtom = runtime.atom(Ipc.getAccountUsage);

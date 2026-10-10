@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  effectiveFreshness,
   formatCountdown,
   formatFreshness,
   formatPlan,
@@ -18,6 +19,33 @@ import {
   toneFor,
   windowTitle,
 } from "~/lib/usage";
+
+describe("effectiveFreshness", () => {
+  it("keeps a fresh reading live", () => {
+    expect(
+      effectiveFreshness({ freshness: "live", fetchedAt: 1_000 }, 2_000),
+    ).toBe("live");
+  });
+
+  it("ages a retained reading into stale at the threshold", () => {
+    const fifteenMinutes = 15 * 60_000;
+    expect(
+      effectiveFreshness(
+        { freshness: "live", fetchedAt: 0 },
+        fifteenMinutes + 1,
+      ),
+    ).toBe("stale");
+    expect(
+      effectiveFreshness({ freshness: "live", fetchedAt: 0 }, fifteenMinutes),
+    ).toBe("live");
+  });
+
+  it("never upgrades an unavailable reading by ageing it", () => {
+    expect(
+      effectiveFreshness({ freshness: "unavailable", fetchedAt: null }, 999),
+    ).toBe("unavailable");
+  });
+});
 
 describe("toneFor", () => {
   it("reports an unavailable reading as unknown, not healthy", () => {
