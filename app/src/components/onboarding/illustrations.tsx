@@ -172,36 +172,36 @@ export function RolloverArt(): ReactElement {
 export function WidgetArt(): ReactElement {
   return (
     <StepArt>
-      <rect x="24" y="30" width="272" height="140" rx="18" className="fill-surface-sunken/50" />
+      <rect x="16" y="12" width="288" height="176" rx="18" className="fill-surface-sunken/50" />
       <rect
-        x="104"
-        y="52"
-        width="112"
-        height="96"
+        x="64"
+        y="24"
+        width="164"
+        height="152"
         rx="16"
         strokeWidth="2"
         className="fill-surface-raised/80 stroke-border"
       />
       <path
-        d="M 128 116 A 32 32 0 0 1 192 116"
+        d="M 100 104 A 46 46 0 0 1 192 104"
         strokeWidth="6"
         strokeLinecap="round"
         className="stroke-border"
       />
       <path
-        d="M 128 116 A 32 32 0 0 1 137.4 93.4"
+        d="M 100 104 A 46 46 0 0 1 113.5 71.5"
         strokeWidth="6"
         strokeLinecap="round"
         className="stroke-brand-teal"
       />
-      <Clock x="114" y="122" size={14} className="text-brand-teal" />
-      <rect x="136" y="126" width="64" height="6" rx="3" className="fill-surface-sunken" />
-      <rect x="136" y="126" width="40" height="6" rx="3" className="fill-brand-teal" />
-      <CalendarBlank x="114" y="134" size={14} className="text-brand-amber" />
-      <rect x="136" y="138" width="64" height="6" rx="3" className="fill-surface-sunken" />
-      <rect x="136" y="138" width="24" height="6" rx="3" className="fill-brand-amber" />
-      <circle cx="238" cy="138" r="14" className="fill-brand-teal" />
-      <SquaresFour x="228" y="128" size={20} className="text-background" data-art-icon="widget" />
+      <Clock x="90" y="110" size={18} className="text-brand-teal" />
+      <rect x="118" y="116" width="84" height="8" rx="4" className="fill-surface-sunken" />
+      <rect x="118" y="116" width="52" height="8" rx="4" className="fill-brand-teal" />
+      <CalendarBlank x="90" y="132" size={18} className="text-brand-amber" />
+      <rect x="118" y="138" width="84" height="8" rx="4" className="fill-surface-sunken" />
+      <rect x="118" y="138" width="32" height="8" rx="4" className="fill-brand-amber" />
+      <circle cx="244" cy="146" r="16" className="fill-brand-teal" />
+      <SquaresFour x="232" y="134" size={24} className="text-background" data-art-icon="widget" />
     </StepArt>
   );
 }
@@ -210,7 +210,7 @@ export function AutomationArt(): ReactElement {
   return (
     <StepArt>
       <rect
-        x="70"
+        x="50"
         y="34"
         width="220"
         height="110"
@@ -221,9 +221,9 @@ export function AutomationArt(): ReactElement {
       />
       <rect
         x="52"
-        y="56"
+        y="48"
         width="220"
-        height="110"
+        height="126"
         rx="16"
         strokeWidth="2"
         className="fill-surface-raised/70 stroke-border"
@@ -237,9 +237,9 @@ export function AutomationArt(): ReactElement {
         strokeLinejoin="round"
         className="stroke-brand-amber"
       />
-      <circle cx="238" cy="72" r="16" className="fill-surface stroke-border" strokeWidth="2" />
-      <LockKey x="228" y="62" size={20} className="text-brand-amber" data-art-icon="no-send" />
-      <rect x="152" y="69" width="60" height="6" rx="3" className="fill-muted-foreground/40" />
+      <circle cx="232" cy="88" r="16" className="fill-surface stroke-border" strokeWidth="2" />
+      <LockKey x="222" y="78" size={20} className="text-brand-amber" data-art-icon="no-send" />
+      <rect x="152" y="73" width="52" height="6" rx="3" className="fill-muted-foreground/40" />
     </StepArt>
   );
 }

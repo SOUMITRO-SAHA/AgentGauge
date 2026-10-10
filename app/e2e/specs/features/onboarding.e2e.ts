@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, browser, $ } from "@wdio/globals";
 
 import {
@@ -8,6 +11,11 @@ import {
   onboardingWithNoData,
   restoreOnboardingStore,
 } from "../fixtures.js";
+
+const screenshots = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../.temp/screenshots",
+);
 
 /**
  * Onboarding coverage: the flow itself, and how it behaves when nothing can be
@@ -157,6 +165,120 @@ describe("onboarding flow", () => {
       await $('[data-testid="onboarding"] [data-testid="widget-status"]')
         .isExisting(),
     ).toBe(false);
+  });
+
+  it("centers the enlarged widget and pads its icons and rows", async () => {
+    for (let step = 0; step < 3; step += 1) {
+      await clickDisplayed('[data-testid="onboarding-next"]');
+    }
+    await expectDisplayed('[data-testid="demo-widget"]');
+
+    const layout = await browser.execute(() => {
+      const svg = document.querySelector('[data-testid="demo-widget"] svg');
+      const card = svg?.querySelector<SVGGraphicsElement>('rect[stroke-width="2"]')?.getBBox();
+      const badge = svg?.querySelector<SVGGraphicsElement>('circle[class*="fill-brand-teal"]')?.getBBox();
+      const gauge = svg?.querySelector<SVGGraphicsElement>('path[class*="stroke-border"]')?.getBBox();
+      const clock = svg?.querySelector<SVGSVGElement>('svg[class*="text-brand-teal"]');
+      const calendar = svg?.querySelector<SVGSVGElement>('svg[class*="text-brand-amber"]');
+      const rows = [...(svg?.querySelectorAll<SVGGraphicsElement>('rect[class="fill-surface-sunken"]') ?? [])]
+        .map((row) => row.getBBox());
+
+      return {
+        cardWidth: card?.width ?? 0,
+        viewportOffset: svg
+          ? Math.abs(svg.getBoundingClientRect().left + svg.getBoundingClientRect().width / 2 - window.innerWidth / 2)
+          : -1,
+        groupCenter: card && badge
+          ? (Math.min(card.x, badge.x) + Math.max(card.x + card.width, badge.x + badge.width)) / 2
+          : -1,
+        gaugeCenterOffset: card && gauge
+          ? Math.abs(gauge.x + gauge.width / 2 - card.x - card.width / 2)
+          : -1,
+        iconInset: card && clock && calendar
+          ? Math.min(Number(clock.getAttribute("x")) - card.x, Number(calendar.getAttribute("x")) - card.x)
+          : -1,
+        iconBottomInset: card && calendar
+          ? card.y + card.height - Number(calendar.getAttribute("y")) - Number(calendar.getAttribute("height"))
+          : -1,
+        rowGap: clock && calendar && rows.length === 2
+          ? Math.min(
+            rows[0].x - Number(clock.getAttribute("x")) - Number(clock.getAttribute("width")),
+            rows[1].x - Number(calendar.getAttribute("x")) - Number(calendar.getAttribute("width")),
+          )
+          : -1,
+        rowRightInset: card && rows.length === 2
+          ? Math.min(...rows.map((row) => card.x + card.width - row.x - row.width))
+          : -1,
+        rowBottomInset: card && rows.length === 2
+          ? card.y + card.height - Math.max(...rows.map((row) => row.y + row.height))
+          : -1,
+      };
+    });
+
+    expect(layout.cardWidth).toBeGreaterThanOrEqual(156);
+    expect(layout.viewportOffset).toBeLessThanOrEqual(2);
+    expect(Math.abs(layout.groupCenter - 160)).toBeLessThanOrEqual(6);
+    expect(layout.gaugeCenterOffset).toBeLessThanOrEqual(4);
+    expect(layout.iconInset).toBeGreaterThanOrEqual(24);
+    expect(layout.iconBottomInset).toBeGreaterThanOrEqual(24);
+    expect(layout.rowGap).toBeGreaterThanOrEqual(8);
+    expect(layout.rowRightInset).toBeGreaterThanOrEqual(20);
+    expect(layout.rowBottomInset).toBeGreaterThanOrEqual(24);
+
+    fs.mkdirSync(screenshots, { recursive: true });
+    const image = path.join(screenshots, "onboarding-widget-inner-padding.png");
+    await browser.saveScreenshot(image);
+    expect(fs.statSync(image).size).toBeGreaterThan(1000);
+  });
+
+  it("keeps the monitor artwork centered with its lock inset from the card edge", async () => {
+    for (let step = 0; step < 4; step += 1) {
+      await clickDisplayed('[data-testid="onboarding-next"]');
+    }
+    await expectDisplayed('[data-testid="demo-automation"]');
+
+    const layout = await browser.execute(() => {
+      const svg = document.querySelector('[data-testid="demo-automation"] svg');
+      const card = svg?.querySelector<SVGGraphicsElement>('rect[stroke-width="2"]:not([stroke-dasharray])')?.getBBox();
+      const backdrop = svg?.querySelector<SVGGraphicsElement>('rect[stroke-dasharray]')?.getBBox();
+      const circles = [...(svg?.querySelectorAll<SVGGraphicsElement>('circle') ?? [])]
+        .map((circle) => circle.getBBox())
+        .sort((left, right) => left.x - right.x);
+      const wave = svg?.querySelector<SVGGraphicsElement>('path[stroke-linejoin]')?.getBBox();
+      const bar = svg?.querySelector<SVGGraphicsElement>('rect[class*="fill-muted-foreground"]')?.getBBox();
+      const [eye, lock] = circles;
+
+      return {
+        viewportOffset: svg
+          ? Math.abs(svg.getBoundingClientRect().left + svg.getBoundingClientRect().width / 2 - window.innerWidth / 2)
+          : -1,
+        groupCenter: card && backdrop
+          ? (Math.min(card.x, backdrop.x) + Math.max(card.x + card.width, backdrop.x + backdrop.width)) / 2
+          : -1,
+        lockTopInset: card && lock ? lock.y - card.y : -1,
+        lockRightInset: card && lock ? card.x + card.width - lock.x - lock.width : -1,
+        eyeBottomInset: card && eye ? card.y + card.height - eye.y - eye.height : -1,
+        barTopInset: card && bar ? bar.y - card.y : -1,
+        lockBarGap: lock && bar ? lock.x - bar.x - bar.width : -1,
+        eyeWaveGap: eye && wave ? wave.x - eye.x - eye.width : -1,
+        waveRightInset: card && wave ? card.x + card.width - wave.x - wave.width : -1,
+      };
+    });
+
+    expect(layout.viewportOffset).toBeLessThanOrEqual(2);
+    expect(Math.abs(layout.groupCenter - 160)).toBeLessThanOrEqual(6);
+    expect(layout.lockTopInset).toBeGreaterThanOrEqual(24);
+    expect(layout.lockRightInset).toBeGreaterThanOrEqual(24);
+    expect(layout.eyeBottomInset).toBeGreaterThanOrEqual(24);
+    expect(layout.barTopInset).toBeGreaterThanOrEqual(24);
+    expect(layout.lockBarGap).toBeGreaterThanOrEqual(12);
+    expect(layout.eyeWaveGap).toBeGreaterThanOrEqual(12);
+    expect(layout.waveRightInset).toBeGreaterThanOrEqual(24);
+
+    fs.mkdirSync(screenshots, { recursive: true });
+    const image = path.join(screenshots, "onboarding-monitor-inner-padding.png");
+    await browser.saveScreenshot(image);
+    expect(fs.statSync(image).size).toBeGreaterThan(1000);
   });
 
   it("shows the monitor step as an illustration with no start control", async () => {
