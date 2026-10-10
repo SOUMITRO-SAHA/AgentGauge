@@ -39,44 +39,75 @@ describe("sidebar collapse", () => {
     );
   }
 
+  /**
+   * The collapse state.
+   *
+   * `data-testid="nav"` lands on the primitive's fixed *container* (the
+   * component spreads `{...props}` there), which carries no state; the
+   * `data-state`/`data-collapsible` pair lives on its parent, the outer
+   * `group` div the collapse styling keys off.
+   */
   const navState = () =>
-    $('[data-testid="nav"]').getAttribute("data-state");
+    browser.execute(
+      () =>
+        document
+          .querySelector('[data-testid="nav"]')
+          ?.parentElement?.getAttribute("data-state") ?? null,
+    );
 
-  it("collapses and expands from the top-right trigger, with no rail", async () => {
+  it("collapses from the brand-row trigger and expands from the parked control, with no rail", async () => {
     await wideWindow();
     try {
       // The draggable rail is gone: a strip along the whole pane edge that
       // toggled on any stray click is replaced by one explicit control.
       await expect($('[data-slot="sidebar-rail"]')).not.toBeExisting();
 
-      // One toggle control, parked in the window's top-right corner.
-      const trigger = await browser.execute(() => {
-        const el = document.querySelector('[data-testid="sidebar-trigger"]');
-        if (!el) return null;
-        const rect = el.getBoundingClientRect();
+      // The toggle sits in the pane's own header: same row as the wordmark,
+      // to its right.
+      const row = await browser.execute(() => {
+        const read = (selector: string) => {
+          const el = document.querySelector(selector);
+          if (!el) return null;
+          const rect = el.getBoundingClientRect();
+          return {
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            height: rect.height,
+          };
+        };
         return {
-          displayed: rect.width > 0 && rect.height > 0,
-          top: rect.top,
-          rightGap: window.innerWidth - rect.right,
+          trigger: read('[data-testid="sidebar-trigger"]'),
+          mark: read('[data-testid="brand-mark"]'),
         };
       });
-      expect(trigger).not.toBeNull();
-      expect(trigger!.displayed).toBe(true);
-      expect(trigger!.top).toBeLessThanOrEqual(24);
-      expect(trigger!.rightGap).toBeGreaterThanOrEqual(0);
-      expect(trigger!.rightGap).toBeLessThanOrEqual(24);
+      expect(row.trigger).not.toBeNull();
+      expect(row.mark).not.toBeNull();
+      const triggerCenter = row.trigger!.top + row.trigger!.height / 2;
+      const markCenter = row.mark!.top + row.mark!.height / 2;
+      expect(Math.abs(triggerCenter - markCenter)).toBeLessThanOrEqual(4);
+      expect(row.trigger!.left).toBeGreaterThan(row.mark!.right);
 
       await clickDisplayed('[data-testid="sidebar-trigger"]');
       await browser.waitUntil(async () => (await navState()) === "collapsed");
 
-      // Collapsed: the wordmark is gone, the mark stays.
+      // Collapsed: wordmark and trigger give way to the mark alone.
       expect(await $('[data-testid="brand-name"]').isDisplayed()).toBe(false);
+      expect(await $('[data-testid="sidebar-trigger"]').isDisplayed()).toBe(
+        false,
+      );
       await expectDisplayed('[data-testid="brand-mark"]');
       await expect($('[data-slot="sidebar-rail"]')).not.toBeExisting();
 
-      await clickDisplayed('[data-testid="sidebar-trigger"]');
+      // The parked control expands again — the trigger is hidden while
+      // collapsed, so the way back is the control outside the pane.
+      await browser.execute(() =>
+        (document.querySelector('[data-testid="nav-expand"]') as HTMLElement)
+          .click(),
+      );
       await browser.waitUntil(async () => (await navState()) === "expanded");
       await expectDisplayed('[data-testid="brand-name"]');
+      await expectDisplayed('[data-testid="sidebar-trigger"]');
     } finally {
       await browser.setWindowRect(60, 60, 960, 700);
     }
@@ -85,8 +116,8 @@ describe("sidebar collapse", () => {
   it("parks a hidden expand control outside the collapsed pane, on the brand row", async () => {
     await wideWindow();
     try {
-      // Expanded, the floating control does not exist at all — the trigger in
-      // the corner owns the toggle.
+      // Expanded, the floating control does not exist at all — the trigger
+      // on the brand row owns the toggle.
       const expanded = await browser.execute(() => {
         const el = document.querySelector('[data-testid="nav-expand"]');
         return el ? getComputedStyle(el).display : null;
