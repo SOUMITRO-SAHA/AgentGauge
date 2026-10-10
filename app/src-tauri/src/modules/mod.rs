@@ -8,4 +8,5 @@ pub mod automation;
 pub mod commands;
 pub mod onboarding;
 pub mod providers;
+pub mod settings;
 pub mod widget;

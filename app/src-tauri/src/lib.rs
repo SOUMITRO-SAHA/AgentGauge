@@ -17,6 +17,7 @@ use modules::automation::AutomationRunner;
 use modules::commands::AppState;
 use modules::onboarding::OnboardingStore;
 use modules::providers::ProviderRegistry;
+use modules::settings::SettingsStore;
 use modules::widget::SnapshotStore;
 use shared::clock::{Clock, SystemClock};
 
@@ -59,11 +60,21 @@ pub fn run() {
                 }
             };
 
+            // Same rule for preferences: degrade to a throwaway directory
+            // rather than fail to launch.
+            let settings = match app.path().app_data_dir() {
+                Ok(dir) => SettingsStore::in_app_dir(&dir),
+                Err(_) => {
+                    SettingsStore::new(std::env::temp_dir().join("ism").join("settings.json"))
+                }
+            };
+
             app.manage(AppState {
                 registry,
                 automation,
                 onboarding,
                 widget_snapshots,
+                settings,
             });
             Ok(())
         })

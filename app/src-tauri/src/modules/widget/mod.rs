@@ -59,7 +59,8 @@ pub const MINIMUM_MACOS_VERSION: &str = "14.0";
 ///
 /// Must stay in step with `SnapshotStore.relativePath` in
 /// `widget/Sources/SnapshotStore.swift`.
-pub const SNAPSHOT_RELATIVE_PATH: &str = "Library/Application Support/AI Sub Stats/widget-snapshot.json";
+pub const SNAPSHOT_RELATIVE_PATH: &str =
+    "Library/Application Support/AI Sub Stats/widget-snapshot.json";
 
 // ---------------------------------------------------------------------------
 // Snapshot: the wire contract with the Swift side
@@ -137,9 +138,9 @@ impl WidgetSnapshot {
         // Any window the provider reported that is neither of the two we name
         // explicitly is still worth showing, but must not be mislabelled.
         for window in &snapshot.windows {
-            let is_named = windows.iter().any(|w| {
-                w.label == window.label && w.resets_at == window.resets_at
-            });
+            let is_named = windows
+                .iter()
+                .any(|w| w.label == window.label && w.resets_at == window.resets_at);
             if !is_named {
                 windows.push(WidgetWindow {
                     kind: WindowKind::Other,
@@ -382,11 +383,7 @@ impl SystemWidgetStatus {
 }
 
 /// The setup procedure, worded to match what macOS actually shows.
-fn setup_steps(
-    extension_present: bool,
-    snapshot_written: bool,
-    menu_bar: bool,
-) -> Vec<SetupStep> {
+fn setup_steps(extension_present: bool, snapshot_written: bool, menu_bar: bool) -> Vec<SetupStep> {
     let mut steps = Vec::new();
 
     if !extension_present {
@@ -418,8 +415,7 @@ fn setup_steps(
              or newer you can also add it to the menu bar from Control Center settings."
                 .to_string()
         } else {
-            "Small, Medium and Large all show the 5-hour window and the weekly limit."
-                .to_string()
+            "Small, Medium and Large all show the 5-hour window and the weekly limit.".to_string()
         },
     });
 
@@ -468,7 +464,10 @@ pub fn macos_version() -> Option<String> {
 pub fn parse_version(version: &str) -> Option<(u32, u32)> {
     let mut parts = version.trim().split('.');
     let major = parts.next()?.parse::<u32>().ok()?;
-    let minor = parts.next().and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+    let minor = parts
+        .next()
+        .and_then(|p| p.parse::<u32>().ok())
+        .unwrap_or(0);
     Some((major, minor))
 }
 
@@ -635,7 +634,10 @@ mod tests {
         let status = SystemWidgetStatus::detect("linux", Some("6.8.0"), true, true);
         assert!(!status.supported);
         assert_eq!(status.system, WidgetSystem::None);
-        assert!(status.setup.is_empty(), "no steps for an unsupported platform");
+        assert!(
+            status.setup.is_empty(),
+            "no steps for an unsupported platform"
+        );
         assert!(status.reason.is_some());
     }
 
@@ -673,10 +675,8 @@ mod tests {
 
     #[test]
     fn the_menu_bar_is_offered_only_from_macos_26() {
-        assert!(SystemWidgetStatus::detect("macos", Some("26.0"), true, true)
-            .menu_bar_available);
-        assert!(!SystemWidgetStatus::detect("macos", Some("25.9"), true, true)
-            .menu_bar_available);
+        assert!(SystemWidgetStatus::detect("macos", Some("26.0"), true, true).menu_bar_available);
+        assert!(!SystemWidgetStatus::detect("macos", Some("25.9"), true, true).menu_bar_available);
     }
 
     #[test]

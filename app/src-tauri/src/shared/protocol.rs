@@ -68,6 +68,20 @@ pub enum AppRequest {
     /// the app can only report what is true and explain the procedure — it cannot
     /// install it, and must not pretend to have done so.
     SystemWidgetStatus,
+    /// The renderer's persisted preferences, so a choice survives a relaunch.
+    UiState,
+    /// Persists the renderer's preferences.
+    ///
+    /// The route vocabulary is the renderer's; see `modules::settings` for why
+    /// this is stored opaquely rather than as a Rust enum.
+    SetUiState {
+        /// The destination to reopen on, if the user has chosen one.
+        ///
+        /// Named on the field itself: the enum-level `rename_all` covers variant
+        /// names only, and this is the protocol's first multi-word field.
+        #[serde(default, rename = "lastRoute")]
+        last_route: Option<String>,
+    },
 }
 
 impl AppRequest {
@@ -90,6 +104,8 @@ impl AppRequest {
             Self::OnboardingProgress => "onboardingProgress",
             Self::SetOnboardingStep { .. } => "setOnboardingStep",
             Self::SystemWidgetStatus => "systemWidgetStatus",
+            Self::UiState => "uiState",
+            Self::SetUiState { .. } => "setUiState",
         }
     }
 }
@@ -126,6 +142,10 @@ pub enum AppResponse {
     },
     SystemWidget {
         status: SystemWidgetStatus,
+    },
+    /// The renderer's persisted preferences.
+    UiState {
+        state: crate::modules::settings::UiState,
     },
     /// A request that could not be satisfied.
     Failure {
@@ -177,6 +197,36 @@ mod tests {
                 dismissed: false,
             }
         );
+    }
+
+    #[test]
+    fn ui_state_round_trips_through_the_envelope() {
+        let request = AppRequest::SetUiState {
+            last_route: Some("stats".into()),
+        };
+        let json = serde_json::to_string(&request).expect("serializes");
+        // camelCase on the field, tagged on `type` — same as every other request.
+        assert_eq!(json, r#"{"type":"setUiState","lastRoute":"stats"}"#);
+        assert_eq!(
+            serde_json::from_str::<AppRequest>(&json).expect("deserializes"),
+            request
+        );
+    }
+
+    #[test]
+    fn ui_state_names_are_stable_for_the_dispatch_log() {
+        assert_eq!(AppRequest::UiState.name(), "uiState");
+        assert_eq!(
+            AppRequest::SetUiState { last_route: None }.name(),
+            "setUiState"
+        );
+    }
+
+    #[test]
+    fn a_set_ui_state_may_clear_the_choice() {
+        let request: AppRequest = serde_json::from_str(r#"{"type":"setUiState","lastRoute":null}"#)
+            .expect("deserializes");
+        assert_eq!(request, AppRequest::SetUiState { last_route: None });
     }
 
     #[test]

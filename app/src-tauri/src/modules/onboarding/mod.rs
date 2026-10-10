@@ -347,12 +347,7 @@ mod contract_tests {
         let names: Vec<&str> = OnboardingStep::ALL
             .iter()
             .map(|step| serde_json::to_value(step).expect("serialises"))
-            .map(|json| {
-                json.as_str()
-                    .expect("a bare string tag")
-                    .to_string()
-                    .leak() as &str
-            })
+            .map(|json| json.as_str().expect("a bare string tag").to_string().leak() as &str)
             .collect();
 
         assert_eq!(
@@ -370,8 +365,7 @@ mod contract_tests {
 
     #[test]
     fn every_step_has_a_distinct_ordinal() {
-        let mut indices: Vec<u8> =
-            OnboardingStep::ALL.iter().map(|s| s.index()).collect();
+        let mut indices: Vec<u8> = OnboardingStep::ALL.iter().map(|s| s.index()).collect();
         let count = indices.len();
         indices.sort_unstable();
         indices.dedup();

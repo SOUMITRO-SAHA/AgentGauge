@@ -17,7 +17,8 @@ use crate::modules::onboarding::{
     OnboardingProgress, OnboardingState, OnboardingStep, OnboardingStore,
 };
 use crate::modules::providers::{ProviderRegistry, PING_PROMPT};
-use crate::modules::widget::{SnapshotStore, SystemWidgetStatus, WidgetSnapshot, now_secs};
+use crate::modules::settings::{SettingsStore, UiState};
+use crate::modules::widget::{now_secs, SnapshotStore, SystemWidgetStatus, WidgetSnapshot};
 use crate::shared::domain::{ProviderKind, UsageSnapshot};
 use crate::shared::error::Error;
 use crate::shared::protocol::{AppRequest, AppResponse, PROTOCOL_VERSION};
@@ -28,6 +29,7 @@ pub struct AppState {
     pub automation: Arc<AutomationRunner>,
     pub onboarding: OnboardingStore,
     pub widget_snapshots: Option<SnapshotStore>,
+    pub settings: SettingsStore,
 }
 
 /// The single entry point for every renderer capability.
@@ -128,6 +130,19 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
         AppRequest::SystemWidgetStatus => Ok(AppResponse::SystemWidget {
             status: SystemWidgetStatus::current(),
         }),
+
+        AppRequest::UiState => Ok(AppResponse::UiState {
+            state: state.settings.load(),
+        }),
+
+        AppRequest::SetUiState { last_route } => {
+            let next = UiState::default().with_last_route(last_route);
+            // Same rule as onboarding: a failed write is reported, because a
+            // preference lost silently is a preference that lies about having
+            // been kept.
+            state.settings.save(&next)?;
+            Ok(AppResponse::UiState { state: next })
+        }
     }
 }
 
