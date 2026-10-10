@@ -11,9 +11,35 @@ segmented crossbar suggesting measured usage. It uses one neutral foreground
 color per color scheme on a transparent canvas: graphite (`#17191D`) for light
 scheme and near-white (`#F4F4F5`) for dark scheme. Do not add a background tile
 to the master SVG. Native desktop icons are a separate composition using only
-the approved monochrome theme: brand ink (`#111827`) full-bleed background and
-near-white (`#F4F4F5`) A mark, including its segmented meter bars. Do not add a
+the approved monochrome theme: a brand ink (`#111827`) plate and a near-white
+(`#F4F4F5`) A mark, including its segmented meter bars. Do not add a
 teal accent to this icon theme.
+
+### The desktop plate follows Apple's macOS icon grid
+
+On 2026-10-10 the user directed that the desktop icon stop rendering larger than
+its Dock neighbours. The plate is drawn on the grid macOS itself uses, measured
+from the system app icons on this machine rather than assumed — every native icon
+fills the same 206 of every 256 pixels of its canvas:
+
+| Property | Value | Measured from |
+| --- | --- | --- |
+| Canvas | 1024 x 1024 | Apple HIG layout size |
+| Opaque body | 824 x 824 | 0.8047 of the canvas |
+| Inset | 100 px per side | 25/256 |
+| Corner radius | 211 px | 0.256 of the body width |
+| Corner exponent | 2.4 | fitted to the system icons' corner profile |
+
+The Dock draws the stored artwork rather than masking it, so the shape has to be
+authored here. A full-bleed square renders larger than every neighbouring icon
+and with sharp corners — that is the whole defect, and it is why the plate is a
+path rather than a `rect`.
+
+**Keep the mark's proportion inside the plate unchanged when the grid changes.**
+The source is scaled into the body rather than redrawn, so the monogram and its
+segmented crossbar stay exactly as approved. The mark currently clears the plate
+edge by 11% per side, just under the 12% below; that ratio comes from
+`logo.svg`, and shrinking the mark is a brand change that needs the user.
 
 - Name: **AgentGauge**. Descriptor remains “A local usage and status dashboard
   for AI coding tools.”

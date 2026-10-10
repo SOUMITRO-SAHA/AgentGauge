@@ -37,18 +37,88 @@ export const desktopIconFiles = [
 export const desktopIconBackground = "#111827";
 export const desktopIconMarkColor = "#F4F4F5";
 
+/**
+ * Apple's macOS icon grid, measured from the icons macOS ships with rather than
+ * assumed: every native app icon occupies the same 206 of every 256 pixels of
+ * its canvas.
+ */
+export const MACOS_ICON_CANVAS = 1024;
+
+/** Edge length of the opaque body within {@link MACOS_ICON_CANVAS}. */
+export const MACOS_ICON_BODY = 824;
+
+/** Corner radius of that body, matching the system icons at the same scale. */
+export const MACOS_ICON_CORNER_RADIUS = 211;
+
+/**
+ * Superellipse exponent of the corner curve. `2` is a plain circular arc; the
+ * system icons measure slightly fuller than that, which is the continuous
+ * corner macOS uses rather than a circular one.
+ */
+export const MACOS_ICON_CORNER_EXPONENT = 2.4;
+
+const MACOS_ICON_INSET = (MACOS_ICON_CANVAS - MACOS_ICON_BODY) / 2;
+
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-export function composeDesktopIconSvg(sourceSvg: string) {
-  if (!/<svg\b[^>]*>/i.test(sourceSvg)) {
-    throw new Error("Desktop icons must be generated from an SVG source.");
+function format(value: number): string {
+  return String(Number(value.toFixed(6)));
+}
+
+function macosIconBodyPath(samplesPerCorner = 32): string {
+  const radius = MACOS_ICON_CORNER_RADIUS;
+  const quarter: Array<[number, number]> = [];
+  for (let sample = 0; sample <= samplesPerCorner; sample++) {
+    const t = (sample / samplesPerCorner) * (Math.PI / 2);
+    quarter.push([
+      radius * Math.cos(t) ** (2 / MACOS_ICON_CORNER_EXPONENT),
+      radius * Math.sin(t) ** (2 / MACOS_ICON_CORNER_EXPONENT),
+    ]);
   }
 
-  return sourceSvg.replace(
-    /<svg\b[^>]*>/i,
-    (svgTag) =>
-      `${svgTag}<style>.mark{fill:${desktopIconMarkColor}!important}</style><rect width="100%" height="100%" fill="${desktopIconBackground}"/>`,
-  );
+  const points: string[] = [];
+  const arc = (x: number, y: number, signX: 1 | -1, signY: 1 | -1, reverse: boolean) => {
+    for (const [dx, dy] of reverse ? [...quarter].reverse() : quarter) {
+      points.push(`${format(x + signX * dx)} ${format(y + signY * dy)}`);
+    }
+  };
+
+  arc(MACOS_ICON_INSET + MACOS_ICON_BODY - radius, MACOS_ICON_INSET + radius, 1, -1, true);
+  arc(MACOS_ICON_INSET + MACOS_ICON_BODY - radius, MACOS_ICON_INSET + MACOS_ICON_BODY - radius, 1, 1, false);
+  arc(MACOS_ICON_INSET + radius, MACOS_ICON_INSET + MACOS_ICON_BODY - radius, -1, 1, true);
+  arc(MACOS_ICON_INSET + radius, MACOS_ICON_INSET + radius, -1, -1, false);
+
+  return `M ${points.join(" L ")} Z`;
+}
+
+export function composeDesktopIconSvg(sourceSvg: string) {
+  const openTag = sourceSvg.match(/<svg\b[^>]*>/i)?.[0];
+  if (!openTag) {
+    throw new Error("Desktop icons must be generated from an SVG source.");
+  }
+  const viewBox = openTag.match(/viewBox\s*=\s*["']([^"']+)["']/i)?.[1];
+  if (!viewBox) {
+    throw new Error("Desktop icon sources must declare a viewBox.");
+  }
+  const [, , sourceWidth, sourceHeight] = viewBox.trim().split(/[\s,]+/).map(Number);
+
+  const scale = MACOS_ICON_BODY / Math.max(sourceWidth, sourceHeight);
+  const translateX = MACOS_ICON_INSET + (MACOS_ICON_BODY - sourceWidth * scale) / 2;
+  const translateY = MACOS_ICON_INSET + (MACOS_ICON_BODY - sourceHeight * scale) / 2;
+
+  const canvasViewBox = `viewBox="0 0 ${MACOS_ICON_CANVAS} ${MACOS_ICON_CANVAS}"`;
+  const sizedTag = openTag
+    .replace(/\s(?:width|height)\s*=\s*["'][^"']*["']/gi, "")
+    .replace(/viewBox\s*=\s*["'][^"']*["']/i, canvasViewBox);
+
+  const overlay =
+    `<style>.mark{fill:${desktopIconMarkColor}!important}</style>` +
+    `<path d="${macosIconBodyPath()}" fill="${desktopIconBackground}"/>` +
+    `<g transform="translate(${format(translateX)} ${format(translateY)}) scale(${format(scale)})">`;
+
+  return sourceSvg
+    .replace(openTag, () => `${sizedTag}${overlay}`)
+    .replace(/<\/svg\s*>/i, () => "</g></svg>");
 }
 
 export function copyDesktopIcons(generatedDirectory: string, destinationDirectory: string) {
