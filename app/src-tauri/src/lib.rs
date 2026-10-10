@@ -19,7 +19,6 @@ use modules::onboarding::OnboardingStore;
 use modules::providers::ProviderRegistry;
 use modules::settings::SettingsStore;
 use modules::widget::SnapshotStore;
-use shared::clock::{Clock, SystemClock};
 
 /// Surfaces for the integration tests in `tests/`.
 ///
@@ -35,11 +34,10 @@ pub mod testkit {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let now_ms = SystemClock.now_ms();
     // Built once here and shared: the watcher and the command dispatcher must
     // see the same provider instances, or a poll and a manual read could each
     // spawn their own app-server process.
-    let registry = Arc::new(ProviderRegistry::new(now_ms));
+    let registry = Arc::new(ProviderRegistry::new());
     let automation = Arc::new(AutomationRunner::new(Arc::clone(&registry)));
     // Where the macOS system widget reads its snapshot from. `None` only when
     // there is no home directory, in which case the widget has nowhere to read

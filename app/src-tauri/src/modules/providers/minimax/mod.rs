@@ -19,13 +19,11 @@ use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
 /// first, then the China plan.
 const FAMILY: [&str; 2] = ["minimax-coding-plan", "minimax-cn-coding-plan"];
 
-pub struct MinimaxProvider {
-    now_ms: i64,
-}
+pub struct MinimaxProvider;
 
 impl MinimaxProvider {
-    pub fn new(now_ms: i64) -> Self {
-        Self { now_ms }
+    pub fn new() -> Self {
+        Self
     }
 
     fn spec() -> PlanSpec {
@@ -48,7 +46,7 @@ impl Provider for MinimaxProvider {
     }
 
     fn read_usage(&self) -> Result<UsageSnapshot, Error> {
-        coding_plan::read_usage(&Self::spec(), self.now_ms, |payload, kind, now_ms| {
+        coding_plan::read_usage(&Self::spec(), |payload, kind, now_ms| {
             // MiniMax reports a rejected credential inside its own envelope
             // with a 200 status; that is a "reconnect it" state, not a broken
             // read.
@@ -87,7 +85,7 @@ mod tests {
 
     #[test]
     fn the_provider_speaks_for_minimax() {
-        let provider = MinimaxProvider::new(0);
+        let provider = MinimaxProvider::new();
         assert_eq!(provider.kind(), ProviderKind::Minimax);
         assert_eq!(provider.status().kind, ProviderKind::Minimax);
     }

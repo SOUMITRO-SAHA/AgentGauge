@@ -262,7 +262,7 @@ mod tests {
 
     fn runner() -> AutomationRunner {
         let clock = FixedClock::new(1_000);
-        AutomationRunner::new(Arc::new(ProviderRegistry::new(0))).with_clock(Arc::new(clock))
+        AutomationRunner::new(Arc::new(ProviderRegistry::new())).with_clock(Arc::new(clock))
     }
 
     #[test]

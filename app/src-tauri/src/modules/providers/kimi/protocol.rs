@@ -112,7 +112,12 @@ pub fn decode_usages(
         source: provider.source().to_string(),
         reason: None,
         plan: None,
-        permission: UsagePermission::Unknown,
+        // The usage endpoint answering means the account is usable; an
+        // exhausted or rejected account arrives as an error envelope instead,
+        // which decodes to an explicit unavailable state. Leaving this
+        // `Unknown` would mute every reading — the UI renders unknown as
+        // never-healthy, and a plan reporting low usage is healthy.
+        permission: UsagePermission::Allowed,
         windows,
         five_hour,
         weekly,

@@ -28,6 +28,15 @@ pub use transport::CODEX_EXECUTABLE;
 /// open, not to make the model do work.
 pub const PING_PROMPT: &str = "hi";
 
+/// The read stamp: the clock at the moment a reading is decoded.
+///
+/// A stamp captured at construction would make a reading fetched hours into a
+/// session claim it was fetched at launch, which the freshness label then
+/// reports as old on data that is seconds fresh.
+fn fresh_now_ms() -> i64 {
+    crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock)
+}
+
 /// Reasoning effort used for a ping. `minimal` is the cheapest tier the
 /// protocol accepts.
 const PING_EFFORT: &str = "minimal";
@@ -55,15 +64,13 @@ const PING_CWD: &str = "C:\\Windows\\Temp";
 pub struct CodexProvider {
     server: Mutex<Option<AppServer>>,
     executable: String,
-    now_ms: i64,
 }
 
 impl CodexProvider {
-    pub fn new(executable: impl Into<String>, now_ms: i64) -> Self {
+    pub fn new(executable: impl Into<String>) -> Self {
         Self {
             server: Mutex::new(None),
             executable: executable.into(),
-            now_ms,
         }
     }
 
@@ -139,7 +146,7 @@ impl Provider for CodexProvider {
                 // widget polls on a timer and does not need credit detail.
                 Some(serde_json::json!({ "excludeResetCreditDetails": true })),
             )?;
-            protocol::decode_rate_limits(&payload, self.kind(), self.now_ms)
+            protocol::decode_rate_limits(&payload, self.kind(), fresh_now_ms())
         })
         .or_else(|err| match err.kind {
             // A signed-out account is a state, not a failure. The client shows
@@ -219,7 +226,7 @@ impl Provider for CodexProvider {
                 Some(serde_json::json!({ "excludeResetCreditDetails": true })),
             ) {
                 Ok(payload) => {
-                    protocol::decode_rate_limits(&payload, self.kind(), self.now_ms).ok()
+                    protocol::decode_rate_limits(&payload, self.kind(), fresh_now_ms()).ok()
                 }
                 // The turn succeeded even if the follow-up read did not.
                 Err(_) => None,
@@ -281,7 +288,7 @@ mod tests {
 
     #[test]
     fn status_reports_a_missing_binary_without_panicking() {
-        let provider = CodexProvider::new("definitely-not-a-real-binary-xyz", 0);
+        let provider = CodexProvider::new("definitely-not-a-real-binary-xyz");
         let status = provider.status();
         assert!(!status.installed);
         assert!(status.reason.is_some());
@@ -289,7 +296,7 @@ mod tests {
 
     #[test]
     fn status_reports_the_installed_version() {
-        let provider = CodexProvider::new(transport::CODEX_EXECUTABLE, 0);
+        let provider = CodexProvider::new(transport::CODEX_EXECUTABLE);
         let status = provider.status();
         assert!(status.installed, "expected codex on PATH in CI");
         assert!(status.version.unwrap().starts_with("codex-cli"));
@@ -297,7 +304,7 @@ mod tests {
 
     #[test]
     fn reading_without_codex_is_a_typed_error() {
-        let provider = CodexProvider::new("definitely-not-a-real-binary-xyz", 0);
+        let provider = CodexProvider::new("definitely-not-a-real-binary-xyz");
         let err = provider.read_usage().expect_err("must fail");
         assert_eq!(err.kind, ErrorKind::ProviderMissing);
     }
@@ -328,7 +335,7 @@ mod tests {
 
     #[test]
     fn an_unavailable_snapshot_names_the_executable() {
-        let provider = CodexProvider::new("definitely-not-a-real-binary-xyz", 0);
+        let provider = CodexProvider::new("definitely-not-a-real-binary-xyz");
         let snapshot = provider.cached_or_unavailable("not installed");
         assert_eq!(snapshot.provider, ProviderKind::Codex);
         assert_eq!(snapshot.reason.as_deref(), Some("not installed"));

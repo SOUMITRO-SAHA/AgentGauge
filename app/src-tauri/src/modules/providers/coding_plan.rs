@@ -99,7 +99,6 @@ pub(crate) fn plan_request(catalog: &OpenCodeCatalog, spec: &PlanSpec) -> PlanRe
 /// is an `Err`.
 pub(crate) fn read_usage(
     spec: &PlanSpec,
-    now_ms: i64,
     decode: impl Fn(&str, ProviderKind, i64) -> Result<UsageSnapshot, Error>,
 ) -> Result<UsageSnapshot, Error> {
     let catalog = match OpenCodeCatalog::read() {
@@ -119,6 +118,10 @@ pub(crate) fn read_usage(
         PlanRequest::Unavailable(snapshot) => Ok(snapshot),
         PlanRequest::Fetch { url, auth } => {
             let payload = http::get_json(&url, &auth)?;
+            // Stamped at read time, not at app start: a stale stamp makes a
+            // reading fetched seconds ago claim it was fetched when the app
+            // launched, and the freshness label reports that lie as hours.
+            let now_ms = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
             decode(&payload, spec.kind, now_ms)
         }
     }

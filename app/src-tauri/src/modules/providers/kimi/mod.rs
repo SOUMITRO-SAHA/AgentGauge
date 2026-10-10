@@ -22,13 +22,11 @@ const FAMILY: [&str; 3] = [
     "kimi-code-plan-global",
 ];
 
-pub struct KimiProvider {
-    now_ms: i64,
-}
+pub struct KimiProvider;
 
 impl KimiProvider {
-    pub fn new(now_ms: i64) -> Self {
-        Self { now_ms }
+    pub fn new() -> Self {
+        Self
     }
 
     fn spec() -> PlanSpec {
@@ -51,7 +49,7 @@ impl Provider for KimiProvider {
     }
 
     fn read_usage(&self) -> Result<UsageSnapshot, Error> {
-        coding_plan::read_usage(&Self::spec(), self.now_ms, |payload, kind, now_ms| {
+        coding_plan::read_usage(&Self::spec(), |payload, kind, now_ms| {
             if is_auth_refusal(payload) {
                 return Ok(decode_auth_failure(kind));
             }
@@ -87,7 +85,7 @@ mod tests {
 
     #[test]
     fn the_provider_speaks_for_kimi() {
-        let provider = KimiProvider::new(0);
+        let provider = KimiProvider::new();
         assert_eq!(provider.kind(), ProviderKind::Kimi);
         assert_eq!(provider.status().kind, ProviderKind::Kimi);
     }

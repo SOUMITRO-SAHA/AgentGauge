@@ -45,13 +45,13 @@ impl ProviderRegistry {
     /// app without Codex installed still yields a usable "not installed"
     /// state rather than a failed start-up. The coding-plan providers are the
     /// same: they ask OpenCode what is connected only when read.
-    pub fn new(now_ms: i64) -> Self {
+    pub fn new() -> Self {
         Self {
             providers: vec![
-                Box::new(CodexProvider::new(CODEX_EXECUTABLE, now_ms)),
-                Box::new(ZaiProvider::new(now_ms)),
-                Box::new(MinimaxProvider::new(now_ms)),
-                Box::new(KimiProvider::new(now_ms)),
+                Box::new(CodexProvider::new(CODEX_EXECUTABLE)),
+                Box::new(ZaiProvider::new()),
+                Box::new(MinimaxProvider::new()),
+                Box::new(KimiProvider::new()),
             ],
         }
     }
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn registers_every_supported_provider() {
-        let registry = ProviderRegistry::new(0);
+        let registry = ProviderRegistry::new();
         assert_eq!(
             registry.kinds(),
             vec![
@@ -129,14 +129,14 @@ mod tests {
 
     #[test]
     fn reports_status_for_every_provider() {
-        let registry = ProviderRegistry::new(0);
+        let registry = ProviderRegistry::new();
         assert_eq!(registry.status().len(), 4);
     }
 
     #[test]
     fn every_registered_status_speaks_for_its_own_kind() {
         // A status row must never describe another provider's transport.
-        let registry = ProviderRegistry::new(0);
+        let registry = ProviderRegistry::new();
         for status in registry.status() {
             assert_eq!(
                 registry.find(status.kind).is_ok(),
@@ -152,7 +152,7 @@ mod tests {
         // The registry guard itself is exercised through a kind that exists;
         // an unknown kind cannot be constructed because ProviderKind is a
         // closed enum whose every variant is registered above.
-        let registry = ProviderRegistry::new(0);
+        let registry = ProviderRegistry::new();
         for kind in registry.kinds() {
             assert!(registry.find(kind).is_ok());
         }

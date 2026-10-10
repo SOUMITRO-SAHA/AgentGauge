@@ -111,7 +111,12 @@ pub fn decode_quota(
         source: provider.source().to_string(),
         reason: None,
         plan: data.level.as_deref().map(PlanKind::from_wire),
-        permission: UsagePermission::Unknown,
+        // The quota endpoint answering means the account is usable; an
+        // exhausted or rejected account arrives as an error envelope instead,
+        // which decodes to an explicit unavailable state. Leaving this
+        // `Unknown` would mute every reading — the UI renders unknown as
+        // never-healthy, and a plan reporting 19% used is healthy.
+        permission: UsagePermission::Allowed,
         windows,
         five_hour,
         weekly,
@@ -200,6 +205,73 @@ mod tests {
         let weekly = snapshot.weekly.expect("weekly window present");
         assert_eq!(weekly.used_percent, 35);
         assert_eq!(weekly.duration_mins, Some(10_080));
+    }
+
+    /// A second verbatim live capture, hours after the first, with different
+    /// values — pins the mapping against a moving target rather than one
+    /// lucky reply.
+    const LIVE_QUOTA_LATER: &str = r#"{
+        "code": 200,
+        "msg": "Operation successful",
+        "data": {
+            "limits": [
+                {
+                    "type": "CREDIT_LIMIT",
+                    "unit": 3,
+                    "number": 5,
+                    "usage": 12000,
+                    "currentValue": 2318,
+                    "remaining": 9681,
+                    "percentage": 19,
+                    "nextResetTime": 1791665647806
+                },
+                {
+                    "type": "CREDIT_LIMIT",
+                    "unit": 6,
+                    "number": 1,
+                    "usage": 60000,
+                    "currentValue": 27896,
+                    "remaining": 32103,
+                    "percentage": 46,
+                    "nextResetTime": 1791790768984
+                }
+            ],
+            "level": "pro"
+        },
+        "success": true
+    }"#;
+
+    #[test]
+    fn a_second_live_capture_decodes_with_the_same_rules() {
+        // Captured at 2026-10-10T17:48:06Z; the absolute counts independently
+        // confirm the direction: 2318/12000 = 19% used matches `percentage`.
+        let snapshot = decode_quota(LIVE_QUOTA_LATER, ProviderKind::Zai, 5_000).expect("decodes");
+        let five_hour = snapshot.five_hour.expect("5h window present");
+        assert_eq!(five_hour.used_percent, 19);
+        assert_eq!(five_hour.remaining_percent, 81);
+        assert_eq!(five_hour.resets_at, Some(1_791_665_647));
+
+        let weekly = snapshot.weekly.expect("weekly window present");
+        assert_eq!(weekly.used_percent, 46);
+        assert_eq!(weekly.remaining_percent, 54);
+        assert_eq!(weekly.resets_at, Some(1_791_790_768));
+    }
+
+    #[test]
+    fn a_successful_read_is_allowed_not_unknown() {
+        // `unknown` is never rendered as healthy, so a plan reporting 19%
+        // used must not arrive as unknown — the muted grey it causes reads
+        // as wrong data next to Codex's coloured reading.
+        let snapshot = decode_quota(LIVE_QUOTA_LATER, ProviderKind::Zai, 0).expect("decodes");
+        assert_eq!(snapshot.permission, UsagePermission::Allowed);
+    }
+
+    #[test]
+    fn the_stamp_is_the_one_the_caller_passes() {
+        // The pipeline passes the clock at read time; the decoder must not
+        // invent its own (older) stamp.
+        let snapshot = decode_quota(LIVE_QUOTA_LATER, ProviderKind::Zai, 123_456).expect("decodes");
+        assert_eq!(snapshot.fetched_at, Some(123_456));
     }
 
     #[test]

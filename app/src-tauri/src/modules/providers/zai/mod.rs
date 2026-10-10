@@ -19,13 +19,11 @@ use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
 /// likely to be spending the global one.
 const FAMILY: [&str; 2] = ["zai-coding-plan", "zhipuai-coding-plan"];
 
-pub struct ZaiProvider {
-    now_ms: i64,
-}
+pub struct ZaiProvider;
 
 impl ZaiProvider {
-    pub fn new(now_ms: i64) -> Self {
-        Self { now_ms }
+    pub fn new() -> Self {
+        Self
     }
 
     fn spec() -> PlanSpec {
@@ -48,7 +46,7 @@ impl Provider for ZaiProvider {
     }
 
     fn read_usage(&self) -> Result<UsageSnapshot, Error> {
-        coding_plan::read_usage(&Self::spec(), self.now_ms, |payload, kind, now_ms| {
+        coding_plan::read_usage(&Self::spec(), |payload, kind, now_ms| {
             // Z.AI reports a rejected credential inside HTTP 200; that is a
             // "sign in again" state, not a broken read.
             if is_auth_refusal(payload) {
@@ -85,7 +83,6 @@ mod tests {
     fn live_zai_read_usage_prints_the_snapshot() {
         match crate::modules::providers::coding_plan::read_usage(
             &ZaiProvider::spec(),
-            0,
             |payload, kind, now_ms| {
                 if crate::modules::providers::zai::protocol::is_auth_refusal(payload) {
                     return Ok(crate::modules::providers::zai::protocol::decode_auth_failure(kind));
@@ -94,11 +91,17 @@ mod tests {
             },
         ) {
             Ok(snapshot) => println!(
-                "LIVE_ZAI>>> freshness={:?} plan={:?} windows={:?} five_hour_used={:?}",
+                "LIVE_ZAI>>> freshness={:?} plan={:?} permission={:?} fetched_at={} wall_now={} stamp_age_ms={} windows={:?} five_hour_used={:?} five_hour_resets={:?}",
                 snapshot.freshness,
                 snapshot.plan,
+                snapshot.permission,
+                snapshot.fetched_at.unwrap_or(0),
+                crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock),
+                crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock)
+                    - snapshot.fetched_at.unwrap_or(0),
                 snapshot.windows.len(),
-                snapshot.five_hour.as_ref().map(|w| w.used_percent)
+                snapshot.five_hour.as_ref().map(|w| w.used_percent),
+                snapshot.five_hour.as_ref().and_then(|w| w.resets_at),
             ),
             Err(error) => println!("LIVE_ZAI_ERR>>> {:?} {}", error.kind, error.message),
         }
@@ -111,7 +114,7 @@ mod tests {
 
     #[test]
     fn the_provider_speaks_for_zai() {
-        let provider = ZaiProvider::new(0);
+        let provider = ZaiProvider::new();
         assert_eq!(provider.kind(), ProviderKind::Zai);
         assert_eq!(provider.status().kind, ProviderKind::Zai);
     }

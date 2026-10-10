@@ -383,7 +383,9 @@ export function zaiSnapshot(overrides: Record<string, unknown> = {}) {
     source: "z.ai coding plan",
     reason: null,
     plan: "pro",
-    permission: "unknown",
+    // The decoder reports Allowed on a successful quota read; an unknown
+    // permission would mute every Z.AI reading next to Codex's coloured one.
+    permission: "allowed",
     windows: [
       fiveHour,
       {
