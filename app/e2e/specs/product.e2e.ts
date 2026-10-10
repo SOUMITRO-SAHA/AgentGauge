@@ -248,6 +248,29 @@ describe("dashboard", () => {
     expect(await $('[data-testid="onboarding"]').isDisplayed()).toBe(false);
   });
 
+  it("keeps the Home header and panels separated by the container gap", async () => {
+    for (const view of ["home", "stats", "automation", "settings"] as const) {
+      await gotoView(view);
+      const rowGap = await browser.execute((route) => {
+        const container = document.querySelector(`[data-testid="view-${route}"]`);
+        return container ? Number.parseFloat(getComputedStyle(container).rowGap) : null;
+      }, view);
+
+      expect(rowGap).toBe(16);
+    }
+
+    await gotoView("home");
+    const panelGap = await browser.execute(() => {
+      const detection = document.querySelector('[data-testid="provider-status"]');
+      const usage = document.querySelector('[data-testid="usage-panel"]');
+      if (!detection || !usage) return null;
+      return usage.getBoundingClientRect().top - detection.getBoundingClientRect().bottom;
+    });
+
+    expect(panelGap).not.toBeNull();
+    expect(panelGap).toBeGreaterThanOrEqual(16);
+  });
+
   it("renders the plan and freshness alongside the number", async () => {
     await expect($('[data-testid="plan"]')).toHaveText("Team");
     await expect($('[data-testid="freshness-pill"]')).toHaveAttribute(

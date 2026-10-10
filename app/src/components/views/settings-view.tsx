@@ -16,7 +16,7 @@ import { ViewHeader } from "~/components/views/view-header";
 
 export function SettingsView({ visible }: { readonly visible: boolean }) {
   return (
-    <div className={visible ? "block" : "hidden"} data-testid="view-settings">
+    <div className={visible ? "flex flex-col gap-4" : "hidden"} data-testid="view-settings">
       <ViewHeader title="Settings" subtitle="The system widget and this build." />
 
       <SystemWidgetGuide />

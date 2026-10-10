@@ -28,7 +28,7 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
   const refreshAutomation = useAtomRefresh(automationAtom);
 
   return (
-    <div className={visible ? "block" : "hidden"} data-testid="view-automation">
+    <div className={visible ? "flex flex-col gap-4" : "hidden"} data-testid="view-automation">
       <ViewHeader title="Automation" subtitle="Watching for the moment a window resets." />
 
       <section className={PANEL} data-testid="automation-panel">

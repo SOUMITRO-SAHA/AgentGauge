@@ -50,7 +50,7 @@ export function HomeView({ visible }: { readonly visible: boolean }) {
   const nowMs = useClock();
 
   return (
-    <div className={visible ? "block" : "hidden"} data-testid="view-home">
+    <div className={visible ? "flex flex-col gap-4" : "hidden"} data-testid="view-home">
       <ViewHeader
         title="Home"
         subtitle="Your Codex window, read from your own CLI."

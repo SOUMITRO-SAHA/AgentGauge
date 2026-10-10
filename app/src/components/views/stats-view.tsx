@@ -25,7 +25,7 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
   const refreshUsage = useAtomRefresh(usageAtom);
 
   return (
-    <div className={visible ? "block" : "hidden"} data-testid="view-stats">
+    <div className={visible ? "flex flex-col gap-4" : "hidden"} data-testid="view-stats">
       <ViewHeader title="Stats" subtitle="Every window, with what remains in each." />
 
       <section className={PANEL} data-testid="stats-panel">
