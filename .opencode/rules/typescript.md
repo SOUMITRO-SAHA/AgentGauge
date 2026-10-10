@@ -138,9 +138,10 @@ real data. See [`ui.md`](ui.md).
 
 ## E2E specs & scripts
 
-- `app/e2e/specs/*.e2e.ts` drives the real binary. Specs import from
-  `@wdio/globals` (`expect`, `browser`, `$`) — never the global namespace.
-  `capabilities.e2e.ts` is a harness self-test, not product coverage.
+- `app/e2e/specs/features/*.e2e.ts` drives the real binary, one file per
+  feature. Specs import from `@wdio/globals` (`expect`, `browser`, `$`) — never
+  the global namespace. `capabilities.e2e.ts` is a harness self-test, not
+  product coverage.
 - `bun run e2e` owns the build; never bare `wdio`, never a bare `cargo build`.
   See the `tauri-e2e-testing` skill.
 - Command mocking (`browser.tauri.mock`) still works with Effect: it patches

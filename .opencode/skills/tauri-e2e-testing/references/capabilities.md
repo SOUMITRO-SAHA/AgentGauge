@@ -80,8 +80,8 @@ provider, and the spec passes or fails against live data while looking stubbed.
 control on the visible screen cannot be mocked, because the read happens before
 the mock exists and the control needed to trigger a re-read is itself hidden by
 the state under test. The onboarding gate has this shape;
-`app/e2e/specs/fixtures.ts` works around it and `product.e2e.ts` carries the
-remaining failures.
+`app/e2e/specs/fixtures.ts` works around it and the `specs/features/` files
+carry the remaining failures.
 
 ### `window.__TAURI__.core.invoke` interception does not apply on this build
 
@@ -98,11 +98,15 @@ recording why.
 
 The app is a single window, so every spec file drives the *same* page. A mock
 installed by one file replaces the previous file's, and running files
-concurrently makes the fixtures race. Product coverage is therefore consolidated
-into a single ordered file, `app/e2e/specs/product.e2e.ts`.
+concurrently makes the fixtures race. Product coverage is therefore split by
+feature into `app/e2e/specs/features/*.e2e.ts` but kept in **one ordered group**
+in `wdio.conf.ts`, which wdio runs in a single worker, in order. Splitting is
+safe because the group is sequential; splitting it into parallel instances is
+not.
 
 Do not write the persisted onboarding store to set up a spec: it lives on disk,
-so a write races every other spec that reads it.
+so a write races every other spec that reads it. Each feature file restores both
+persisted stores in its own file-scope `after`.
 
 ## Window geometry — supported
 

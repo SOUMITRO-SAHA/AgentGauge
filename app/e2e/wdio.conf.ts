@@ -17,11 +17,25 @@ export const config: WebdriverIO.Config = {
   // in order. A glob lets wdio run files as parallel instances, and every file
   // drives the SAME renderer — parallel files raced each other's mocks and
   // boots (verified: product boots failed while capabilities ran alongside).
+  //
+  // `specs/features/` holds one file per feature so `--spec` can run a single
+  // task's coverage. Those files stay in this one group, in this order: they
+  // share the renderer and the persisted stores, so running them as separate
+  // instances would race exactly as a glob does.
+  //
   // capabilities first: it probes the harness itself, not fixtures.
   specs: [
     [
       path.join(here, "specs", "capabilities.e2e.ts"),
-      path.join(here, "specs", "product.e2e.ts"),
+      path.join(here, "specs", "features", "onboarding.e2e.ts"),
+      path.join(here, "specs", "features", "dashboard.e2e.ts"),
+      path.join(here, "specs", "features", "automation.e2e.ts"),
+      path.join(here, "specs", "features", "widget.e2e.ts"),
+      path.join(here, "specs", "features", "styling.e2e.ts"),
+      path.join(here, "specs", "features", "stats.e2e.ts"),
+      path.join(here, "specs", "features", "navigation.e2e.ts"),
+      path.join(here, "specs", "features", "sidebar-collapse.e2e.ts"),
+      path.join(here, "specs", "features", "dev-test-screen.e2e.ts"),
       path.join(here, "specs", "onboarding-visual.e2e.ts"),
     ],
   ],

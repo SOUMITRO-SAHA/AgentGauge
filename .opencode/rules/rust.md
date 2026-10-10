@@ -347,7 +347,7 @@ fails for the intended reason, then implement.
   network calls.
 - A `#[tauri::command]`'s **returned value and error serialization** are the
   contract the client branches on. If a command is new or its behaviour changed,
-  a spec in `app/e2e/specs/` must assert it — commands with no coverage are the
+  a spec in `app/e2e/specs/features/` must assert it — commands with no coverage are the
   usual source of "the UI shows nothing" defects. Reach the command with
   `browser.tauri.execute(({ core }) => core.invoke(...))` when no UI gesture
   triggers it.

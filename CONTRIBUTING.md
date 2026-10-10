@@ -52,7 +52,7 @@ bun run test
 bun run e2e
 ```
 
-`bun run e2e` builds the frontend and native binary before running WebdriverIO against the real Tauri window. Do not replace it with a bare `wdio` invocation. UI changes must include a spec under `app/e2e/specs/` and the suite must actually run.
+`bun run e2e` builds the frontend and native binary before running WebdriverIO against the real Tauri window. Do not replace it with a bare `wdio` invocation. UI changes must include a spec under `app/e2e/specs/features/` and the suite must actually run.
 
 For Rust changes, from the repository root:
 

@@ -104,7 +104,8 @@ Check these in order — the first three account for nearly every failure.
 
 ## Writing tests
 
-Specs live in `app/e2e/specs/*.e2e.ts`. Follow `e2e/specs/app.e2e.ts`.
+Specs live in `app/e2e/specs/features/*.e2e.ts`, one file per feature, and
+drive the real binary. Follow `e2e/specs/features/dashboard.e2e.ts`.
 
 ```ts
 import { expect, browser, $ } from "@wdio/globals";

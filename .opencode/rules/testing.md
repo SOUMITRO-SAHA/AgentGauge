@@ -21,7 +21,7 @@ gate.
 | --- | --- |
 | Any client change | `bun run build` · `bun run test` · `bun run e2e --spec <task spec>` |
 | Effect code (atoms, services, layers) | `bun run build` · `bun run test` (vitest + `@effect/vitest`) · `bun run e2e --spec <task spec>` |
-| UI change (layout, copy, state, navigation, data display) | all of the above, **plus a new/updated spec in `app/e2e/specs/`** |
+| UI change (layout, copy, state, navigation, data display) | all of the above, **plus a new/updated spec in `app/e2e/specs/features/`** |
 | IPC command / capability / plugin / `src-tauri` | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` · `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` · `cargo check --manifest-path src-tauri/Cargo.toml` · `bun run build` · `bun run test` · `bun run e2e --spec <task spec>` |
 | New Rust module or crate | the Rust gates · `cargo test --manifest-path src-tauri/Cargo.toml` (`cargo test -p <crate>` for a crate) |
 | `tauri.conf.json`, icons, bundle, release profile | the Rust gates · `bun run tauri build` on the target OS · `bun run e2e --spec <task spec>` |
@@ -106,11 +106,16 @@ Three layers, each with a job. Pick the cheapest that proves the thing.
 
 ## Writing e2e specs
 
-Specs live in `app/e2e/specs/*.e2e.ts` and drive the **real compiled binary**
-through its native webview.
+Specs live in `app/e2e/specs/features/*.e2e.ts` and drive the **real compiled
+binary** through its native webview.
 
 - Read the `tauri-e2e-testing` skill before extending the suite; it holds the
-  build constraint, mocking, and screenshot details. `app.e2e.ts` is the pattern.
+  build constraint, mocking, and screenshot details.
+  `specs/features/dashboard.e2e.ts` is the pattern.
+- Feature coverage lives in `app/e2e/specs/features/<feature>.e2e.ts`, one file
+  per feature. Every one of those files is listed in the **single ordered
+  group** in `wdio.conf.ts` — the group is what keeps them sequential in one
+  worker. Adding a feature file means adding it to that group, not globbing it.
 - `capabilities.e2e.ts` is a **harness self-test**. If it fails, the harness is
   broken and no other result in that run can be trusted.
 - Always go through `bun run e2e` (it owns the build); `--spec` filtering still

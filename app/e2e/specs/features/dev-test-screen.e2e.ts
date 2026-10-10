@@ -1,0 +1,120 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { expect, browser, $ } from "@wdio/globals";
+
+import {
+  clickDisplayed,
+  dashboardLive,
+  dispatchCalls,
+  expectDisplayed,
+  restoreOnboardingStore,
+} from "../fixtures.js";
+
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../",
+);
+const OUT = path.join(repoRoot, ".temp", "e2e", "dev-test-screen");
+
+const STEPS = [
+  { id: "welcome", title: "A clear, honest view of Codex usage" },
+  { id: "statusCheck", title: "Every reading keeps its source" },
+  { id: "windowRollover", title: "Notice when Codex reports a new window" },
+  { id: "widget", title: "Your usage, at a glance" },
+  { id: "automation", title: "A read-only rollover monitor" },
+];
+
+async function expectTestFollowsSettings(): Promise<void> {
+  const followsSettings = await browser.execute(() => {
+    const settings = document.querySelector('[data-testid="nav-settings"]');
+    const test = document.querySelector('[data-testid="nav-test"]');
+    return Boolean(
+      settings &&
+        test &&
+        settings.compareDocumentPosition(test) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+  expect(followsSettings).toBe(true);
+}
+
+async function resizeTo(width: number): Promise<void> {
+  await browser.setWindowRect(60, 60, width, 720);
+  for (let waited = 0; waited < 8000; waited += 250) {
+    const actualWidth = await browser.execute(() => window.innerWidth);
+    if (Math.abs(actualWidth - width) <= 16) return;
+    await browser.pause(250);
+  }
+  throw new Error(`the window never reached a width near ${width}px`);
+}
+
+after(() => {
+  restoreOnboardingStore();
+});
+
+describe("developer test screen", () => {
+  beforeEach(async () => {
+    await dashboardLive();
+  });
+
+  it("appears after Settings and opens every product screen", async () => {
+    fs.mkdirSync(OUT, { recursive: true });
+    await resizeTo(960);
+    await expectDisplayed('[data-testid="nav-test"]');
+    await expectTestFollowsSettings();
+
+    await clickDisplayed('[data-testid="nav-test"]');
+    await expectDisplayed('[data-testid="view-test"]');
+    await browser.saveScreenshot(`${OUT}/wide.png`);
+    await expect($('[data-testid="test-safety-note"]')).toHaveText(
+      expect.stringContaining("never send a prompt or consume usage"),
+    );
+
+    for (const screen of ["home", "automation", "stats", "settings"]) {
+      await clickDisplayed(`[data-testid="test-screen-${screen}"]`);
+      await expectDisplayed(`[data-testid="view-${screen}"]`);
+      await clickDisplayed('[data-testid="nav-test"]');
+      await expectDisplayed('[data-testid="view-test"]');
+    }
+
+    for (const width of [500, 360]) {
+      await resizeTo(width);
+      await expectDisplayed('[data-testid="nav-test"]');
+      await expectTestFollowsSettings();
+    }
+    await browser.saveScreenshot(`${OUT}/compact.png`);
+  });
+
+  it("opens each onboarding step and replays the full flow without sending prompts", async () => {
+    await clickDisplayed('[data-testid="nav-test"]');
+
+    for (const step of STEPS) {
+      await clickDisplayed(`[data-testid="test-onboarding-step-${step.id}"]`);
+      await expectDisplayed('[data-testid="onboarding"]');
+      await expect($('[data-testid="onboarding"] h1')).toHaveText(step.title);
+      await clickDisplayed('[data-testid="onboarding-skip"]');
+      await expectDisplayed('[data-testid="view-test"]');
+    }
+
+    await clickDisplayed('[data-testid="test-onboarding-replay"]');
+    await expect($('[data-testid="onboarding"] h1')).toHaveText(STEPS[0].title);
+    for (const step of STEPS.slice(1)) {
+      await clickDisplayed('[data-testid="onboarding-next"]');
+      await expect($('[data-testid="onboarding"] h1')).toHaveText(step.title);
+    }
+    await clickDisplayed('[data-testid="onboarding-next"]');
+    await expectDisplayed('[data-testid="view-test"]');
+
+    const calls = await dispatchCalls();
+    expect(calls.some((request) => request.type === "sendPing")).toBe(false);
+    expect(
+      calls.some(
+        (request) =>
+          request.type === "setOnboardingStep" &&
+          request.step === "done" &&
+          request.dismissed === true,
+      ),
+    ).toBe(true);
+  });
+});

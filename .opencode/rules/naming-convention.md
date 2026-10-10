@@ -46,7 +46,7 @@ there are no project-specific overrides.
 | Shared types               | `<name>.types.ts`       | `usage.types.ts`                 |
 | Pure helpers               | `<name>.utils.ts`      | `formatUsage.utils.ts`           |
 | Constants / query keys     | `<name>.constants.ts`  | `refresh.constants.ts`           |
-| E2E spec                   | `<name>.e2e.ts`        | `app.e2e.ts`, `capabilities.e2e.ts` |
+| E2E spec                   | `<feature>.e2e.ts`     | `dashboard.e2e.ts`, `capabilities.e2e.ts` |
 | Vite / toolchain config    | framework name         | `vite.config.ts`                 |
 
 - **React components are the kebab-case `.tsx` family** — this is what shadcn
@@ -59,7 +59,7 @@ there are no project-specific overrides.
 - Framework-fixed names are exempt from the role suffix: `main.tsx`, `App.tsx`
   (root shell, matched by the scaffold), `vite-env.d.ts`, and
   `e2e/wdio.conf.ts` (matched by the `wdio` CLI).
-- Folders stay kebab-case (`components/usage/`, `e2e/specs/`, `lib/`).
+- Folders stay kebab-case (`components/usage/`, `e2e/specs/features/`, `lib/`).
 - Files predating these rules are grandfathered until touched — rename to the
   current scheme when you significantly edit one.
 

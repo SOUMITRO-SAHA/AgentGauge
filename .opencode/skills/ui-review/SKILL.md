@@ -25,7 +25,7 @@ Per the root `AGENTS.md`, a UI change requires e2e coverage and TDD is the
 default. This skill is for reviewing an existing screen and capturing evidence;
 it is **not** a substitute for the regression spec that change must ship with.
 
-- A change under review needs a spec in `app/e2e/specs/` asserting the rendered
+- A change under review needs a spec in `app/e2e/specs/features/` asserting the rendered
   outcome, so the defect cannot return.
 - Reviewing here — a clean report, a screenshot — catches problems in code you
   did not just touch. It does not close the requirement for the change itself.
