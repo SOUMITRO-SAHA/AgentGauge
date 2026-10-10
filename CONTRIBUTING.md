@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in improving AI Subscription Stats. Contributions should make the app more useful without weakening its data accuracy, privacy, or user-control guarantees.
+Thank you for your interest in improving AgentGauge. Contributions should make the app more useful without weakening its data accuracy, privacy, or user-control guarantees.
 
 ## Before you start
 

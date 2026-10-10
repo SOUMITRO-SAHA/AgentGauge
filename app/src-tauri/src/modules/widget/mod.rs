@@ -392,7 +392,7 @@ fn setup_steps(extension_present: bool, snapshot_written: bool, menu_bar: bool) 
             detail: format!(
                 "This build does not contain the widget extension. Run `bun run tauri build` and \
                  open {} — the extension is embedded automatically.",
-                "AI Sub Stats.app"
+                "AgentGauge.app"
             ),
         });
         return steps;
@@ -405,8 +405,8 @@ fn setup_steps(extension_present: bool, snapshot_written: bool, menu_bar: bool) 
             .to_string(),
     });
     steps.push(SetupStep {
-        title: "Find AI Sub Stats".to_string(),
-        detail: "Search for “AI Sub Stats” in the gallery.".to_string(),
+        title: "Find AgentGauge".to_string(),
+        detail: "Search for “AgentGauge” in the gallery.".to_string(),
     });
     steps.push(SetupStep {
         title: "Choose a size and drag it in".to_string(),
@@ -511,7 +511,7 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("aism-widget-test-{name}"));
+        let dir = std::env::temp_dir().join(format!("agentgauge-widget-test-{name}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("scratch dir");
         dir
@@ -717,14 +717,14 @@ mod tests {
 
     #[test]
     fn a_bundled_executable_is_recognised_and_a_dev_binary_is_not() {
-        let bundled = Path::new("/Applications/AI Sub Stats.app/Contents/MacOS/aism");
+        let bundled = Path::new("/Applications/AgentGauge.app/Contents/MacOS/agentgauge-daemon");
         assert_eq!(
             bundle_root(bundled),
-            Some(PathBuf::from("/Applications/AI Sub Stats.app"))
+            Some(PathBuf::from("/Applications/AgentGauge.app"))
         );
 
         // `tauri dev` runs the raw binary with no bundle around it.
-        let unbundled = Path::new("/repo/target/debug/aism");
+        let unbundled = Path::new("/repo/target/debug/agentgauge-daemon");
         assert_eq!(bundle_root(unbundled), None);
     }
 }

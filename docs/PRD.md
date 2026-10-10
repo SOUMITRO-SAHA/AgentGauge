@@ -1,18 +1,18 @@
-# Product Requirements Document (PRD): AI Subscription Stats
+# Product Requirements Document (PRD): AgentGauge
 
 - **Status:** Final product-direction draft; integration feasibility remains subject to validation
 - **Version:** 2.0
 - **Last updated:** 2026-10-10
-- **Product:** AI Subscription Stats
+- **Product:** AgentGauge
 - **Platform:** Desktop application (Tauri + Rust); macOS validated to date
 
 > **Implementation disclaimer:** This document defines the agreed product direction and planned requirements. It does not imply that proposed harness integrations, model selection, scheduled kickoff, or analytics are already shipped.
 
 ## 1. Executive summary
 
-AI Subscription Stats is a local-first desktop companion for **AI coding harnesses**. It helps developers understand the subscription usage and reset information that their installed harnesses actually expose, and optionally sends a minimal `Hi` prompt after a verified, provider-controlled usage-window rollover using a model explicitly selected by the user.
+AgentGauge is a local-first desktop companion for **AI coding harnesses**. It helps developers understand the subscription usage and reset information that their installed harnesses actually expose, and optionally sends a minimal `Hi` prompt after a verified, provider-controlled usage-window rollover using a model explicitly selected by the user.
 
-The application integrates with **coding harnesses, not AI platforms directly**. It uses Agent Client Protocol (ACP) where supported, or other documented, authorized harness interfaces such as local app-server or RPC protocols. Authentication, provider configuration, subscriptions, and credentials remain managed by the user's existing harness. AI Subscription Stats does not connect directly to model-provider APIs or manage provider credentials.
+The application integrates with **coding harnesses, not AI platforms directly**. It uses Agent Client Protocol (ACP) where supported, or other documented, authorized harness interfaces such as local app-server or RPC protocols. Authentication, provider configuration, subscriptions, and credentials remain managed by the user's existing harness. AgentGauge does not connect directly to model-provider APIs or manage provider credentials.
 
 **Integration priority is fixed:**
 
@@ -58,7 +58,7 @@ The product must not treat unlike harnesses or underlying subscription plans as 
 
 ### 3.1 Harness-only integration
 
-AI Subscription Stats **must**:
+AgentGauge **must**:
 
 - Communicate with locally installed coding harnesses through supported ACP, local app-server, CLI, SDK, or RPC surfaces, depending on each harness's documented integration path.
 - Prefer ACP for generic agent sessions, prompt submission, and model/config selection where available.
@@ -66,10 +66,10 @@ AI Subscription Stats **must**:
 - Detect and display harness version, connectivity, and the capabilities that have been verified.
 - Work with the authentication and provider configuration already owned by the harness.
 
-AI Subscription Stats **must not**:
+AgentGauge **must not**:
 
 - Integrate directly with OpenAI, Anthropic, Moonshot, or other model-provider APIs to retrieve usage or send kickoff prompts.
-- Ask users to enter provider API keys, passwords, OAuth tokens, or session cookies into AI Subscription Stats.
+- Ask users to enter provider API keys, passwords, OAuth tokens, or session cookies into AgentGauge.
 - Read, copy, mutate, or store harness credential files.
 - Automate logins, switch provider credentials behind the user's back, scrape private endpoints, or bypass provider policies.
 - Claim a subscription window exists simply because a harness exposes an ACP prompt method.
@@ -343,6 +343,10 @@ The application architecture consists of four layers:
 - Session/model/prompt executor, explicitly enabled only.
 - Later: permissioned local analytics importers.
 
+The packaged Rust process is named `agentgauge-daemon` for clear identification
+in process listings. It hosts the desktop app and its background polling; it is
+not a separately installed operating-system service.
+
 **Harness adapters (no direct model-provider APIs)**
 
 - Codex adapter: existing app-server integration.
@@ -387,7 +391,7 @@ Kickoff records must carry: harness, selected model, targeted window/rollover id
 - Classify readings as `live`, `cached`, `stale`, `unavailable`, or `unsupported`; retain a human-readable reason.
 - Never let one harness's failure wipe another harness's last reliable reading.
 - Never show a nonexistent entitlement, limit, model selection, or reset as confirmed.
-- Keep provider credentials wholly in user-managed harnesses; AI Subscription Stats never asks for or stores them. Avoid logging sensitive values that might appear in harness diagnostics.
+- Keep provider credentials wholly in user-managed harnesses; AgentGauge never asks for or stores them. Avoid logging sensitive values that might appear in harness diagnostics.
 - All inference-consuming automation is opt-in and can be paused immediately.
 - No silent model fallback, unexpected account switching, unbounded retries, or catch-up sends.
 - Analytics requires a separate permission path with explicit scope, local retention/deletion rules, and no automatic uploads.

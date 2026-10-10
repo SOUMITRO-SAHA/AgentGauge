@@ -1,7 +1,7 @@
 # Logo & Icon Generation
 
 Applies to any generated or revised app mark, icon, or brand asset for this
-project (`ism` / AI Subscription Stats).
+project (AgentGauge).
 
 ## Current brand status — read this first
 

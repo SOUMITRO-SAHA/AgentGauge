@@ -5,7 +5,7 @@ description: Run, repair, and extend the WebdriverIO end-to-end suite that drive
 
 # Tauri E2E Testing
 
-`app/e2e` drives the **real compiled Tauri binary** (`src-tauri/target/debug/aism`)
+`app/e2e` drives the **real compiled Tauri binary** (`src-tauri/target/debug/agentgauge-daemon`)
 through its native webview. It is not a browser test: the Rust backend runs, IPC
 crosses the process boundary, and the OS window exists.
 
@@ -75,7 +75,7 @@ Two independent facts collide here:
 `custom-protocol` resolves it: a debug build that serves the embedded bundle.
 
 `tauri-build` caches its generated output, and that cache belongs to the
-`tauri-build` crate — `cargo clean -p aism` does **not** clear it. Without the
+`tauri-build` crate — `cargo clean -p agentgauge-daemon` does **not** clear it. Without the
 `touch`, a rebuild reuses the stale dev URL and the suite passes against a
 running dev server while appearing green. `bun run e2e:build` performs the
 `touch`; never run the bare `cargo build` in its place.

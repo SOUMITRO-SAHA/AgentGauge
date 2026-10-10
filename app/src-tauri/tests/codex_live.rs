@@ -14,8 +14,8 @@
 use std::time::Duration;
 
 /// Spawns the app-server and returns it, or `None` when Codex is not installed.
-fn server() -> Option<aism_lib::testkit::AppServer> {
-    let server = aism_lib::testkit::AppServer::spawn("codex").ok()?;
+fn server() -> Option<agentgauge_daemon_lib::testkit::AppServer> {
+    let server = agentgauge_daemon_lib::testkit::AppServer::spawn("codex").ok()?;
     Some(server)
 }
 
@@ -56,9 +56,12 @@ fn decodes_a_live_rate_limit_response() {
         )
         .expect("the app-server answers a rate-limit read");
 
-    let snapshot =
-        aism_lib::testkit::decode_rate_limits(&payload, aism_lib::testkit::ProviderKind::Codex, 0)
-            .expect("decodes");
+    let snapshot = agentgauge_daemon_lib::testkit::decode_rate_limits(
+        &payload,
+        agentgauge_daemon_lib::testkit::ProviderKind::Codex,
+        0,
+    )
+    .expect("decodes");
 
     // A real account always reports at least one window. Asserting this means
     // the decode is proven against live data, while staying independent of the
@@ -94,7 +97,7 @@ fn rejects_a_second_initialize() {
         .request(
             "initialize",
             Some(serde_json::json!({
-                "clientInfo": { "name": "ism", "title": "AI Sub Stats", "version": "0.1.0" }
+                "clientInfo": { "name": "agentgauge-daemon", "title": "AgentGauge", "version": "0.1.0" }
             })),
         )
         .expect_err("a second initialize must be refused");
@@ -124,7 +127,8 @@ fn a_second_process_can_be_spawned_independently() {
         eprintln!("skipping: the codex CLI is not installed");
         return;
     };
-    let second = aism_lib::testkit::AppServer::spawn("codex").expect("a second server spawns");
+    let second =
+        agentgauge_daemon_lib::testkit::AppServer::spawn("codex").expect("a second server spawns");
 
     assert!(first
         .request("account/read", Some(serde_json::json!({})))

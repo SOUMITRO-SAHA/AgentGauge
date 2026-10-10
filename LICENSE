@@ -1,4 +1,4 @@
-AI SUBSCRIPTION STATS — CUSTOM LICENSE
+AGENTGAUGE — CUSTOM LICENSE
 Apache License, Version 2.0, with Additional Non-Commercial Redistribution Restriction
 
 IMPORTANT: This is a modified, custom license based on the Apache License, Version 2.0. It is not the unmodified Apache License 2.0 and must not be identified by the SPDX identifier Apache-2.0. The additional restriction below controls over any conflicting permission in the Apache License text that follows.
@@ -13,7 +13,7 @@ For this restriction, "You," "Work," "Derivative Works," "Source," and "Object" 
 
 PROJECT INFORMATION
 
-Project: AI Subscription Stats Widget (AISM)
+Project: AgentGauge
 Website: https://aism.soumitrasaha.com/
 Copyright Holder: SOUMITRA SAHA
 Contact: contact@soumitrasaha.com
@@ -221,7 +221,7 @@ For questions about this license or to request permissions beyond its scope, ple
 
    Copyright 2026 SOUMITRA SAHA
 
-   Licensed under the AI Subscription Stats Custom License, based on the
+   Licensed under the AgentGauge Custom License, based on the
    Apache License, Version 2.0, with the additional non-commercial
    redistribution restriction stated in this LICENSE file. This is not the
    unmodified Apache License 2.0. You may obtain the Apache License text at

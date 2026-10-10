@@ -88,7 +88,7 @@ function SidebarNav({
             weight="fill"
           />
           <span className="text-sm font-semibold tracking-tight">
-            AI Sub Stats
+            AgentGauge
           </span>
         </div>
       </SidebarHeader>

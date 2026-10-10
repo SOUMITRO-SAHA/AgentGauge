@@ -117,7 +117,7 @@ mod tests {
     use super::*;
 
     fn temp_path(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ism-settings-{name}"));
+        let dir = std::env::temp_dir().join(format!("agentgauge-settings-{name}"));
         let _ = fs::remove_dir_all(&dir);
         dir.join("nested").join("settings.json")
     }
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn a_save_into_a_blocked_path_is_reported_not_swallowed() {
-        let dir = std::env::temp_dir().join("ism-settings-blocked");
+        let dir = std::env::temp_dir().join("agentgauge-settings-blocked");
         let _ = fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("dir");
         // A directory where the file must go makes every write fail.

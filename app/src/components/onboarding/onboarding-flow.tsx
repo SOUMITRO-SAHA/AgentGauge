@@ -45,9 +45,9 @@ const STEPS: ReadonlyArray<{
 }> = [
   {
     id: "welcome",
-    title: "Never wait for a window again",
+    title: "A clear view of your coding tools",
     blurb:
-      "AI Sub Stats watches your Codex 5-hour window so a fresh one is always ready when you sit down to work.",
+      "AgentGauge shows the usage and status information your installed coding tools actually provide. Missing or unsupported data stays clearly marked.",
   },
   {
     id: "statusCheck",

@@ -74,9 +74,9 @@ If a task is primarily research (spike, investigation, literature review, librar
 
 ## Project intent
 
-This is an early-stage Tauri 2 desktop app and native-widget project for AI subscription statistics, account/service status, and related automation. Intended provider coverage includes Codex, Claude Code, Z.ai, and additional services over time. The primary platform goals are macOS, Windows, and Linux.
+This is an early-stage Tauri 2 desktop app and native-widget project named **AgentGauge**, for AI coding-harness usage and status. The primary platform goals are macOS, Windows, and Linux.
 
-The current UI and Rust backend implement **Codex only**: real usage reads via `codex app-server`, rollover detection, onboarding, the dashboard, and a frameless desktop widget. Do not describe Z.ai, Claude Code, or any other provider as integrated unless the code actually implements it, and do not claim Windows or Linux verification — only macOS has been exercised.
+The current UI and Rust backend implement **Codex only**: real usage reads via `codex app-server`, rollover detection, onboarding, the dashboard, and a frameless desktop widget. The app's executable is `agentgauge-daemon`; the polling backend runs inside that same desktop process and is not a separately installed service. Do not describe other harnesses as integrated unless the code actually implements them, and do not claim Windows or Linux verification — only macOS has been exercised.
 
 ## A 5-hour window cannot be restarted by a prompt
 
@@ -104,7 +104,8 @@ app to add one or to ask whether the user placed it, so `SystemWidgetStatus` onl
 ever reports facts about the build.
 
 The widget and the app are separate processes and share data through a JSON
-snapshot written atomically to `~/Library/Application Support/AI Sub Stats/`. The
+snapshot written atomically to the legacy-compatible path
+`~/Library/Application Support/AI Sub Stats/`. The
 window list carries an explicit `kind`, never a label the Swift side has to
 pattern-match on.
 

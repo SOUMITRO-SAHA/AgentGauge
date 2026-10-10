@@ -55,18 +55,22 @@ pub fn run() {
                 Ok(dir) => OnboardingStore::in_app_dir(&dir),
                 // Without a writable app-data directory onboarding simply does
                 // not persist; the app still runs.
-                Err(_) => {
-                    OnboardingStore::new(std::env::temp_dir().join("ism").join("onboarding.json"))
-                }
+                Err(_) => OnboardingStore::new(
+                    std::env::temp_dir()
+                        .join("agentgauge")
+                        .join("onboarding.json"),
+                ),
             };
 
             // Same rule for preferences: degrade to a throwaway directory
             // rather than fail to launch.
             let settings = match app.path().app_data_dir() {
                 Ok(dir) => SettingsStore::in_app_dir(&dir),
-                Err(_) => {
-                    SettingsStore::new(std::env::temp_dir().join("ism").join("settings.json"))
-                }
+                Err(_) => SettingsStore::new(
+                    std::env::temp_dir()
+                        .join("agentgauge")
+                        .join("settings.json"),
+                ),
             };
 
             app.manage(AppState {

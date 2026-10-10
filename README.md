@@ -1,6 +1,12 @@
-# AI Subscription Stats
+# AgentGauge
 
-**AI Subscription Stats is a local-first desktop companion for AI coding harnesses.** It brings together the usage and reset information those harnesses actually expose, with planned, opt-in kickoff automation after a verified usage-window rollover.
+**AgentGauge is a local-first desktop companion for AI coding harnesses.** It brings together the usage and reset information those harnesses actually expose, with planned, opt-in kickoff automation after a verified usage-window rollover.
+
+The desktop app is displayed as **AgentGauge**. Its Rust process is named
+`agentgauge-daemon` so it is recognizable in process listings; the background
+poller currently runs inside the app process and is not a separately installed
+system daemon. The existing app-data identifier and snapshot directory remain
+stable for saved-state compatibility.
 
 The app integrates with **coding harnesses, not model-provider platforms directly**. It uses harness-supported local interfaces such as app-server, ACP, CLI, SDK, or RPC. The harness remains responsible for sign-in, provider configuration, subscriptions, and credentials.
 

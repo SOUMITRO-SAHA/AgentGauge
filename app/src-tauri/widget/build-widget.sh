@@ -21,7 +21,7 @@
 #
 #   Ad-hoc by default, which is enough for a locally built app to be offered in
 #   the widget gallery. A real "Apple Development" identity is used when
-#   AISM_SIGN_IDENTITY is set.
+#   AGENTGAUGE_SIGN_IDENTITY is set.
 #
 #   Note on team IDs: the parenthetical in an Apple Development certificate's CN
 #   is the Apple ID, NOT the Team ID. On this machine CN says `(DW5S8RN36T)` while
@@ -39,11 +39,11 @@ set -euo pipefail
 WIDGET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$WIDGET_DIR/AIStatsWidget.xcodeproj"
 SCHEME="AIStatsWidget"
-CONFIGURATION="${AISM_WIDGET_CONFIGURATION:-Release}"
+CONFIGURATION="${AGENTGAUGE_WIDGET_CONFIGURATION:-Release}"
 DERIVED="$WIDGET_DIR/build"
 
 # Empty means ad-hoc.
-SIGN_IDENTITY="${AISM_SIGN_IDENTITY:--}"
+SIGN_IDENTITY="${AGENTGAUGE_SIGN_IDENTITY:--}"
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }

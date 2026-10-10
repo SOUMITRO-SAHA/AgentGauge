@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    aism_lib::run()
+    agentgauge_daemon_lib::run()
 }

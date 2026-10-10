@@ -124,7 +124,7 @@ rules in [`rust.md`](rust.md) and never appear in the builder chain.
 
 ## The e2e harness is load-bearing
 
-`app/e2e` drives the **real compiled binary** (`src-tauri/target/debug/aism`).
+`app/e2e` drives the **real compiled binary** (`src-tauri/target/debug/agentgauge-daemon`).
 Five integration points must stay intact — `Cargo.toml`, `lib.rs`,
 `capabilities/default.json`, `tauri.conf.json`, `src/main.tsx`. Removing any
 one produces a confusing failure, not a clear error.

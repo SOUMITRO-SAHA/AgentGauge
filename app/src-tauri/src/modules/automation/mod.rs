@@ -117,7 +117,7 @@ impl AutomationRunner {
 
         let runner = Arc::clone(self);
         let handle = thread::Builder::new()
-            .name("ism-automation".to_string())
+            .name("agentgauge-daemon-automation".to_string())
             .spawn(move || runner.poll_loop())
             .ok();
 

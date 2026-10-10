@@ -50,7 +50,7 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
     let name = request.name();
 
     if let Err(error) = validate(&request) {
-        eprintln!("ism: rejected `{name}`: {}", error.message);
+        eprintln!("agentgauge-daemon: rejected `{name}`: {}", error.message);
         return Err(error);
     }
 
@@ -186,7 +186,10 @@ fn publish_snapshot(state: &AppState, snapshots: &[UsageSnapshot]) {
     if let Err(error) = store.write(&snapshot) {
         // A widget that cannot be written must not break the reading the user
         // actually asked for, so this is reported and not propagated.
-        eprintln!("ism: could not publish widget snapshot: {}", error.message);
+        eprintln!(
+            "agentgauge-daemon: could not publish widget snapshot: {}",
+            error.message
+        );
     }
 }
 

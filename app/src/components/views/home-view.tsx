@@ -52,7 +52,7 @@ export function HomeView({ visible }: { readonly visible: boolean }) {
     <div className={visible ? "block" : "hidden"} data-testid="view-home">
       <header className="flex flex-col gap-1">
         <h1 className="text-[clamp(1.25rem,4vw,1.5rem)] font-semibold tracking-tight text-foreground">
-          AI Sub Stats
+          AgentGauge
         </h1>
         <p className="text-sm text-muted-foreground">
           Your Codex window, read from your own CLI.

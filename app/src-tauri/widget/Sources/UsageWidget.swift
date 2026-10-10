@@ -28,7 +28,7 @@ struct UsageWidget: Widget {
         StaticConfiguration(kind: "AIStatsUsageWidget", provider: UsageTimelineProvider()) { entry in
             UsageWidgetView(entry: entry)
         }
-        .configurationDisplayName("AI Sub Stats")
+        .configurationDisplayName("AgentGauge")
         .description("Your Codex 5-hour window and weekly limit.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
@@ -45,7 +45,7 @@ struct UsageWidgetView: View {
             .containerBackground(for: .widget) {
                 Color(nsColor: .windowBackgroundColor)
             }
-            .widgetURL(URL(string: "aism://usage"))
+            .widgetURL(URL(string: "agentgauge://usage"))
     }
 
     @ViewBuilder
@@ -223,7 +223,7 @@ struct UsageWidgetView: View {
 
     private var missingBody: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("AI Sub Stats")
+            Text("AgentGauge")
                 .font(.caption2)
                 .fontWeight(.semibold)
             Text("Open the app to read usage")

@@ -1,6 +1,6 @@
 # Contributors
 
-Thank you to everyone who helps improve AI Subscription Stats through code, documentation, testing, design, and feedback.
+Thank you to everyone who helps improve AgentGauge through code, documentation, testing, design, and feedback.
 
 ## Project
 

@@ -133,12 +133,12 @@ To confirm by hand:
 ```sh
 cd app
 bun run build:mac
-open "$(pwd)/src-tauri/target/release/bundle/macos/aism.app"
-# then right-click the desktop -> Edit Widgets, and search for "AI Sub Stats"
+open "$(pwd)/src-tauri/target/release/bundle/macos/AgentGauge.app"
+# then right-click the desktop -> Edit Widgets, and search for "AgentGauge"
 ```
 
 If it is missing, check `codesign -dvvv --entitlements -` on the embedded
-`.appex` and try signing with a real identity via `AISM_SIGN_IDENTITY`.
+`.appex` and try signing with a real identity via `AGENTGAUGE_SIGN_IDENTITY`.
 
 ## Files
 

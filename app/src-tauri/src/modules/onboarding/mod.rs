@@ -191,7 +191,7 @@ mod tests {
     use super::*;
 
     fn temp_path(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ism-onboarding-{name}"));
+        let dir = std::env::temp_dir().join(format!("agentgauge-onboarding-{name}"));
         let _ = fs::remove_dir_all(&dir);
         dir.join("nested").join("onboarding.json")
     }

@@ -51,7 +51,7 @@ export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
       // preference that lies about having been kept.
       void Effect.runPromise(Ipc.setUiState({ lastRoute: next })).catch(
         (error) => {
-          console.error("ism: could not persist the last destination", error);
+          console.error("AgentGauge: could not persist the last destination", error);
         },
       );
     },

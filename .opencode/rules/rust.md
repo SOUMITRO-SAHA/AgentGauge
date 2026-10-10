@@ -17,12 +17,12 @@ the wrong tier is the defect this file exists to prevent.
 - No `rust-toolchain.toml`, no `rustfmt.toml`, no `clippy.toml` exist. Use the
   installed stable toolchain and default rustfmt/clippy settings; do not add a
   pin or a config file without explicit instruction.
-- The crate is a `staticlib` + `cdylib` + `rlib` triple (lib name `ism_lib`,
+- The crate is a `staticlib` + `cdylib` + `rlib` triple (lib name `agentgauge_daemon_lib`,
   bin `main.rs`). Mobile entries use `#[cfg_attr(mobile, tauri::mobile_entry_point)]` —
   preserve them.
 - `panic = "abort"` in the release profile is deliberate. Do not reintroduce
   unwinding panics, and never rely on `catch_unwind` in release.
-- `cargo clean -p aism` does **not** clear `tauri-build`'s cached output. When
+- `cargo clean -p agentgauge-daemon` does **not** clear `tauri-build`'s cached output. When
   a rebuild serves stale assets, `touch app/src-tauri/build.rs` (or run
   `bun run e2e:build`, which does it) — see [`tauri.md`](tauri.md).
 
@@ -34,13 +34,13 @@ everything else in this file is downstream of it.
 
 ```
 app/src-tauri/
-  Cargo.toml                  # workspace root: app crate `ism` (lib `ism_lib`)
+  Cargo.toml                  # workspace root: app package `agentgauge-daemon` (lib `agentgauge_daemon_lib`)
   crates/                     # independent library crates, one bounded concern each
     <crate-name>/
       Cargo.toml
       src/lib.rs
   src/
-    main.rs                   # entry point only: #![cfg_attr] attrs + ism_lib::run()
+    main.rs                   # entry point only: #![cfg_attr] attrs + agentgauge_daemon_lib::run()
     lib.rs                    # composition root ONLY: plugins, state, wiring, handler
     modules/                  # application modules — one per bounded capability
       <module-name>/
@@ -66,11 +66,11 @@ app/src-tauri/
   with a trait defined in `shared/` and implemented in the module.
 - Sibling modules must not import each other directly. If `poller` needs
   `providers`, go through a trait or a type re-exported from `shared/`.
-- `crates/**` must never depend on `ism` or `ism_lib`. A crate must build and
+- `crates/**` must never depend on `agentgauge-daemon` or `agentgauge_daemon_lib`. A crate must build and
   test standalone — `cargo test -p <crate>` passes with no Tauri app in the
   picture. If a "crate" needs `#[tauri::command]` or `tauri::State`, it is a
   module, not a crate.
-- `main.rs` stays minimal: `#![cfg_attr]` attributes plus `ism_lib::run()`.
+- `main.rs` stays minimal: `#![cfg_attr]` attributes plus `agentgauge_daemon_lib::run()`.
 
 ### `lib.rs` is a composition root, nothing more
 
@@ -174,7 +174,7 @@ and needs no justification.
 - Extract to a crate when the code needs one of: a heavyweight dependency the
   app should not pay for everywhere, platform-conditional compilation, its own
   test suite that must not drag in Tauri, or reuse beyond this app.
-- **Keep the app crate minimal.** Every dependency added to `ism` is compiled
+- **Keep the app crate minimal.** Every dependency added to `agentgauge-daemon` is compiled
   into the desktop binary on every platform; push it into a crate first when
   the choice exists.
 - The app crate `Cargo.toml` is the workspace root. When you create the first
@@ -239,7 +239,7 @@ These are the mechanisms that keep the app scalable as providers multiply:
   follow the downward-only direction in
   [Architecture](#architecture). A crate must never depend on another module's
   internals or back on the app crate.
-- Give a heavy or niche dependency to the **crate that needs it**, not to `ism`.
+- Give a heavy or niche dependency to the **crate that needs it**, not to `agentgauge-daemon`.
   A dependency added to the app crate is linked into every platform build; one
   added to a crate is scoped to what actually uses it.
 - Feature flags are additive and narrow: never enable a feature "to make it
