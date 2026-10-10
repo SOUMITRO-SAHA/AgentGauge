@@ -462,7 +462,7 @@ export const getAutomationState = () =>
     Effect.map((response) => expectType(response, "automation").state),
   );
 
-/** Starts the watcher. Idempotent, so a double call cannot double-poll. */
+/** Starts the rollover monitor. Idempotent, so a double call cannot double-poll. */
 export const startAutomation = () =>
   request({ type: "startAutomation" }).pipe(
     Effect.map((response) => expectType(response, "automation").state),

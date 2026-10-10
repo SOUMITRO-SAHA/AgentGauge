@@ -39,7 +39,7 @@ export const usageAtom = runtime.atom(Ipc.getUsage);
 /** The Codex account's plan tier. */
 export const planAtom = runtime.atom(Ipc.getPlan("codex"));
 
-/** The automation watcher's state, including any detected rollover. */
+/** The rollover monitor's state, including any detected rollover. */
 export const automationAtom = runtime.atom(Ipc.getAutomationState);
 
 /** Whether this machine can run the system widget, and how to add it. */

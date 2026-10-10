@@ -1,10 +1,10 @@
 /**
- * Automation: the window watcher.
+ * Automation: the rollover monitor.
  *
- * The watcher's one job is to *detect* the moment a window resets — never to
- * cause one. That boundary is stated in the copy here, not just implemented in
- * Rust, because it is the single most misunderstood thing about the feature: a
- * 5-hour window cannot be restarted by a prompt, and sending a prompt spends
+ * The monitor's one job is to *detect* the moment a window rolls over — never
+ * to cause one. That boundary is stated in the copy here, not just implemented
+ * in Rust, because it is the single most misunderstood thing about the feature:
+ * a 5-hour window cannot be restarted by a prompt, and sending a prompt spends
  * the account's quota rather than opening a new window.
  *
  * Owns `automation-panel`, `refresh-automation`, `automation-status`,
@@ -33,7 +33,7 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
 
       <section className={PANEL} data-testid="automation-panel">
         <PanelHeader
-          title="Window watcher"
+          title="Rollover monitor"
           testId="refresh-automation"
           onRefresh={refreshAutomation}
         />
@@ -41,7 +41,7 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
         {AsyncResult.match(automation, {
           onInitial: () => (
             <p className="text-sm text-muted-foreground">
-              Checking the watcher…
+              Checking the monitor…
             </p>
           ),
           onSuccess: (result) => {
@@ -84,15 +84,19 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
       </section>
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        The watcher only reads. A 5-hour window cannot be restarted by a prompt
-        — sending one consumes the current window, so the watcher never sends
-        anything and a reset is detected, never caused.
+        The monitor only reads. A 5-hour window cannot be restarted by a prompt
+        — sending one consumes the current window, so nothing is ever sent: a
+        rollover is detected, never caused.
       </p>
     </div>
   );
 }
 
-/** Rollover state: shown as facts, with an acknowledge only when one happened. */
+/**
+ * Rollover facts: the reset the source last reported, and the transition the
+ * monitor detected. The PRD separates a *reported* reset from an *observed*
+ * rollover, so the labels must too.
+ */
 function RolloverDetails({
   state,
   onChanged,
@@ -102,9 +106,10 @@ function RolloverDetails({
 }) {
   return (
     <div className="flex flex-col gap-2" data-testid="automation-rollover">
+      <DetailGroupLabel>Rollover</DetailGroupLabel>
       <DetailRow
         testId="automation-observed-reset"
-        label="Window reset observed at"
+        label="Last reported reset"
         value={formatTime(state.observedResetsAt)}
       />
       <DetailRow
@@ -136,7 +141,8 @@ function RolloverDetails({
 
 function WatchSchedule({ state }: { readonly state: Ipc.AutomationState }) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" data-testid="automation-schedule">
+      <DetailGroupLabel>Checks</DetailGroupLabel>
       <DetailRow
         testId="automation-last-polled"
         label="Last checked"
@@ -148,6 +154,13 @@ function WatchSchedule({ state }: { readonly state: Ipc.AutomationState }) {
         value={formatTime(state.nextPollAt)}
       />
     </div>
+  );
+}
+
+/** The quiet heading that frames a group of detail rows. */
+function DetailGroupLabel({ children }: { readonly children: React.ReactNode }) {
+  return (
+    <span className="text-xs font-medium text-muted-foreground">{children}</span>
   );
 }
 

@@ -2,7 +2,7 @@
  * Home: whether the window is usable right now.
  *
  * The answer view. Provider availability, the one number that matters — how
- * much of the soonest-expiring window remains — and whether the watcher is on.
+ * much of the soonest-expiring window remains — and whether the monitor is on.
  * The soonest window is chosen by reset time, not by matching a label: the
  * label vocabulary belongs to the provider, and a rename would otherwise
  * silently promote the wrong window to the headline.
@@ -124,7 +124,7 @@ export function HomeView({ visible }: { readonly visible: boolean }) {
         })}
       </section>
 
-      <WatcherGlance running={AsyncResult.match(automation, {
+      <MonitorGlance running={AsyncResult.match(automation, {
         onInitial: () => null,
         onSuccess: (result) => result.value.running,
         onFailure: () => null,
@@ -199,23 +199,23 @@ function SnapshotHeader({
 }
 
 /**
- * Whether the watcher is on, stated as a fact rather than a control.
+ * Whether the monitor is on, stated as a fact rather than a control.
  *
  * Set apart from the panels above it: this is context for what was just shown,
  * not another panel, so it reads as a footnote with its own rule above it rather
  * than as loose text flush against a panel's edge.
  */
-function WatcherGlance({ running }: { readonly running: boolean | null }) {
+function MonitorGlance({ running }: { readonly running: boolean | null }) {
   return (
     <p
       className="border-t border-border/60 pt-4 text-xs text-muted-foreground"
       data-testid="home-watcher"
     >
       {running === null
-        ? "The window watcher could not be reached."
+        ? "The rollover monitor could not be reached."
         : running
-          ? "The window watcher is running."
-          : "The window watcher is stopped."}
+          ? "The rollover monitor is running."
+          : "The rollover monitor is stopped."}
     </p>
   );
 }
