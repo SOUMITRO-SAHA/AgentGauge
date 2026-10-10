@@ -96,6 +96,16 @@ async function invoke(
 export const ProviderKind = Schema.Literals(["codex"]);
 export type ProviderKind = typeof ProviderKind.Type;
 
+export const CliToolStatus = Schema.Struct({
+  tool: Schema.Literals(["codex", "openCode"]),
+  displayName: Schema.String,
+  executable: Schema.String,
+  installed: Schema.Boolean,
+  version: Schema.NullOr(Schema.String),
+  reason: Schema.NullOr(Schema.String),
+});
+export type CliToolStatus = typeof CliToolStatus.Type;
+
 export const Freshness = Schema.Literals(["live", "cached", "stale", "unavailable"]);
 export type Freshness = typeof Freshness.Type;
 
@@ -263,6 +273,7 @@ const ErrorPayload = Schema.Struct({ kind: Schema.String, message: Schema.String
 export const AppRequest = Schema.Union([
   Schema.Struct({ type: Schema.Literal("hello") }),
   Schema.Struct({ type: Schema.Literal("providerStatus") }),
+  Schema.Struct({ type: Schema.Literal("cliDetection") }),
   Schema.Struct({ type: Schema.Literal("readUsage") }),
   Schema.Struct({ type: Schema.Literal("readUsageFor"), provider: ProviderKind }),
   Schema.Struct({ type: Schema.Literal("readPlan"), provider: ProviderKind }),
@@ -300,6 +311,10 @@ export const AppResponse = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("providerStatuses"),
     providers: Schema.Array(ProviderStatus),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("cliDetections"),
+    tools: Schema.Array(CliToolStatus),
   }),
   Schema.Struct({
     type: Schema.Literal("usage"),
@@ -401,6 +416,12 @@ export const hello = () =>
 export const getProviderStatus = () =>
   request({ type: "providerStatus" }).pipe(
     Effect.map((response) => expectType(response, "providerStatuses").providers),
+  );
+
+/** Detects supported coding-agent CLIs using only their version commands. */
+export const getCliDetection = () =>
+  request({ type: "cliDetection" }).pipe(
+    Effect.map((response) => expectType(response, "cliDetections").tools),
   );
 
 /**

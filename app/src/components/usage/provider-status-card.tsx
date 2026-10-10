@@ -1,113 +1,110 @@
-/**
- * Whether the Codex CLI is installed, with the fix when it is not.
- *
- * The onboarding flow gates on this rather than on a guess, so a user without
- * Codex is told exactly what to install instead of being shown an empty
- * dashboard.
- */
+/** Read-only CLI installation checks; detection does not imply usage support. */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
-import { ArrowClockwise, Terminal, CheckCircle, Warning } from "@phosphor-icons/react";
+import { ArrowClockwise, CheckCircle, Terminal, Warning } from "@phosphor-icons/react";
 
-import { providerStatusAtom } from "~/atoms";
+import { cliDetectionAtom } from "~/atoms";
+import { PANEL } from "~/components/dashboard/panel";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
+import type * as Ipc from "~/lib/ipc";
+
+const INSTALL_COMMANDS: Record<Ipc.CliToolStatus["tool"], string> = {
+  codex: "npm install -g @openai/codex",
+  openCode: "npm install -g opencode-ai",
+};
 
 export function ProviderStatusCard() {
-  const result = useAtomValue(providerStatusAtom);
-  const refresh = useAtomRefresh(providerStatusAtom);
+  const result = useAtomValue(cliDetectionAtom);
+  const refresh = useAtomRefresh(cliDetectionAtom);
 
   return (
-    <div
+    <section
       data-testid="provider-status"
-      className="relative rounded-xl border border-border/70 bg-surface-raised/70 p-[clamp(0.75rem,2.5vw,1.25rem)] backdrop-blur-md"
+      aria-label="CLI detection"
+      className={`relative ${PANEL}`}
     >
-      {/* Re-probes the install without reloading: the executable can appear or
-          vanish while the app is open, and the card should be able to say so. */}
       <Button
         variant="ghost"
         size="icon"
         className="absolute top-2 right-2 size-7 text-muted-foreground hover:text-foreground"
         onClick={() => refresh()}
         data-testid="refresh-provider"
-        aria-label="Re-check the Codex CLI"
+        aria-label="Re-check installed CLIs"
       >
         <ArrowClockwise aria-hidden="true" />
       </Button>
-      {AsyncResult.match(result, {
-        onInitial: () => (
-          <div className="flex items-center gap-3" data-testid="status-loading">
-            <div className="size-8 animate-pulse rounded-lg bg-muted" />
-            <div className="h-4 w-40 animate-pulse rounded bg-muted" />
-          </div>
-        ),
-        onSuccess: (result) => {
-          const codex = result.value.find(
-            (provider) => provider.kind === "codex",
-          );
-
-          if (!codex) {
-            return (
-              <div className="flex items-center gap-3" data-testid="status-unknown">
-                <Warning className="size-4 text-unknown" aria-hidden="true" />
-                <span className="text-sm text-muted-foreground">
-                  No provider is registered.
-                </span>
-              </div>
-            );
-          }
-
-          return (
-            <div className="flex items-start gap-3">
-              {codex.installed ? (
-                <CheckCircle
-                  className="mt-0.5 size-4 shrink-0 text-ok"
-                  aria-hidden="true"
-                />
-              ) : (
-                <Warning
-                  className="mt-0.5 size-4 shrink-0 text-warn"
-                  aria-hidden="true"
-                />
-              )}
-
-              <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium text-foreground">
-                  {codex.installed ? "Codex CLI detected" : "Codex CLI not found"}
-                </span>
-
-                {codex.installed ? (
-                  <span
-                    className="tabular text-xs text-muted-foreground"
-                    data-testid="codex-version"
-                  >
-                    {codex.version ?? "Version unknown"}
-                  </span>
-                ) : (
-                  <>
-                    <span className="text-xs text-muted-foreground">
-                      {codex.reason ?? "The executable was not found on your PATH."}
-                    </span>
-                    <code className="mt-1 inline-flex max-w-full items-center gap-1.5 self-start overflow-x-auto rounded-md bg-muted px-2 py-1 text-xs whitespace-nowrap text-foreground">
-                      <Terminal className="size-3 shrink-0" aria-hidden="true" />
-                      npm install -g @openai/codex
-                    </code>
-                  </>
-                )}
-              </div>
+      <div className="flex flex-col gap-4 pr-8">
+        <h2 className="text-sm font-semibold text-foreground">CLI detection</h2>
+        {AsyncResult.match(result, {
+          onInitial: () => (
+            <div className="flex flex-col gap-3" data-testid="status-loading">
+              <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+              <div className="h-4 w-40 animate-pulse rounded bg-muted" />
             </div>
-          );
-        },
-        onFailure: () => (
-          <div className="flex items-center gap-3" data-testid="status-error">
-            <Warning className="size-4 text-critical" aria-hidden="true" />
-            <span className="text-sm text-muted-foreground">
-              The app could not be reached.
+          ),
+          onSuccess: (success) => (
+            <div className="flex flex-col gap-3">
+              {success.value.map((tool) => (
+                <CliStatusRow key={tool.tool} status={tool} />
+              ))}
+              <p className="border-t border-border/60 pt-3 text-xs text-muted-foreground">
+                AgentGauge currently reads usage from Codex only. Detecting
+                another CLI does not enable its usage integration.
+              </p>
+            </div>
+          ),
+          onFailure: () => (
+            <div className="flex items-center gap-3" data-testid="status-error">
+              <Warning className="size-4 text-critical" aria-hidden="true" />
+              <span className="text-sm text-muted-foreground">
+                The app could not check installed CLIs.
+              </span>
+            </div>
+          ),
+        })}
+      </div>
+    </section>
+  );
+}
+
+function CliStatusRow({ status }: { readonly status: Ipc.CliToolStatus }) {
+  return (
+    <div
+      className="flex min-w-0 items-start gap-3"
+      data-testid={`cli-${status.tool === "openCode" ? "opencode" : "codex"}`}
+    >
+      {status.installed ? (
+        <CheckCircle className="mt-0.5 size-4 shrink-0 text-ok" aria-hidden="true" />
+      ) : (
+        <Warning className="mt-0.5 size-4 shrink-0 text-warn" aria-hidden="true" />
+      )}
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="text-sm font-medium text-foreground">
+          {status.installed
+            ? `${status.displayName} detected`
+            : `${status.displayName} not found`}
+        </span>
+        {status.installed ? (
+          <span
+            className="break-words text-xs text-muted-foreground"
+            data-testid={`${status.tool === "openCode" ? "opencode" : "codex"}-version`}
+          >
+            {status.version ?? "Version unknown"}
+          </span>
+        ) : (
+          <>
+            <span className="text-xs text-muted-foreground">
+              {status.reason ?? "The executable was not found on your PATH."}
             </span>
-          </div>
-        ),
-      })}
+            <code className="inline-flex max-w-full items-center gap-1.5 self-start overflow-x-auto rounded-md bg-muted px-2 py-1 text-xs whitespace-nowrap text-foreground">
+              <Terminal className="size-3 shrink-0" aria-hidden="true" />
+              {INSTALL_COMMANDS[status.tool]}
+            </code>
+          </>
+        )}
+      </div>
     </div>
   );
 }

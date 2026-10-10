@@ -14,6 +14,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::modules::automation::AutomationState;
+use crate::modules::cli_detection::CliToolStatus;
 use crate::modules::onboarding::{OnboardingProgress, OnboardingStep};
 use crate::modules::widget::SystemWidgetStatus;
 use crate::shared::domain::{PlanKind, ProviderKind, UsageSnapshot};
@@ -35,6 +36,8 @@ pub enum AppRequest {
     Hello,
     /// Probes every provider without starting a long-lived process.
     ProviderStatus,
+    /// Detects supported coding-agent CLIs without starting sessions.
+    CliDetection,
     /// Reads usage for every provider.
     ReadUsage,
     /// Reads usage for one provider, propagating its failure.
@@ -93,6 +96,7 @@ impl AppRequest {
         match self {
             Self::Hello => "hello",
             Self::ProviderStatus => "providerStatus",
+            Self::CliDetection => "cliDetection",
             Self::ReadUsage => "readUsage",
             Self::ReadUsageFor { .. } => "readUsageFor",
             Self::ReadPlan { .. } => "readPlan",
@@ -124,6 +128,9 @@ pub enum AppResponse {
     },
     ProviderStatuses {
         providers: Vec<ProviderStatus>,
+    },
+    CliDetections {
+        tools: Vec<CliToolStatus>,
     },
     Usage {
         snapshots: Vec<UsageSnapshot>,
@@ -175,6 +182,14 @@ mod tests {
     fn a_request_with_no_arguments_is_a_bare_tag() {
         let json = serde_json::to_string(&AppRequest::ReadUsage).expect("serializes");
         assert_eq!(json, r#"{"type":"readUsage"}"#);
+    }
+
+    #[test]
+    fn cli_detection_is_a_bare_read_only_request() {
+        let request: AppRequest =
+            serde_json::from_str(r#"{"type":"cliDetection"}"#).expect("deserializes");
+        assert_eq!(request, AppRequest::CliDetection);
+        assert_eq!(request.name(), "cliDetection");
     }
 
     #[test]

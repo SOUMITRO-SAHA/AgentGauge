@@ -94,3 +94,30 @@ describe("SystemWidgetStatus", () => {
     expect(typeof Ipc.getSystemWidgetStatus).toBe("function");
   });
 });
+
+describe("CliToolStatus", () => {
+  it("decodes Codex and OpenCode detection without implying provider support", () => {
+    const statuses = [
+      {
+        tool: "codex",
+        displayName: "Codex CLI",
+        executable: "codex",
+        installed: true,
+        version: "codex-cli 0.159.0",
+        reason: null,
+      },
+      {
+        tool: "openCode",
+        displayName: "OpenCode CLI",
+        executable: "opencode",
+        installed: false,
+        version: null,
+        reason: "Executable was not found on PATH.",
+      },
+    ];
+
+    const decoded = Schema.decodeUnknownSync(Schema.Array(Ipc.CliToolStatus))(statuses);
+    expect(decoded.map((status) => status.tool)).toEqual(["codex", "openCode"]);
+    expect(decoded[1]?.installed).toBe(false);
+  });
+});

@@ -101,6 +101,13 @@ describe("onboarding flow", () => {
     await expect($('[data-testid="codex-version"]')).toHaveText(
       "codex-cli 0.159.0",
     );
+    await expectDisplayed('[data-testid="cli-opencode"]');
+    await expect($('[data-testid="opencode-version"]')).toHaveText(
+      "opencode 1.0.0",
+    );
+    await expect($('[data-testid="provider-status"]')).toHaveText(
+      expect.stringContaining("Detecting another CLI does not enable its usage integration."),
+    );
   });
 
   it("renders the 5-hour window with its percentage and reset countdown", async () => {

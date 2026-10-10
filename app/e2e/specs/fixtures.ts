@@ -461,6 +461,28 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               },
             ],
           };
+        case "cliDetection":
+          return {
+            type: "cliDetections",
+            tools: [
+              {
+                tool: "codex",
+                displayName: "Codex CLI",
+                executable: "codex",
+                installed: data.installed,
+                version: data.version ?? null,
+                reason: data.installed ? null : "`codex` is not available on this system.",
+              },
+              {
+                tool: "openCode",
+                displayName: "OpenCode CLI",
+                executable: "opencode",
+                installed: true,
+                version: "opencode 1.0.0",
+                reason: null,
+              },
+            ],
+          };
         case "automationState":
         case "startAutomation":
         case "stopAutomation":

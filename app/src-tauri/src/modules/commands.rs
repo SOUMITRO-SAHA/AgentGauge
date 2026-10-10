@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::modules::automation::AutomationRunner;
+use crate::modules::cli_detection;
 use crate::modules::onboarding::{
     OnboardingProgress, OnboardingState, OnboardingStep, OnboardingStore,
 };
@@ -61,6 +62,10 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
 
         AppRequest::ProviderStatus => Ok(AppResponse::ProviderStatuses {
             providers: state.registry.status(),
+        }),
+
+        AppRequest::CliDetection => Ok(AppResponse::CliDetections {
+            tools: cli_detection::detect(),
         }),
 
         AppRequest::ReadUsage => {

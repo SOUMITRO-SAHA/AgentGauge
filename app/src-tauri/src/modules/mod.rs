@@ -5,6 +5,7 @@
 //! modules never import each other — they meet at the traits in `shared/`.
 
 pub mod automation;
+pub mod cli_detection;
 pub mod commands;
 pub mod onboarding;
 pub mod providers;

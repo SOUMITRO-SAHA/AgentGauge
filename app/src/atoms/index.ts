@@ -25,8 +25,8 @@ import { DEFAULT_ROUTE, type Route } from "~/lib/navigation";
  */
 const runtime = Atom.runtime(Layer.empty);
 
-/** Probes every provider without starting a long-lived process. */
-export const providerStatusAtom = runtime.atom(Ipc.getProviderStatus);
+/** Detects installed CLI tools without starting an agent session. */
+export const cliDetectionAtom = runtime.atom(Ipc.getCliDetection);
 
 /**
  * Reads usage for every provider.
