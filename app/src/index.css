@@ -111,7 +111,9 @@
   --chart-3: var(--color-blue-600);
   --chart-4: var(--color-blue-700);
   --chart-5: var(--color-blue-800);
-  --sidebar: oklch(0.985 0 0);
+  /* Translucent so the sidebar reads as glass over the vibrancy layer; the
+     blur itself comes from the Sidebar's className. */
+  --sidebar: oklch(1 0 0 / 72%);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -160,7 +162,8 @@
   --chart-3: var(--color-blue-600);
   --chart-4: var(--color-blue-700);
   --chart-5: var(--color-blue-800);
-  --sidebar: oklch(0.205 0 0);
+  /* Same translucency as light, on the app's own dark hue. */
+  --sidebar: oklch(0.21 0.008 265 / 65%);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -259,4 +262,31 @@
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
   }
+}
+
+/*
+ * Glossy macOS material for the navigation surfaces.
+ *
+ * Three layers, the same ones the system's own sidebars read as: a translucent
+ * fill over the window's vibrancy, a blur that keeps motion behind the surface
+ * legible, and an inset highlight on the top edge — the specular line that
+ * makes a surface read as glass rather than as flat grey. Colors come from the
+ * theme tokens so dark mode needs no second definition of the fill; only the
+ * highlight is re-tuned, because a white line that reads as glass on a light
+ * surface reads as a scratch on a dark one.
+ */
+@utility glass {
+  background-color: var(--accent-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid color-mix(in oklch, var(--foreground) 9%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 42%, transparent),
+    0 10px 30px -12px color-mix(in oklch, black 28%, transparent);
+}
+
+.dark .glass {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 14%, transparent),
+    0 10px 30px -12px color-mix(in oklch, black 55%, transparent);
 }

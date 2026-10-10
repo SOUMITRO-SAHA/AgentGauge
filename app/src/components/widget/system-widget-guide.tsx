@@ -1,6 +1,6 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
-import { CircleAlert, CircleCheck } from "lucide-react";
+import { CheckCircle, WarningCircle } from "@phosphor-icons/react";
 
 import { systemWidgetAtom } from "~/atoms";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
@@ -96,7 +96,7 @@ function StatusLine({ status }: { status: SystemWidgetStatus }) {
         data-state="unsupported"
         className="flex items-start gap-2 text-sm text-muted-foreground"
       >
-        <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+        <WarningCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
         <span>{status.reason ?? "Not available on this system."}</span>
       </p>
     );
@@ -109,7 +109,7 @@ function StatusLine({ status }: { status: SystemWidgetStatus }) {
         data-state="not-embedded"
         className="flex items-start gap-2 text-sm text-muted-foreground"
       >
-        <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+        <WarningCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
         <span>
           Not in this build. Run <code>bun run tauri build</code> and open the
           packaged app — the dev server has no bundle to put the widget in.
@@ -124,7 +124,7 @@ function StatusLine({ status }: { status: SystemWidgetStatus }) {
       data-state="ready"
       className="flex items-start gap-2 text-sm text-muted-foreground"
     >
-      <CircleCheck
+      <CheckCircle
         aria-hidden="true"
         className="mt-0.5 size-4 shrink-0 text-[var(--ok)]"
       />

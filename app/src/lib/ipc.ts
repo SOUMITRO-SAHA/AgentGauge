@@ -206,6 +206,19 @@ export const OnboardingProgress = Schema.Struct({
 export type OnboardingProgress = typeof OnboardingProgress.Type;
 
 /**
+ * The renderer's persisted preferences, mirroring the Rust `UiState`.
+ *
+ * The route is typed loosely here and clamped through `isRoute` from
+ * `~/lib/navigation` where it is read: the file may hold a value from an older
+ * build whose route set differed, and a stale word must fall back to Home, not
+ * break the decode and take the whole shell down with it.
+ */
+export const UiState = Schema.Struct({
+  lastRoute: Schema.NullOr(Schema.String),
+});
+export type UiState = typeof UiState.Type;
+
+/**
  * What the setup guide needs to know about the system's own widget.
  *
  * `supported` is false off macOS and below macOS 14, and `reason` says which —
@@ -268,6 +281,11 @@ export const AppRequest = Schema.Union([
     dismissed: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({ type: Schema.Literal("systemWidgetStatus") }),
+  Schema.Struct({ type: Schema.Literal("uiState") }),
+  Schema.Struct({
+    type: Schema.Literal("setUiState"),
+    lastRoute: Schema.NullOr(Schema.String),
+  }),
 ]);
 export type AppRequest = typeof AppRequest.Type;
 
@@ -295,6 +313,10 @@ export const AppResponse = Schema.Union([
     progress: OnboardingProgress,
   }),
   Schema.Struct({ type: Schema.Literal("systemWidget"), status: SystemWidgetStatus }),
+  Schema.Struct({
+    type: Schema.Literal("uiState"),
+    state: UiState,
+  }),
   Schema.Struct({ type: Schema.Literal("failure"), error: ErrorPayload }),
 ]);
 export type AppResponse = typeof AppResponse.Type;
@@ -457,4 +479,22 @@ export const setOnboardingStep = (step: OnboardingStep, dismissed: boolean) =>
 export const getSystemWidgetStatus = () =>
   request({ type: "systemWidgetStatus" }).pipe(
     Effect.map((response) => expectType(response, "systemWidget").status),
+  );
+
+/** Reads the renderer's persisted preferences. */
+export const getUiState = () =>
+  request({ type: "uiState" }).pipe(
+    Effect.map((response) => expectType(response, "uiState").state),
+  );
+
+/**
+ * Persists the renderer's preferences, so a choice survives a relaunch.
+ *
+ * A failure is reported rather than swallowed, the same rule as onboarding
+ * progress: silently losing a preference is a preference that lies about
+ * having been kept.
+ */
+export const setUiState = (state: UiState) =>
+  request({ type: "setUiState", lastRoute: state.lastRoute }).pipe(
+    Effect.map((response) => expectType(response, "uiState").state),
   );

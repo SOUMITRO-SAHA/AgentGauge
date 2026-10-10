@@ -7,8 +7,8 @@
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
-import { useAtomValue } from "@effect/atom-react";
-import { Terminal, CircleCheck, TriangleAlert } from "lucide-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { ArrowClockwise, Terminal, CheckCircle, Warning } from "@phosphor-icons/react";
 
 import { providerStatusAtom } from "~/atoms";
 import { Button } from "~/components/ui/button";
@@ -16,12 +16,25 @@ import { cn } from "~/lib/utils";
 
 export function ProviderStatusCard() {
   const result = useAtomValue(providerStatusAtom);
+  const refresh = useAtomRefresh(providerStatusAtom);
 
   return (
     <div
       data-testid="provider-status"
-      className="rounded-xl border border-border/70 bg-surface-raised/70 p-[clamp(0.75rem,2.5vw,1.25rem)] backdrop-blur-md"
+      className="relative rounded-xl border border-border/70 bg-surface-raised/70 p-[clamp(0.75rem,2.5vw,1.25rem)] backdrop-blur-md"
     >
+      {/* Re-probes the install without reloading: the executable can appear or
+          vanish while the app is open, and the card should be able to say so. */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute top-2 right-2 size-7 text-muted-foreground hover:text-foreground"
+        onClick={() => refresh()}
+        data-testid="refresh-provider"
+        aria-label="Re-check the Codex CLI"
+      >
+        <ArrowClockwise aria-hidden="true" />
+      </Button>
       {AsyncResult.match(result, {
         onInitial: () => (
           <div className="flex items-center gap-3" data-testid="status-loading">
@@ -37,7 +50,7 @@ export function ProviderStatusCard() {
           if (!codex) {
             return (
               <div className="flex items-center gap-3" data-testid="status-unknown">
-                <TriangleAlert className="size-4 text-unknown" aria-hidden="true" />
+                <Warning className="size-4 text-unknown" aria-hidden="true" />
                 <span className="text-sm text-muted-foreground">
                   No provider is registered.
                 </span>
@@ -48,12 +61,12 @@ export function ProviderStatusCard() {
           return (
             <div className="flex items-start gap-3">
               {codex.installed ? (
-                <CircleCheck
+                <CheckCircle
                   className="mt-0.5 size-4 shrink-0 text-ok"
                   aria-hidden="true"
                 />
               ) : (
-                <TriangleAlert
+                <Warning
                   className="mt-0.5 size-4 shrink-0 text-warn"
                   aria-hidden="true"
                 />
@@ -88,7 +101,7 @@ export function ProviderStatusCard() {
         },
         onFailure: () => (
           <div className="flex items-center gap-3" data-testid="status-error">
-            <TriangleAlert className="size-4 text-critical" aria-hidden="true" />
+            <Warning className="size-4 text-critical" aria-hidden="true" />
             <span className="text-sm text-muted-foreground">
               The app could not be reached.
             </span>

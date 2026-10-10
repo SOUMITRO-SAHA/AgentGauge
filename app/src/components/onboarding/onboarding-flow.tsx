@@ -16,11 +16,11 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowClockwise,
   Check,
-  LayoutPanelTop,
-  RefreshCw,
-  Sparkles,
-} from "lucide-react";
+  Sparkle,
+  SquaresFour,
+} from "@phosphor-icons/react";
 
 import {
   automationAtom,
@@ -190,7 +190,7 @@ function OnboardingBody({
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-[clamp(1rem,3vw,2rem)] px-[clamp(1rem,4vw,1.5rem)] py-[clamp(1rem,4vw,2.5rem)]">
         <header className="flex flex-col gap-4">
           <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-            <Sparkles className="size-3.5 shrink-0" aria-hidden="true" />
+            <Sparkle className="size-3.5 shrink-0" aria-hidden="true" />
             <span className="tabular">
               Step {Math.min(stepIndex + 1, STEPS.length)} of {STEPS.length}
             </span>
@@ -236,7 +236,7 @@ function OnboardingBody({
             onClick={onRefresh}
             data-testid="onboarding-refresh"
           >
-            <RefreshCw aria-hidden="true" />
+            <ArrowClockwise aria-hidden="true" />
             <span className="hidden sm:inline">Re-read</span>
           </Button>
           <Button
@@ -401,7 +401,7 @@ function WidgetDemo({
           return (
             <div className="flex flex-col gap-3">
               <div className="flex items-center gap-2" data-testid="widget-ready">
-                <LayoutPanelTop className="size-4 text-ok" aria-hidden="true" />
+                <SquaresFour className="size-4 text-ok" aria-hidden="true" />
                 <span className="text-sm text-foreground">
                   {status.extensionPresent
                     ? `Ready to add on macOS ${status.osVersion ?? status.minimumVersion}.`
@@ -436,7 +436,7 @@ function WidgetDemo({
                 onClick={onRefresh}
                 data-testid="refresh-widget"
               >
-                <RefreshCw aria-hidden="true" />
+                <ArrowClockwise aria-hidden="true" />
                 Re-check
               </Button>
             </div>

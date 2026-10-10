@@ -14,6 +14,7 @@ import * as Atom from "effect/unstable/reactivity/Atom";
 import * as Layer from "effect/Layer";
 
 import * as Ipc from "~/lib/ipc";
+import { DEFAULT_ROUTE, type Route } from "~/lib/navigation";
 
 /**
  * The runtime atoms run in.
@@ -67,5 +68,18 @@ export const nowAtom = Atom.make(Date.now());
  * this only tracks the live value.
  */
 export const onboardingVisibleAtom = Atom.make<boolean>(true);
+
+/**
+ * The destination currently shown, persisted across launches.
+ *
+ * The value is chosen by using the navigation; the shell mirrors every change
+ * into the Rust-side `settings.json` (`setUiState`) and restores it once on
+ * mount, clamped through `isRoute` so a stored word from an older build falls
+ * back to Home instead of breaking the decode.
+ *
+ * The narrow/sidebar layout is inferred from the window width in CSS, never
+ * from here.
+ */
+export const routeAtom = Atom.make<Route>(DEFAULT_ROUTE);
 
 export { Atom };

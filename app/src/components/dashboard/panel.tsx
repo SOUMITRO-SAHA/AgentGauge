@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { ArrowClockwise } from "@phosphor-icons/react";
 
 import { Button } from "~/components/ui/button";
 
@@ -51,7 +51,7 @@ export function PanelHeader({
         onClick={onRefresh}
         data-testid={testId}
       >
-        <RefreshCw aria-hidden="true" />
+        <ArrowClockwise aria-hidden="true" />
         <span className="hidden sm:inline">Refresh</span>
       </Button>
     </div>

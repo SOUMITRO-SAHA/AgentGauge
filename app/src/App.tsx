@@ -10,7 +10,7 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { RegistryProvider, useAtomValue } from "@effect/atom-react";
 
 import { onboardingAtom, onboardingVisibleAtom } from "~/atoms";
-import { Dashboard } from "~/components/dashboard/dashboard";
+import { AppShell } from "~/components/shell/app-shell";
 import { OnboardingFlow } from "~/components/onboarding/onboarding-flow";
 
 /**
@@ -45,9 +45,9 @@ function Surface() {
 }
 
 /**
- * Shows onboarding until it is dismissed, then the dashboard.
+ * Shows onboarding until it is dismissed, then the app shell.
  *
- * Both stay mounted so the dashboard's atoms are already warm when the flow
+ * Both stay mounted so the shell's atoms are already warm when the flow
  * finishes — otherwise the first paint after onboarding is a loading state the
  * user did not ask to wait through.
  *
@@ -71,7 +71,7 @@ function OnboardingGate() {
 
   return (
     <>
-      <Dashboard hidden={!skipped || showFlow} />
+      <AppShell hidden={!skipped || showFlow} />
       <OnboardingFlow />
     </>
   );
