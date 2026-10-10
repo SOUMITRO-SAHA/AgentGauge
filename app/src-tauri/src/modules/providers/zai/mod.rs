@@ -8,7 +8,8 @@ pub(crate) mod protocol;
 
 use crate::modules::providers::coding_plan::{self, PlanSpec};
 use crate::modules::providers::zai::protocol::{
-    decode_auth_failure, decode_quota, is_auth_refusal, QUOTA_PATH,
+    decode_auth_failure, decode_model_usage, decode_quota, is_auth_refusal, model_usage_query,
+    QUOTA_PATH,
 };
 use crate::shared::domain::{AccountUsage, PlanKind, ProviderKind, UsageSnapshot};
 use crate::shared::error::Error;
@@ -57,10 +58,12 @@ impl Provider for ZaiProvider {
     }
 
     fn read_account_usage(&self) -> Result<AccountUsage, Error> {
-        Err(coding_plan::unsupported(
-            ProviderKind::Zai,
-            "account activity",
-        ))
+        let now_ms = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
+        coding_plan::read_monitor_json(
+            &Self::spec(),
+            &model_usage_query(now_ms),
+            decode_model_usage,
+        )
     }
 
     fn account(&self) -> Result<Option<PlanKind>, Error> {
@@ -71,6 +74,16 @@ impl Provider for ZaiProvider {
 
     fn send_ping(&self, _prompt: &str) -> Result<PingOutcome, Error> {
         Err(coding_plan::unsupported(ProviderKind::Zai, "a ping"))
+    }
+
+    fn send_kickoff(&self, prompt: &str, model: Option<&str>) -> Result<PingOutcome, Error> {
+        coding_plan::send_kickoff(
+            &Self::spec(),
+            prompt,
+            model,
+            protocol::kickoff_body,
+            protocol::decode_kickoff_reply,
+        )
     }
 }
 
@@ -104,6 +117,39 @@ mod tests {
                 snapshot.five_hour.as_ref().and_then(|w| w.resets_at),
             ),
             Err(error) => println!("LIVE_ZAI_ERR>>> {:?} {}", error.kind, error.message),
+        }
+    }
+
+    #[test]
+    #[ignore = "live probe: hits the real Z.AI endpoint with the key OpenCode stores"]
+    fn live_zai_model_usage_prints_the_account_usage() {
+        use crate::modules::opencode::OpenCodeCatalog;
+        use crate::modules::providers::coding_plan::{plan_request, PlanRequest};
+        use crate::modules::providers::http;
+
+        let now_ms = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
+        let spec = ZaiProvider::spec();
+        let catalog = OpenCodeCatalog::read().expect("opencode reads");
+        let PlanRequest::Fetch { url, auth } =
+            plan_request(&catalog, &spec, &protocol::model_usage_query(now_ms))
+        else {
+            panic!("expected a fetch");
+        };
+        let payload = http::get_json(&url, &auth).expect("the monitor answers");
+        println!("LIVE_ZAI_MODEL_USAGE_RAW>>> {payload}");
+        match protocol::decode_model_usage(&payload, now_ms) {
+            Ok(usage) => println!(
+                "LIVE_ZAI_ANALYTICS>>> fetched_at={} window_days={:?} total_tokens={:?} total_requests={:?} peak={:?} streaks=({:?},{:?}) buckets={}",
+                usage.fetched_at,
+                usage.window_days,
+                usage.summary.total_tokens,
+                usage.summary.total_requests,
+                usage.summary.peak_daily_tokens,
+                usage.summary.current_streak_days,
+                usage.summary.longest_streak_days,
+                usage.daily_usage_buckets.len(),
+            ),
+            Err(error) => println!("LIVE_ZAI_ANALYTICS_ERR>>> {:?} {}", error.kind, error.message),
         }
     }
 

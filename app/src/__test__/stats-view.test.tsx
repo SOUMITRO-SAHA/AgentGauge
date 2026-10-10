@@ -39,6 +39,41 @@ function zaiSnapshot() {
   };
 }
 
+function codexAccountUsage() {
+  return {
+    fetchedAt: 1_791_561_935_000,
+    summary: {
+      totalTokens: 1234567,
+      peakDailyTokens: 45678,
+      longestRunningTurnSec: 540,
+      currentStreakDays: 8,
+      longestStreakDays: 14,
+      totalRequests: null,
+    },
+    windowDays: null,
+    dailyUsageBuckets: [{ startDate: "2026-10-07", tokens: 2300 }],
+  };
+}
+
+function zaiAccountUsage() {
+  return {
+    fetchedAt: 1_791_561_935_000,
+    summary: {
+      totalTokens: 21_700_000_000,
+      peakDailyTokens: 1_860_000_000,
+      longestRunningTurnSec: null,
+      currentStreakDays: 5,
+      longestStreakDays: 9,
+      totalRequests: 10_419,
+    },
+    windowDays: 30,
+    dailyUsageBuckets: [
+      { startDate: "2026-10-08", tokens: 1_470_000_000 },
+      { startDate: "2026-10-09", tokens: 275_000_000 },
+    ],
+  };
+}
+
 function installDispatch(): void {
   (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
     dispatch: ({ request }: { request: Request }) => {
@@ -68,19 +103,8 @@ function installDispatch(): void {
         case "readAccountUsage":
           return {
             type: "accountUsage",
-            usage: {
-              fetchedAt: 1_791_561_935_000,
-              summary: {
-                lifetimeTokens: 1234567,
-                peakDailyTokens: 45678,
-                longestRunningTurnSec: 540,
-                currentStreakDays: 8,
-                longestStreakDays: 14,
-              },
-              dailyUsageBuckets: [
-                { startDate: "2026-10-07", tokens: 2300 },
-              ],
-            },
+            usage:
+              request.provider === "zai" ? zaiAccountUsage() : codexAccountUsage(),
           };
         case "readUsageFor":
           return {
@@ -114,7 +138,7 @@ it("renders analytics immediately, with no consent gate", async () => {
     await screen.findByTestId("stats-account-analytics"),
   ).toBeTruthy();
   expect(screen.queryByTestId("stats-analytics-consent")).toBeNull();
-  expect(await screen.findByTestId("stats-lifetime-tokens")).toBeTruthy();
+  expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
 });
 
 it("gives every connected plan a tab and shows its stats there", async () => {
@@ -140,3 +164,28 @@ it("gives every connected plan a tab and shows its stats there", async () => {
   fireEvent.click(screen.getByTestId("stats-tab-alibaba-coding-plan"));
   expect(await screen.findByTestId("stats-plan-unreadable")).toBeTruthy();
 });
+
+it("shows Z.AI's token analytics like Codex's, labelled with its window", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  fireEvent.mouseDown(screen.getByTestId("stats-tab-zai"));
+  fireEvent.click(screen.getByTestId("stats-tab-zai"));
+
+  expect(await screen.findByTestId("stats-plan-analytics")).toBeTruthy();
+  expect(await screen.findByTestId("stats-daily-chart")).toBeTruthy();
+
+  const cards = await readAnalyticsCards();
+  expect(cards.totalTokens).toBe("21700000000");
+  expect(cards.totalRequests).toBe("10419");
+});
+
+async function readAnalyticsCards() {
+  const totals = await screen.findByTestId("stats-total-tokens");
+  const requests = await screen.findByTestId("stats-total-requests");
+  return {
+    totalTokens: (totals.textContent ?? "").replace(/\D/g, ""),
+    totalRequests: (requests.textContent ?? "").replace(/\D/g, ""),
+  };
+}

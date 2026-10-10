@@ -12,9 +12,9 @@
  * that testid, and both views stay mounted, so a duplicate would make every
  * spec selector ambiguous.
  *
- * The tabbed content mounts only while the view is visible: a hidden view
- * must not read the account in the background, and a first read belongs to the
- * moment the user actually opens Stats.
+ * The tab strip is mounted from app start like Home's, so a click never races
+ * a fresh Radix mount; only the tab *bodies* are gated on visibility, which is
+ * what keeps a hidden view from reading the account in the background.
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
@@ -25,7 +25,7 @@ import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
 import { ChartBar, Fire, Lightning } from "@phosphor-icons/react";
 
 import {
-  accountUsageAtom,
+  accountUsageForAtom,
   analyticsConsentAtom,
   statsTabAtom,
   subscriptionsAtom,
@@ -85,40 +85,36 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
         subtitle="Local analytics across your connected plans."
       />
 
-      {visible ? (
-        <Tabs
-          value={active}
-          onValueChange={setSelected}
-          className="flex flex-col gap-4"
-        >
-          <TabsList aria-label="Connected plans">
-            {tabs.map((tab) => (
-              <TabsTrigger
-                key={tab.value}
-                value={tab.value}
-                data-testid={`stats-tab-${tab.value}`}
-                data-active={tab.value === active}
-              >
-                {tab.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
+      <Tabs
+        value={active}
+        onValueChange={setSelected}
+        className="flex flex-col gap-4"
+      >
+        <TabsList aria-label="Connected plans">
           {tabs.map((tab) => (
-            <TabsContent
+            <TabsTrigger
               key={tab.value}
               value={tab.value}
-              className="animate-in fade-in duration-200"
+              data-testid={`stats-tab-${tab.value}`}
+              data-active={tab.value === active}
             >
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {tabs.map((tab) => (
+          <TabsContent key={tab.value} value={tab.value}>
+            {visible ? (
               <StatsTabBody
                 tab={tab}
                 analyticsEnabled={analyticsEnabled}
                 onSetAnalytics={setAnalyticsEnabled}
               />
-            </TabsContent>
-          ))}
-        </Tabs>
-      ) : null}
+            ) : null}
+          </TabsContent>
+        ))}
+      </Tabs>
     </div>
   );
 }
@@ -153,8 +149,27 @@ function StatsTabBody({
     );
   }
 
+  if (TOKEN_HISTORY_PROVIDERS.includes(tab.kind)) {
+    return analyticsEnabled ? (
+      <div className="flex flex-col gap-4">
+        <PlanAnalytics kind={tab.kind} label={tab.label} />
+        <PlanReading kind={tab.kind} />
+      </div>
+    ) : (
+      <AnalyticsOff onEnable={() => onSetAnalytics(true)} />
+    );
+  }
+
   return <PlanReading kind={tab.kind} />;
 }
+
+/**
+ * The providers whose backend reports token history, so a stats tab can carry
+ * the same activity analytics Codex's does. Anything absent keeps reading its
+ * windows only, and a provider added here must implement the account-usage
+ * read in Rust — the card is a promise the read has to keep.
+ */
+const TOKEN_HISTORY_PROVIDERS: readonly Ipc.ProviderKind[] = ["codex", "zai"];
 
 /**
  * The state a user's own opt-out produces.
@@ -218,8 +233,8 @@ function AnalyticsOff({ onEnable }: { readonly onEnable: () => void }) {
 
 /** The Codex tab: token activity, with the opt-out at the bottom. */
 function CodexActivity({ onDisable }: { readonly onDisable: () => void }) {
-  const usage = useAtomValue(accountUsageAtom);
-  const refresh = useAtomRefresh(accountUsageAtom);
+  const usage = useAtomValue(accountUsageForAtom("codex"));
+  const refresh = useAtomRefresh(accountUsageForAtom("codex"));
   const [saving, setSaving] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
@@ -302,6 +317,75 @@ function CodexActivity({ onDisable }: { readonly onDisable: () => void }) {
           {saving ? "Saving…" : "Turn off analytics"}
         </Button>
       </div>
+    </section>
+  );
+}
+
+/**
+ * Another plan's token-activity panel.
+ *
+ * The provider's own monitor API reports the daily series, so this is the
+ * same diagram Codex's tab carries, labelled with the window the provider
+ * actually reported. Below it sits the plan's window reading, which answers a
+ * different question and stays.
+ */
+function PlanAnalytics({
+  kind,
+  label,
+}: {
+  readonly kind: Ipc.ProviderKind;
+  readonly label: string;
+}) {
+  const usage = useAtomValue(accountUsageForAtom(kind));
+  const refresh = useAtomRefresh(accountUsageForAtom(kind));
+
+  return (
+    <section
+      className={`${PANEL} flex flex-col gap-4`}
+      data-testid="stats-plan-analytics"
+    >
+      <PanelHeader
+        title="Token activity"
+        testId="stats-plan-analytics-refresh"
+        onRefresh={refresh}
+      />
+      <p className="-mt-3 text-xs text-muted-foreground">
+        Reported by {label} · activity tokens and model calls in the reported
+        window, not plan credits or quota-window history.
+      </p>
+      {AsyncResult.match(usage, {
+        onInitial: () => (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="stats-plan-analytics-loading"
+          >
+            Reading {label} activity…
+          </p>
+        ),
+        onSuccess: (result) => (
+          <AnalyticsContent usage={result.value} refreshing={result.waiting} />
+        ),
+        onFailure: () => (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="stats-plan-analytics-unavailable"
+          >
+            {label} activity is unavailable. Your usage-window readings are
+            not affected.
+          </p>
+        ),
+      })}
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="stats-plan-analytics-source"
+      >
+        Source: {label} monitor API · read locally at{" "}
+        {AsyncResult.match(usage, {
+          onInitial: () => "—",
+          onSuccess: (result) => formatAbsolute(result.value.fetchedAt),
+          onFailure: () => "—",
+        })}
+      </p>
     </section>
   );
 }
@@ -477,10 +561,25 @@ function AnalyticsContent({
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          label="Lifetime tokens"
-          value={formatCount(usage.summary.lifetimeTokens)}
-          testId="stats-lifetime-tokens"
+          label={
+            usage.windowDays !== null
+              ? `Tokens in ${usage.windowDays} days`
+              : "Lifetime tokens"
+          }
+          value={formatCount(usage.summary.totalTokens)}
+          testId="stats-total-tokens"
         />
+        {usage.summary.totalRequests !== null ? (
+          <MetricCard
+            label={
+              usage.windowDays !== null
+                ? `Model calls in ${usage.windowDays} days`
+                : "Model calls"
+            }
+            value={formatCount(usage.summary.totalRequests)}
+            testId="stats-total-requests"
+          />
+        ) : null}
         <MetricCard
           label="Peak day"
           value={formatCount(usage.summary.peakDailyTokens)}
@@ -558,10 +657,12 @@ function AnalyticsContent({
             ? `Tokens in reported days: ${formatCount(knownBuckets.reduce((sum, bucket) => sum + (bucket.tokens ?? 0), 0))}`
             : `Partial daily totals: ${formatCount(knownBuckets.reduce((sum, bucket) => sum + (bucket.tokens ?? 0), 0))}`}
         </span>
-        <span>
-          Longest running turn:{" "}
-          {formatDuration(usage.summary.longestRunningTurnSec)}
-        </span>
+        {usage.summary.longestRunningTurnSec !== null ? (
+          <span>
+            Longest running turn:{" "}
+            {formatDuration(usage.summary.longestRunningTurnSec)}
+          </span>
+        ) : null}
       </div>
     </div>
   );

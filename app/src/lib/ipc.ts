@@ -206,11 +206,12 @@ export type UsageSnapshot = typeof UsageSnapshot.Type;
 export const AccountUsage = Schema.Struct({
   fetchedAt: Schema.Number,
   summary: Schema.Struct({
-    lifetimeTokens: Schema.NullOr(Schema.Number),
+    totalTokens: Schema.NullOr(Schema.Number),
     peakDailyTokens: Schema.NullOr(Schema.Number),
     longestRunningTurnSec: Schema.NullOr(Schema.Number),
     currentStreakDays: Schema.NullOr(Schema.Number),
     longestStreakDays: Schema.NullOr(Schema.Number),
+    totalRequests: Schema.NullOr(Schema.Number),
   }),
   dailyUsageBuckets: Schema.Array(
     Schema.Struct({
@@ -218,6 +219,13 @@ export const AccountUsage = Schema.Struct({
       tokens: Schema.NullOr(Schema.Number),
     }),
   ),
+  /**
+   * Days the reported window covers, when the provider reports a bounded span
+   * rather than the account's lifetime. `null` means lifetime, so the cards
+   * may say "lifetime"; a present value must be shown, because a window total
+   * must never pose as lifetime.
+   */
+  windowDays: Schema.NullOr(Schema.Number),
 });
 export type AccountUsage = typeof AccountUsage.Type;
 
@@ -315,6 +323,49 @@ export const PingOutcome = Schema.Struct({
 });
 export type PingOutcome = typeof PingOutcome.Type;
 
+/** One model the scheduled kickoff may use; `cheapest` is the default. */
+export const KickoffModel = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  cheapest: Schema.Boolean,
+});
+export type KickoffModel = typeof KickoffModel.Type;
+
+/** One subscription's scheduled-kickoff state, shaped for the picker. */
+export const KickoffView = Schema.Struct({
+  kind: ProviderKind,
+  enabled: Schema.Boolean,
+  /** The user's selection, if any — distinct from what would be sent. */
+  modelId: Schema.NullOr(Schema.String),
+  /** The model the next kickoff would actually use. */
+  effectiveModel: Schema.String,
+  models: Schema.Array(KickoffModel),
+  /** Epoch ms of the next scheduled attempt, if one is armed. */
+  nextKickAt: Schema.NullOr(Schema.Number),
+  lastKickAt: Schema.NullOr(Schema.Number),
+  lastAccepted: Schema.NullOr(Schema.Boolean),
+  lastDetail: Schema.NullOr(Schema.String),
+});
+export type KickoffView = typeof KickoffView.Type;
+
+/**
+ * Whether the system scheduler can run, and whether it is installed.
+ *
+ * `supported: false` means the platform has no scheduler integration yet;
+ * nothing schedules in the background there, and the UI must say so.
+ */
+export const SchedulerStatus = Schema.Struct({
+  supported: Schema.Boolean,
+  installed: Schema.Boolean,
+});
+export type SchedulerStatus = typeof SchedulerStatus.Type;
+
+export const KickoffOverview = Schema.Struct({
+  subscriptions: Schema.Array(KickoffView),
+  scheduler: SchedulerStatus,
+});
+export type KickoffOverview = typeof KickoffOverview.Type;
+
 // ---------------------------------------------------------------------------
 // The protocol
 // ---------------------------------------------------------------------------
@@ -344,6 +395,17 @@ export const AppRequest = Schema.Union([
   Schema.Struct({ type: Schema.Literal("startAutomation") }),
   Schema.Struct({ type: Schema.Literal("stopAutomation") }),
   Schema.Struct({ type: Schema.Literal("acknowledgeRollover") }),
+  Schema.Struct({ type: Schema.Literal("kickoffState") }),
+  Schema.Struct({
+    type: Schema.Literal("setKickoffEnabled"),
+    kind: ProviderKind,
+    enabled: Schema.Boolean,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("setKickoffModel"),
+    kind: ProviderKind,
+    modelId: Schema.String,
+  }),
   Schema.Struct({ type: Schema.Literal("onboardingProgress") }),
   Schema.Struct({
     type: Schema.Literal("setOnboardingStep"),
@@ -391,6 +453,10 @@ export const AppResponse = Schema.Union([
   Schema.Struct({ type: Schema.Literal("plan"), plan: Schema.NullOr(PlanKind) }),
   Schema.Struct({ type: Schema.Literal("ping"), outcome: PingOutcome }),
   Schema.Struct({ type: Schema.Literal("automation"), state: AutomationState }),
+  Schema.Struct({
+    type: Schema.Literal("kickoff"),
+    state: KickoffOverview,
+  }),
   Schema.Struct({
     type: Schema.Literal("onboarding"),
     progress: OnboardingProgress,
@@ -522,9 +588,9 @@ export const getUsageFor = (provider: ProviderKind) =>
     Effect.map((response) => expectType(response, "usage").snapshots),
   );
 
-/** Reads account-wide Codex token activity after explicit local analytics opt-in. */
-export const getAccountUsage = () =>
-  request({ type: "readAccountUsage", provider: "codex" }).pipe(
+/** Reads an account's token activity for one provider, local analytics permitting. */
+export const getAccountUsage = (provider: ProviderKind) =>
+  request({ type: "readAccountUsage", provider }).pipe(
     Effect.map((response) => expectType(response, "accountUsage").usage),
   );
 
@@ -564,6 +630,30 @@ export const stopAutomation = () =>
 export const acknowledgeRollover = () =>
   request({ type: "acknowledgeRollover" }).pipe(
     Effect.map((response) => expectType(response, "automation").state),
+  );
+
+/** Reads every subscription's scheduled-kickoff state. */
+export const getKickoffState = () =>
+  request({ type: "kickoffState" }).pipe(
+    Effect.map((response) => expectType(response, "kickoff").state),
+  );
+
+/**
+ * Opts one subscription into (or out of) the scheduled kickoff.
+ *
+ * This is the explicit quota-spending opt-in: a `true` here is the only thing
+ * that may ever arm a timer that sends prompts. Installing the system
+ * scheduler is the Rust side's job, and a failure to install is reported.
+ */
+export const setKickoffEnabled = (kind: ProviderKind, enabled: boolean) =>
+  request({ type: "setKickoffEnabled", kind, enabled }).pipe(
+    Effect.map((response) => expectType(response, "kickoff").state),
+  );
+
+/** Selects the model the scheduled kickoff sends for one subscription. */
+export const setKickoffModel = (kind: ProviderKind, modelId: string) =>
+  request({ type: "setKickoffModel", kind, modelId }).pipe(
+    Effect.map((response) => expectType(response, "kickoff").state),
   );
 
 export const getOnboardingProgress = () =>

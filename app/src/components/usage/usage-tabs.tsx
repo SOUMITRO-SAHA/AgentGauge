@@ -24,6 +24,7 @@ import {
   usageForAtom,
 } from "~/atoms";
 import { PanelHeader } from "~/components/dashboard/panel";
+import { KickoffSection } from "~/components/usage/kickoff-section";
 import { FreshnessPill } from "~/components/usage/provider-status-card";
 import {
   UsageWindowList,
@@ -242,7 +243,12 @@ function ProviderUsage({
           </p>
         );
       }
-      return <SnapshotBody snapshot={snapshot} nowMs={nowMs} />;
+      return (
+        <div className="flex flex-col gap-6">
+          <SnapshotBody snapshot={snapshot} nowMs={nowMs} />
+          <KickoffSection kind={kind} nowMs={nowMs} />
+        </div>
+      );
     },
     onFailure: (error) => (
       <div className="flex flex-col gap-2">

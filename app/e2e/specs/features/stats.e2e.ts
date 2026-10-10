@@ -1,10 +1,11 @@
 import { expect, browser, $, $$ } from "@wdio/globals";
 
 import {
-  clickDisplayed,
   dashboardLive,
   dashboardWithPlans,
+  dashboardWithZaiAnalytics,
   dispatchCalls,
+  clickDisplayed,
   expectDisplayed,
   gotoView,
   restoreOnboardingStore,
@@ -18,6 +19,10 @@ import {
  * rules that make that work live in `../fixtures.ts`. The persisted stores are
  * restored at *file* scope, which is the only place mocha runs an `after`
  * after every `describe` here has finished.
+ *
+ * Tab switches use `clickDisplayed` (the driver's native click): the
+ * fixtures' trap notes that page-level DOM clicks do not reliably reach React
+ * for Radix tabs, and the usage-tabs specs prove the native path.
  */
 after(() => {
   restoreOnboardingStore();
@@ -37,7 +42,7 @@ describe("stats", () => {
     ).toBe(false);
 
     const values = await browser.execute(() => ({
-      lifetime: document.querySelector('[data-testid="stats-lifetime-tokens"]')
+      total: document.querySelector('[data-testid="stats-total-tokens"]')
         ?.textContent,
       historyReads:
         (
@@ -47,7 +52,7 @@ describe("stats", () => {
         ).length ?? 0,
     }));
     expect(values.historyReads).toBeGreaterThan(0);
-    expect(values.lifetime?.replace(/\D/g, "")).toBe("1234567");
+    expect(values.total?.replace(/\D/g, "")).toBe("1234567");
     await expectDisplayed('[data-testid="stats-daily-chart"]');
     await expectDisplayed('[data-testid="stats-current-streak"]');
     await expectDisplayed('[data-testid="stats-analytics-source"]');
@@ -76,6 +81,41 @@ describe("stats", () => {
 
     await clickDisplayed('[data-testid="stats-tab-alibaba-coding-plan"]');
     await expectDisplayed('[data-testid="stats-plan-unreadable"]');
+
+    // Leave the selection on Codex: the tab atom outlives this spec's boot in
+    // the shared document, and a later boot mounting this tab's body would
+    // read through the real backend before its mock is installed.
+    await clickDisplayed('[data-testid="stats-tab-codex"]');
+  });
+
+  it("shows Z.AI token analytics like Codex's, labelled with its window", async () => {
+    await dashboardWithZaiAnalytics();
+    await gotoView("stats");
+
+    await clickDisplayed('[data-testid="stats-tab-zai"]');
+    await expectDisplayed('[data-testid="stats-plan-analytics"]');
+    await expectDisplayed('[data-testid="stats-daily-chart"]');
+
+    const analytics = await browser.execute(() => ({
+      tokens: document.querySelector('[data-testid="stats-total-tokens"]')
+        ?.textContent,
+      calls: document.querySelector('[data-testid="stats-total-requests"]')
+        ?.textContent,
+      coverage: document.querySelector(
+        '[data-testid="stats-activity-coverage"]',
+      )?.textContent,
+      reading: Array.from(
+        document.querySelectorAll('[data-testid="stats-plan-reading"]'),
+      ).some((el) => (el as HTMLElement).offsetParent !== null),
+    }));
+    expect(analytics.tokens?.replace(/\D/g, "")).toBe("21700000000");
+    expect(analytics.calls?.replace(/\D/g, "")).toBe("10419");
+    expect(analytics.coverage).toContain("2026-10-08");
+    // The window reading stays on the tab beside the analytics.
+    expect(analytics.reading).toBe(true);
+    await expectDisplayed('[data-testid="stats-plan-analytics-source"]');
+
+    await clickDisplayed('[data-testid="stats-tab-codex"]');
   });
 
   it("turns local analytics off and back on as a preference, with no gate", async () => {

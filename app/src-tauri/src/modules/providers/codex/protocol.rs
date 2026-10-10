@@ -161,11 +161,12 @@ pub fn decode_account_usage(payload: &str, now_ms: i64) -> Result<AccountUsage, 
     Ok(AccountUsage {
         fetched_at: now_ms,
         summary: AccountUsageSummary {
-            lifetime_tokens: summary.lifetime_tokens,
+            total_tokens: summary.lifetime_tokens,
             peak_daily_tokens: summary.peak_daily_tokens,
             longest_running_turn_sec: summary.longest_running_turn_sec,
             current_streak_days: summary.current_streak_days,
             longest_streak_days: summary.longest_streak_days,
+            total_requests: None,
         },
         daily_usage_buckets: parsed
             .daily_usage_buckets
@@ -178,6 +179,7 @@ pub fn decode_account_usage(payload: &str, now_ms: i64) -> Result<AccountUsage, 
                 })
             })
             .collect(),
+        window_days: None,
     })
 }
 
@@ -404,7 +406,7 @@ mod tests {
         let payload = r#"{"summary":{"lifetimeTokens":1234567,"peakDailyTokens":45678,"longestRunningTurnSec":540,"currentStreakDays":8,"longestStreakDays":14},"dailyUsageBuckets":[{"startDate":"2026-10-09","tokens":12345},{"startDate":"2026-10-10","tokens":null}]}"#;
         let usage = decode_account_usage(payload, NOW).expect("decodes");
 
-        assert_eq!(usage.summary.lifetime_tokens, Some(1_234_567));
+        assert_eq!(usage.summary.total_tokens, Some(1_234_567));
         assert_eq!(usage.summary.peak_daily_tokens, Some(45_678));
         assert_eq!(usage.summary.longest_running_turn_sec, Some(540));
         assert_eq!(usage.summary.current_streak_days, Some(8));
@@ -420,7 +422,7 @@ mod tests {
         let usage = decode_account_usage(r#"{"summary":null,"dailyUsageBuckets":null}"#, NOW)
             .expect("nullable response decodes");
 
-        assert_eq!(usage.summary.lifetime_tokens, None);
+        assert_eq!(usage.summary.total_tokens, None);
         assert_eq!(usage.summary.current_streak_days, None);
         assert!(usage.daily_usage_buckets.is_empty());
     }

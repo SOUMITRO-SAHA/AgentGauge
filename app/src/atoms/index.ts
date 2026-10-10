@@ -71,15 +71,53 @@ export function usageForAtom(kind: Ipc.ProviderKind) {
 }
 
 /**
- * Codex account activity, retained for the session.
+ * One account-analytics atom per provider, retained for the session.
  *
- * The read runs only while the stats view is showing, and the infinite idle
- * TTL holds the last reading between visits, so returning to Stats renders it
- * immediately while a refresh runs underneath.
+ * The same retention rule as the usage atoms: returning to a stats tab
+ * renders the last reading instantly while a fresh one runs underneath. The
+ * read runs only while the stats view is showing — a hidden view never reads
+ * the account in the background.
  */
-export const accountUsageAtom = Atom.setIdleTTL(Infinity)(
-  runtime.atom(Ipc.getAccountUsage),
+const accountUsageByProvider = new Map<
+  Ipc.ProviderKind,
+  ReturnType<typeof makeAccountUsageAtom>
+>();
+
+function makeAccountUsageAtom(kind: Ipc.ProviderKind) {
+  return Atom.setIdleTTL(Infinity)(
+    runtime.atom(() => Ipc.getAccountUsage(kind)),
+  );
+}
+
+/** The session-retained account-analytics atom for one provider. */
+export function accountUsageForAtom(kind: Ipc.ProviderKind) {
+  let atom = accountUsageByProvider.get(kind);
+  if (atom === undefined) {
+    atom = makeAccountUsageAtom(kind);
+    accountUsageByProvider.set(kind, atom);
+  }
+  return atom;
+}
+
+/**
+ * The scheduled kickoff state for every connected plan, retained for the
+ * session.
+ *
+ * One atom for the whole overview: the schedule is a single file the worker
+ * also writes, so reading it per-provider would be four copies of one truth.
+ * Writes go through the command and the section refreshes this atom after.
+ */
+export const kickoffAtom = Atom.setIdleTTL(Infinity)(
+  runtime.atom(() => Ipc.getKickoffState()),
 );
+
+/** Finds one subscription's kickoff state inside an overview. */
+export function kickoffViewOf(
+  overview: Ipc.KickoffOverview,
+  kind: Ipc.ProviderKind,
+): Ipc.KickoffView | null {
+  return overview.subscriptions.find((view) => view.kind === kind) ?? null;
+}
 
 /**
  * Whether local analytics is on.

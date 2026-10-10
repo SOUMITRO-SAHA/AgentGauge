@@ -113,23 +113,35 @@ impl UsageWindow {
     }
 }
 
-/// Codex-reported account token activity, distinct from subscription limits.
+/// Provider-reported account token activity, distinct from subscription
+/// limits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountUsage {
     pub fetched_at: i64,
     pub summary: AccountUsageSummary,
     pub daily_usage_buckets: Vec<DailyUsageBucket>,
+    /// How many days the reported window covers, when the provider reports a
+    /// bounded span rather than the account's lifetime. `None` means the
+    /// numbers are lifetime, so the UI may label them "lifetime"; a present
+    /// value must be shown, so a window total never poses as lifetime.
+    #[serde(default)]
+    pub window_days: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountUsageSummary {
-    pub lifetime_tokens: Option<u64>,
+    /// The headline token total for the covered window: the account lifetime
+    /// for Codex, the reported span for windowed providers.
+    pub total_tokens: Option<u64>,
     pub peak_daily_tokens: Option<u64>,
     pub longest_running_turn_sec: Option<u64>,
     pub current_streak_days: Option<u64>,
     pub longest_streak_days: Option<u64>,
+    /// Model calls in the window, when the provider counts them.
+    #[serde(default)]
+    pub total_requests: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,6 +363,123 @@ pub fn freshness_for(now_ms: i64, fetched_at_ms: Option<i64>) -> Freshness {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Kickoff model catalogs
+// ---------------------------------------------------------------------------
+
+/// One model a subscription's scheduled kickoff may use.
+///
+/// Lives in `shared/` because two modules need it: the kickoff surface shapes
+/// it for the renderer's picker, and the provider pipeline resolves a `None`
+/// selection to the cheapest entry. Serialized but not deserialized: the
+/// catalog is authored in this file, never read back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KickoffModelInfo {
+    pub id: &'static str,
+    pub label: &'static str,
+    /// The cheapest tier for plan quota — the default selection.
+    pub cheapest: bool,
+}
+
+/// The model catalog for one provider, cheapest flagged.
+///
+/// Drawn from the vendors' own plan documentation (see
+/// `.agents/tasks/research/kickoff-mechanisms.md`). Slugs are version-gated on
+/// the vendor side, so a rejected model surfaces the provider's own error in
+/// the attempt's detail rather than being filtered here.
+pub fn models_for(kind: ProviderKind) -> &'static [KickoffModelInfo] {
+    const CODEX: &[KickoffModelInfo] = &[
+        KickoffModelInfo {
+            id: "gpt-6.1-sol",
+            label: "GPT-6.1 Sol",
+            cheapest: false,
+        },
+        KickoffModelInfo {
+            id: "gpt-6-luna",
+            label: "GPT-6 Luna",
+            cheapest: true,
+        },
+        KickoffModelInfo {
+            id: "gpt-5.6-luna",
+            label: "GPT-5.6 Luna",
+            cheapest: false,
+        },
+    ];
+    const ZAI: &[KickoffModelInfo] = &[
+        KickoffModelInfo {
+            id: "glm-5.3",
+            label: "GLM-5.3",
+            cheapest: false,
+        },
+        KickoffModelInfo {
+            id: "glm-5.3-flash",
+            label: "GLM-5.3 Flash",
+            cheapest: true,
+        },
+    ];
+    const MINIMAX: &[KickoffModelInfo] = &[
+        KickoffModelInfo {
+            id: "MiniMax-M3",
+            label: "MiniMax M3",
+            cheapest: false,
+        },
+        KickoffModelInfo {
+            id: "MiniMax-M2",
+            label: "MiniMax M2",
+            cheapest: true,
+        },
+        KickoffModelInfo {
+            id: "MiniMax-M2.5",
+            label: "MiniMax M2.5",
+            cheapest: false,
+        },
+    ];
+    const KIMI: &[KickoffModelInfo] = &[
+        KickoffModelInfo {
+            id: "k3-256k",
+            label: "K3 256K",
+            cheapest: true,
+        },
+        KickoffModelInfo {
+            id: "kimi-for-coding",
+            label: "Kimi for Coding",
+            cheapest: false,
+        },
+        KickoffModelInfo {
+            id: "k3",
+            label: "K3 (1M)",
+            cheapest: false,
+        },
+        KickoffModelInfo {
+            id: "kimi-for-coding-highspeed",
+            label: "HighSpeed (3× quota)",
+            cheapest: false,
+        },
+    ];
+
+    match kind {
+        ProviderKind::Codex => CODEX,
+        ProviderKind::Zai => ZAI,
+        ProviderKind::Minimax => MINIMAX,
+        ProviderKind::Kimi => KIMI,
+    }
+}
+
+/// The cheapest model for a provider — the default kickoff selection.
+pub fn cheapest_model(kind: ProviderKind) -> &'static str {
+    models_for(kind)
+        .iter()
+        .find(|model| model.cheapest)
+        .map(|model| model.id)
+        .unwrap_or_default()
+}
+
+/// Whether `model_id` names a model this build offers for `kind`.
+pub fn is_known_model(kind: ProviderKind, model_id: &str) -> bool {
+    models_for(kind).iter().any(|model| model.id == model_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,5 +653,33 @@ mod tests {
         assert_eq!(snapshot.freshness, Freshness::Unavailable);
         assert_eq!(snapshot.reason.as_deref(), Some("codex not found"));
         assert!(snapshot.five_hour.is_none());
+    }
+
+    #[test]
+    fn every_provider_has_exactly_one_cheapest_model() {
+        for kind in [
+            ProviderKind::Codex,
+            ProviderKind::Zai,
+            ProviderKind::Minimax,
+            ProviderKind::Kimi,
+        ] {
+            let cheapest = models_for(kind).iter().filter(|m| m.cheapest).count();
+            assert_eq!(cheapest, 1, "{} must have one cheapest", kind.as_str());
+            assert!(!cheapest_model(kind).is_empty());
+        }
+    }
+
+    #[test]
+    fn known_models_validate_and_others_do_not() {
+        assert!(is_known_model(ProviderKind::Kimi, "k3-256k"));
+        assert!(!is_known_model(ProviderKind::Kimi, "kimi-k2-turbo-preview"));
+    }
+
+    #[test]
+    fn the_model_catalog_serializes_camel_cased_for_the_picker() {
+        let json =
+            serde_json::to_value(models_for(ProviderKind::Zai)[0].clone()).expect("serializes");
+        assert_eq!(json["id"], "glm-5.3");
+        assert_eq!(json["cheapest"], false);
     }
 }

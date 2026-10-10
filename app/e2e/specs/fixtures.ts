@@ -434,6 +434,24 @@ export interface DispatchFixtures {
    */
   readonly usageForDelay?: { readonly provider: string; readonly ms: number };
   /**
+   * Per-provider account-analytics replies for `readAccountUsage`, keyed by
+   * provider kind. Absent means the default Codex-shaped answer serves.
+   */
+  readonly accountUsageByProvider?: Record<string, Record<string, unknown>>;
+  /**
+   * The scheduled-kickoff fixtures: whether the platform scheduler is
+   * supported and installed, which kinds start opted in, and how far ahead
+   * the next scheduled attempt sits. Absent means supported, not installed,
+   * nothing enabled — every toggle starts off, which is also the app's rule.
+   */
+  readonly kickoff?: {
+    readonly supported?: boolean;
+    readonly installed?: boolean;
+    readonly enabledByKind?: Record<string, boolean>;
+    readonly nextKickInMs?: number;
+    readonly lastAccepted?: boolean;
+  };
+  /**
    * Whether this build contains the widget extension.
    *
    * Replaces the old `widgetInstalled`, which meant "a floating window was open".
@@ -496,6 +514,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       __ismMockCalls__?: Array<Record<string, unknown>>;
       __ismOnboarding__?: { step: string; dismissed: boolean };
       __ismAnalyticsEnabled__?: boolean;
+      __ismKickoffEnabled__?: Record<string, boolean>;
       __wdio_mocks__: Record<
         string,
         (args: unknown) => Promise<Record<string, unknown>>
@@ -526,6 +545,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       dismissed: !f().visible,
     };
     w.__ismAnalyticsEnabled__ = f().analyticsEnabled !== false;
+    w.__ismKickoffEnabled__ = { ...(f().kickoff?.enabledByKind ?? {}) };
     const dispatcher = async (args?: {
       request?: Record<string, unknown>;
     }): Promise<Record<string, unknown>> => {
@@ -576,18 +596,25 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
             type: "openCodeSubscriptions",
             subscriptions: data.subscriptions ?? [],
           };
-        case "readAccountUsage":
+        case "readAccountUsage": {
+          const perProviderUsage =
+            data.accountUsageByProvider?.[request.provider as string];
+          if (perProviderUsage) {
+            return { type: "accountUsage", usage: perProviderUsage };
+          }
           return {
             type: "accountUsage",
             usage: {
               fetchedAt: 1791561935000,
               summary: {
-                lifetimeTokens: 1234567,
+                totalTokens: 1234567,
                 peakDailyTokens: 45678,
                 longestRunningTurnSec: 540,
                 currentStreakDays: 8,
                 longestStreakDays: 14,
+                totalRequests: null,
               },
+              windowDays: null,
               dailyUsageBuckets: [
                 { startDate: "2026-10-07", tokens: 2300 },
                 { startDate: "2026-10-08", tokens: 0 },
@@ -595,6 +622,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               ],
             },
           };
+        }
         case "providerStatus":
           return {
             type: "providerStatuses",
@@ -650,6 +678,62 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               nextPollAt: null,
             },
           };
+        case "kickoffState":
+        case "setKickoffEnabled":
+        case "setKickoffModel": {
+          if (
+            request.type === "setKickoffEnabled" &&
+            typeof request.kind === "string"
+          ) {
+            w.__ismKickoffEnabled__[request.kind] =
+              request.enabled === true;
+          }
+          const enabled = w.__ismKickoffEnabled__;
+          const kickoff = data.kickoff ?? {};
+          const kinds = ["codex", "zai", "minimax", "kimi"];
+          const models: Record<string, Array<{ id: string; label: string; cheapest: boolean }>> = {
+            codex: [
+              { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", cheapest: false },
+              { id: "gpt-6-luna", label: "GPT-6 Luna", cheapest: true },
+            ],
+            zai: [
+              { id: "glm-5.3", label: "GLM-5.3", cheapest: false },
+              { id: "glm-5.3-flash", label: "GLM-5.3 Flash", cheapest: true },
+            ],
+            minimax: [{ id: "MiniMax-M2", label: "MiniMax M2", cheapest: true }],
+            kimi: [{ id: "k3-256k", label: "K3 256K", cheapest: true }],
+          };
+          return {
+            type: "kickoff",
+            state: {
+              subscriptions: kinds.map((kind) => {
+                const kindModels = models[kind] ?? [];
+                const cheapest =
+                  kindModels.find((model) => model.cheapest)?.id ?? "";
+                const isEnabled = enabled[kind] === true;
+                return {
+                  kind,
+                  enabled: isEnabled,
+                  modelId: null,
+                  effectiveModel: cheapest,
+                  models: kindModels,
+                  nextKickAt: isEnabled
+                    ? Date.now() + (kickoff.nextKickInMs ?? 3_600_000)
+                    : null,
+                  lastKickAt: kickoff.lastAccepted === undefined ? null : Date.now(),
+                  lastAccepted: kickoff.lastAccepted ?? null,
+                  lastDetail: kickoff.lastAccepted === undefined
+                    ? null
+                    : "Hello!",
+                };
+              }),
+              scheduler: {
+                supported: kickoff.supported ?? true,
+                installed: kickoff.installed ?? false,
+              },
+            },
+          };
+        }
         case "systemWidgetStatus":
           return {
             type: "systemWidget",
@@ -847,7 +931,7 @@ export async function settle(nudge: UiNudge): Promise<void> {
  * order, which is the hidden one, so clicking it refreshes nothing and the spec
  * then asserts against the value the atom read before the mock existed.
  */
-async function firstDisplayed(
+export async function firstDisplayed(
   selector: string,
 ): Promise<WebdriverIO.Element | null> {
   for (const element of await $$(selector)) {
@@ -1104,9 +1188,47 @@ export async function dashboardWithPlans(): Promise<void> {
   });
 }
 
-/** The same dashboard, with the Z.AI reading arriving late. */
-export async function dashboardWithSlowPlans(): Promise<void> {
+/** A Z.AI account-analytics reading, as the model-usage monitor API reports it. */
+export function zaiAccountUsage() {
+  return {
+    fetchedAt: 1791561935000,
+    summary: {
+      totalTokens: 21700000000,
+      peakDailyTokens: 1860000000,
+      longestRunningTurnSec: null,
+      currentStreakDays: 5,
+      longestStreakDays: 9,
+      totalRequests: 10419,
+    },
+    windowDays: 30,
+    dailyUsageBuckets: [
+      { startDate: "2026-10-08", tokens: 1470000000 },
+      { startDate: "2026-10-09", tokens: 275000000 },
+    ],
+  };
+}
+
+/**
+ * Onboarding dismissed, with Z.AI connected and reporting both window quotas
+ * and token analytics.
+ */
+export async function dashboardWithZaiAnalytics(): Promise<void> {
   await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    subscriptions: [subscription()],
+    usageByProvider: { zai: zaiSnapshot() },
+    accountUsageByProvider: { zai: zaiAccountUsage() },
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+  });
+}
+
+/** The same dashboard, with the Z.AI reading arriving late. */
+export async function dashboardWithSlowPlans(): Promise<void> {  await boot({
     visible: false,
     usage: liveSnapshot(),
     subscriptions: [
