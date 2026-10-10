@@ -411,6 +411,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
     const w = window as unknown as {
       __ismFixtures__?: Record<string, unknown>;
       __ismMockCalls__?: Array<Record<string, unknown>>;
+      __ismOnboarding__?: { step: string; dismissed: boolean };
       __wdio_mocks__: Record<
         string,
         (args: unknown) => Promise<Record<string, unknown>>
@@ -425,6 +426,21 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
     const record = (request: Record<string, unknown> | undefined) => {
       w.__ismMockCalls__?.push(request ?? {});
     };
+    // The persisted onboarding state, mirroring the Rust store: `visible` is
+    // `!dismissed && step != "done"`, derived on every read from the last
+    // write. Without the write-through state, a step navigation answered with
+    // the initial step again and the flow could never advance under the mock.
+    const ORDER = [
+      "welcome",
+      "statusCheck",
+      "windowRollover",
+      "widget",
+      "automation",
+    ];
+    w.__ismOnboarding__ = {
+      step: f().visible ? "welcome" : "done",
+      dismissed: !f().visible,
+    };
     const dispatcher = async (
       args?: { request?: Record<string, unknown> },
     ): Promise<Record<string, unknown>> => {
@@ -433,17 +449,33 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       const data = f();
       switch (request?.type) {
         case "onboardingProgress":
-        case "setOnboardingStep":
+        case "setOnboardingStep": {
+          if (request.type === "setOnboardingStep" && w.__ismOnboarding__) {
+            w.__ismOnboarding__ = {
+              step: (request.step as string) ?? "welcome",
+              dismissed:
+                request.dismissed === true || request.step === "done",
+            };
+          }
+          const state = w.__ismOnboarding__ ?? {
+            step: "done",
+            dismissed: true,
+          };
+          const done = state.dismissed || state.step === "done";
+          const index = done
+            ? ORDER.length
+            : Math.max(0, ORDER.indexOf(state.step));
           return {
             type: "onboarding",
             progress: {
-              step: (request.step as string) ?? "welcome",
-              dismissed: !(data.visible as boolean),
-              visible: (data.visible as boolean) ?? false,
-              index: data.visible ? 0 : 5,
-              total: 6,
+              step: done ? "done" : state.step,
+              dismissed: state.dismissed,
+              visible: !done,
+              index,
+              total: ORDER.length + 1,
             },
           };
+        }
         case "readUsage":
           return { type: "usage", snapshots: [data.usage] };
         case "providerStatus":

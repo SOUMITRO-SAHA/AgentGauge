@@ -22,6 +22,7 @@ export const config: WebdriverIO.Config = {
     [
       path.join(here, "specs", "capabilities.e2e.ts"),
       path.join(here, "specs", "product.e2e.ts"),
+      path.join(here, "specs", "onboarding-visual.e2e.ts"),
     ],
   ],
   maxInstances: 1,
