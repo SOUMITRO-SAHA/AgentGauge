@@ -70,7 +70,15 @@ bun run test           # Run unit and component tests
 bun run e2e            # Build and test the real native app
 bun run tauri build    # Build a native package for the current target
 bun run build:mac      # Build the macOS app and WidgetKit extension
+bun run icons:generate # Regenerate desktop icons from public/logo.svg
 ```
+
+The opt-in icon generator copies only macOS, Windows, and Linux assets into
+`app/src-tauri/icons/`. Tauri's CLI currently creates mobile files as part of
+its generation command, so those are isolated in a temporary directory and
+discarded; they are never copied into the app. To use another square SVG/PNG or
+write the generated icons elsewhere, pass the source and destination after `--`:
+`bun run icons:generate -- path/to/logo.svg path/to/output`.
 
 Native dependencies and packaging are platform-specific. A successful build on one operating system does not verify other operating systems or Linux distributions. macOS is currently the only exercised platform.
 

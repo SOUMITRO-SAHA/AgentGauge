@@ -3,20 +3,24 @@
 Applies to any generated or revised app mark, icon, or brand asset for this
 project (AgentGauge).
 
-## Current brand status — read this first
+## Adopted brand direction — AgentGauge
 
-**No brand is defined yet.** The mark in `app/src-tauri/icons/` is the stock
-Tauri placeholder, and no colour tokens are pinned in `src/index.css`
-(they are the shadcn `neutral` defaults). Therefore:
+The user rejected the prior colorful gauge mark and directed a **monochrome SVG
+only** revision on 2026-10-10. The current SVG is a geometric `A` monogram with a
+segmented crossbar suggesting measured usage. It uses one neutral foreground
+color per color scheme on a transparent canvas: graphite (`#17191D`) for light
+scheme and near-white (`#F4F4F5`) for dark scheme. It contains no gauge arc,
+needle, accent colors, background tile, or text baked into the artwork.
 
-- Do **not** invent brand colours, logomarks, or a tagline and treat them as
-  decided. If a task needs brand direction, propose options and get the user's
-  choice before generating assets.
-- Once the user picks a direction, **record the decision** (name, colours as
-  `oklch`/hex, clear space) in this file so every later asset is consistent,
-  and wire the colours into `src/index.css` `@theme inline` so the UI follows.
-- Do not restate another project's brand values. Brand tokens for this app are
-  whatever the user chooses here — nothing else applies.
+- Name: **AgentGauge**. Descriptor remains “A local usage and status dashboard
+  for AI coding tools.”
+- Keep clear space around the mark of at least 12% of its canvas. Preserve the
+  monogram and segmented crossbar at small sizes; do not add text.
+
+This SVG-only revision does not change the app's UI theme tokens or regenerate
+the existing PNG/ICNS/ICO app icons; the user requested only the SVG logo. Do not
+change the mark direction without confirming with the user. Do not restate
+another project's brand values.
 
 ## Design constraints (unless the user overrides)
 
@@ -70,7 +74,9 @@ StoreLogo.png
 1. Inspect the current reference asset before generating or revising anything.
 2. Confirm the chosen direction with the user if the brand is still undefined.
 3. Generate with the built-in image tooling; inspect at full size **and** at
-   16/32/128px, on light and dark.
+   16/32/128px, on light and dark. If that tooling is unavailable, disclose the
+   limitation and use the simplest reproducible vector fallback rather than
+   silently substituting an unreviewed raster generator.
 4. Regenerate the complete set via `bun run tauri icon`; verify every file in
    the two lists above exists and is valid.
 5. Update `productName` in `tauri.conf.json` and the `<title>` in

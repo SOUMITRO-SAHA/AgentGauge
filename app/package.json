@@ -13,6 +13,7 @@
     "clean:frontend": "bun -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\"",
     "preview": "vite preview",
     "tauri": "tauri",
+    "icons:generate": "bun run scripts/generate-icons.ts",
     "e2e:build": "bun run build && touch src-tauri/build.rs && cargo build --manifest-path src-tauri/Cargo.toml --features custom-protocol",
     "e2e": "bun run e2e:build && wdio run ./e2e/wdio.conf.ts",
     "test": "vitest run",
