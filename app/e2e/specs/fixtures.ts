@@ -79,7 +79,7 @@ function settingsStorePath(): string {
     os.homedir(),
     "Library",
     "Application Support",
-    "com.soumitrasaha.iasm",
+    "com.soumitrasaha.aism",
     "settings.json",
   );
 }
