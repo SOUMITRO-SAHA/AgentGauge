@@ -22,6 +22,7 @@ import {
   ProviderStatusCard,
 } from "~/components/usage/provider-status-card";
 import { UsageWindowList } from "~/components/usage/usage-window-row";
+import { ViewHeader } from "~/components/views/view-header";
 import { useClock } from "~/hooks/use-clock";
 import type * as Ipc from "~/lib/ipc";
 import {
@@ -50,14 +51,10 @@ export function HomeView({ visible }: { readonly visible: boolean }) {
 
   return (
     <div className={visible ? "block" : "hidden"} data-testid="view-home">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-[clamp(1.25rem,4vw,1.5rem)] font-semibold tracking-tight text-foreground">
-          AgentGauge
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Your Codex window, read from your own CLI.
-        </p>
-      </header>
+      <ViewHeader
+        title="Home"
+        subtitle="Your Codex window, read from your own CLI."
+      />
 
       <ProviderStatusCard />
 
@@ -201,10 +198,19 @@ function SnapshotHeader({
   );
 }
 
-/** Whether the watcher is on, stated as a fact rather than a control. */
+/**
+ * Whether the watcher is on, stated as a fact rather than a control.
+ *
+ * Set apart from the panels above it: this is context for what was just shown,
+ * not another panel, so it reads as a footnote with its own rule above it rather
+ * than as loose text flush against a panel's edge.
+ */
 function WatcherGlance({ running }: { readonly running: boolean | null }) {
   return (
-    <p className="text-xs text-muted-foreground" data-testid="home-watcher">
+    <p
+      className="border-t border-border/60 pt-4 text-xs text-muted-foreground"
+      data-testid="home-watcher"
+    >
       {running === null
         ? "The window watcher could not be reached."
         : running

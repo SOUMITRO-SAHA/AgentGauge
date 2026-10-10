@@ -8,8 +8,16 @@ import { Button } from "~/components/ui/button";
  * The padding is fluid rather than fixed so the layout holds from the 300px
  * widget window up to a wide desktop window without a separate breakpoint.
  */
+/**
+ * The shared panel surface.
+ *
+ * `rounded-lg` rather than `rounded-xl`: with `--radius` at 0.625rem the scale
+ * makes `xl` 14px, and macOS cards sit at 10–12px. A panel is the app's
+ * largest rounded surface, so it is where an oversized radius reads most
+ * obviously as web rather than native.
+ */
 export const PANEL =
-  "rounded-xl border border-border/70 bg-surface-raised/70 p-[clamp(0.75rem,2.5vw,1.25rem)] backdrop-blur-md";
+  "rounded-lg border border-border/70 bg-surface-raised/70 p-[clamp(0.75rem,2.5vw,1.25rem)] backdrop-blur-md";
 
 /** A panel with an optional refresh action in its header. */
 export function Panel({

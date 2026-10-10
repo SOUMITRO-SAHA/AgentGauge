@@ -19,6 +19,7 @@ import { Play, Stop } from "@phosphor-icons/react";
 
 import { automationAtom } from "~/atoms";
 import { Button } from "~/components/ui/button";
+import { ViewHeader } from "~/components/views/view-header";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
 import * as Ipc from "~/lib/ipc";
 
@@ -28,14 +29,7 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
 
   return (
     <div className={visible ? "block" : "hidden"} data-testid="view-automation">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-[clamp(1.25rem,4vw,1.5rem)] font-semibold tracking-tight text-foreground">
-          Automation
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Watching for the moment a window resets.
-        </p>
-      </header>
+      <ViewHeader title="Automation" subtitle="Watching for the moment a window resets." />
 
       <section className={PANEL} data-testid="automation-panel">
         <PanelHeader

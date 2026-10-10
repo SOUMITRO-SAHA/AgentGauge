@@ -80,7 +80,12 @@ describe("onboarding flow", () => {
 
   it("shows the welcome step first", async () => {
     await expectDisplayed('[data-testid="onboarding"]');
-    await expect($("h1")).toHaveText("A clear view of your coding tools");
+    // Scoped to the flow: `$("h1")` answers for the FIRST h1 in the
+    // document, and `AppShell` renders before `OnboardingFlow`, so an
+    // unscoped selector reads the shell's heading instead of the step's.
+    await expect($('[data-testid="onboarding"] h1')).toHaveText(
+      "A clear view of your coding tools",
+    );
     await expect($('[data-testid="onboarding"]')).toHaveText(
       expect.stringContaining("AgentGauge shows the usage and status information"),
     );
@@ -153,7 +158,9 @@ describe("onboarding flow", () => {
     for (let step = 0; step < 5; step += 1) {
       await clickDisplayed('[data-testid="onboarding-next"]');
     }
-    await expect($("h1")).toHaveText("Watching runs in the background");
+    await expect($('[data-testid="onboarding"] h1')).toHaveText(
+      "Watching runs in the background",
+    );
     await expect($('[data-testid="onboarding-next"]')).toHaveText(
       expect.stringContaining("Finish"),
     );
@@ -395,11 +402,24 @@ describe("styling and chrome", () => {
     });
     await settle("refresh-usage");
 
+    // The destination must be on screen and settled before the bar is read.
+    // Without the wait this runs while the panel is still on its loading or
+    // unavailable branch, and reads "(none)" from an element that does not
+    // exist yet — which is what happened: the mock is installed here, mid-file,
+    // and the previous spec's dismissal is still in effect.
+    await expectDisplayed('[data-testid="view-home"]');
+    await expectDisplayed('[data-testid="window-bar"]');
+
+    // `querySelectorAll` rather than `querySelector`: both surfaces stay
+    // mounted, so the first match is not necessarily the visible one.
     const width = await browser.execute(() => {
-      const el = document.querySelector('[data-testid="window-bar"]') as
-        | HTMLElement
-        | null;
-      return el?.style.width ?? "(none)";
+      const bars = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid="window-bar"]'),
+      );
+      const bar = bars.find(
+        (el) => getComputedStyle(el).display !== "none",
+      );
+      return bar?.style.width ?? "(none)";
     });
     // 88% remaining, rendered as remaining — the inversion this guards.
     expect(width).toBe("88%");
@@ -473,6 +493,16 @@ describe("responsive layout", () => {
 describe("navigation", () => {
   beforeEach(async () => {
     await dashboardLive();
+  });
+
+  it("renders the AgentGauge brand mark", async () => {
+    await expectDisplayed('[data-testid="brand-mark"]');
+    await expect(
+      $('[data-testid="brand-mark"]'),
+    ).toHaveAttribute("aria-label", "AgentGauge brand mark");
+    await expect(
+      $('[data-testid="brand-mark"]'),
+    ).toHaveAttribute("src", "/agentgauge-mark.svg");
   });
 
   it("starts on Home with exactly the four destinations", async () => {

@@ -16,6 +16,7 @@ import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 
 import { usageAtom } from "~/atoms";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
+import { ViewHeader } from "~/components/views/view-header";
 import type * as Ipc from "~/lib/ipc";
 import { safeResetAt, windowTitle } from "~/lib/usage";
 
@@ -25,14 +26,7 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
 
   return (
     <div className={visible ? "block" : "hidden"} data-testid="view-stats">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-[clamp(1.25rem,4vw,1.5rem)] font-semibold tracking-tight text-foreground">
-          Stats
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Every window, with what remains in each.
-        </p>
-      </header>
+      <ViewHeader title="Stats" subtitle="Every window, with what remains in each." />
 
       <section className={PANEL} data-testid="stats-panel">
         <PanelHeader

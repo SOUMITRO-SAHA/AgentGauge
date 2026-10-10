@@ -12,22 +12,21 @@
  */
 
 import { SystemWidgetGuide } from "~/components/widget/system-widget-guide";
+import { ViewHeader } from "~/components/views/view-header";
 
 export function SettingsView({ visible }: { readonly visible: boolean }) {
   return (
     <div className={visible ? "block" : "hidden"} data-testid="view-settings">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-[clamp(1.25rem,4vw,1.5rem)] font-semibold tracking-tight text-foreground">
-          Settings
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          The system widget and this build.
-        </p>
-      </header>
+      <ViewHeader title="Settings" subtitle="The system widget and this build." />
 
       <SystemWidgetGuide />
 
-      <p className="text-xs text-muted-foreground" data-testid="settings-about">
+      {/* Footnote, not loose text: the guide above is a panel, and this needs
+          the same visual separation or it reads as an orphaned sentence. */}
+      <p
+        className="border-t border-border/60 pt-4 text-xs text-muted-foreground"
+        data-testid="settings-about"
+      >
         The destination you reopen on is the one you left — chosen by using the
         navigation, remembered between launches.
       </p>

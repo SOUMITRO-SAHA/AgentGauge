@@ -32,9 +32,20 @@ import {
 import * as Ipc from "~/lib/ipc";
 import { isRoute, routeForShortcut, type Route } from "~/lib/navigation";
 
-/** Content column: fluid gutter and vertical rhythm, no fixed width. */
+/**
+ * The content column.
+ *
+ * `mx-auto` with a `max-w-*` is the part that matters at wide widths: a fluid
+ * full-width column stretches every panel to the window, which at 1280px gives
+ * ~1500px-long line lengths and strands the content against the left edge of a
+ * very wide window. The cap keeps the reading measure comfortable and centres
+ * the column in whatever space the sidebar leaves.
+ *
+ * `pb-28` clears the floating tab bar on narrow windows, where it sits over the
+ * content; at `md` and up the sidebar owns the left edge and the pill is gone.
+ */
 const PAGE =
-  "mx-auto flex w-full flex-col gap-[clamp(0.75rem,2.5vw,1.5rem)] px-[clamp(0.75rem,4vw,2rem)] py-[clamp(1rem,4vw,2rem)] pb-28 md:pb-8";
+  "mx-auto flex w-full max-w-5xl flex-col gap-[clamp(0.75rem,2.5vw,1.5rem)] px-[clamp(0.75rem,4vw,2rem)] py-[clamp(1rem,4vw,2rem)] pb-28 md:pb-10";
 
 export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
   const route = useAtomValue(routeAtom);

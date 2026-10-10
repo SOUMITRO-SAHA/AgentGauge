@@ -18,7 +18,6 @@
  */
 
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { Sparkle } from "@phosphor-icons/react";
 
 import { routeAtom } from "~/atoms";
 import { Button } from "~/components/ui/button";
@@ -77,15 +76,23 @@ function SidebarNav({
   return (
     <Sidebar
       collapsible="none"
+      // `floating` is shadcn's own detached-pane variant: it insets the sidebar
+      // from the window edge and gives it its own border, radius and shadow,
+      // rather than the full-bleed default. That is the macOS sidebar-pane look
+      // and it is a supported prop, not a hand-rolled margin.
+      variant="floating"
       data-testid="nav"
       className="backdrop-blur-xl"
     >
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1">
-          <Sparkle
-            className="size-4 text-sidebar-primary"
-            aria-hidden="true"
-            weight="fill"
+          <img
+            src="/agentgauge-mark.svg"
+            alt=""
+            aria-label="AgentGauge brand mark"
+            role="img"
+            data-testid="brand-mark"
+            className="size-5 rounded-[5px]"
           />
           <span className="text-sm font-semibold tracking-tight">
             AgentGauge
@@ -143,7 +150,7 @@ function FloatingTabs({
     <nav
       data-testid="nav"
       aria-label="Destinations"
-      className="glass fixed inset-x-0 bottom-0 z-40 mx-auto flex w-fit max-w-[calc(100vw-1.5rem)] items-stretch gap-0.5 rounded-full p-1.5"
+      className="glass fixed inset-x-0 bottom-0 z-40 mx-auto flex w-fit max-w-[calc(100vw-1.5rem)] items-stretch gap-0.5 rounded-full p-1.5 shadow-lg"
     >
       {ROUTES.map((definition) => {
         const active = route === definition.id;
