@@ -1,5 +1,77 @@
 # Agent guidance
 
+<critical_rules>
+
+## Multi-agent task registry (mandatory)
+
+> **Standalone mode:** If the user mentions "standalone mode" at the start of a
+> session, skip everything in this section entirely and work without the task
+> registry.
+
+Multiple coding agents may work in this repo at the same time. All work is
+coordinated through one registry at `.agents/tasks/` — no off-registry tasks.
+Most of `.agents/tasks/` is git-ignored and local to the clone — **except**
+`.agents/tasks/research/`, which is committed so findings persist across clones.
+
+### Every session, in order
+
+1. Read `.agents/tasks/TODO.md` — the single entry point for all work.
+2. Sweep: move any finished task folders from `.agents/tasks/planning/` to
+   `.agents/tasks/completed/` and update `.agents/tasks/TODO.md` (remove from Active, append
+   to Recently completed).
+3. Claim before you code: append a row to the Active table using the next free
+   `task_id`. Never stage or commit it.
+
+### Task lifecycle
+
+CLAIMED → RUNNING/BLOCKED → DONE/CANCELLED
+.agents/tasks/TODO.md .agents/tasks/planning/<id>/ .agents/tasks/completed/<id>/
+
+- `.agents/tasks/planning/<task_id>/` holds ONLY running (and blocked) tasks — exactly
+  two files: `<task_id>.plan.md` (durable rationale) and `<task_id>.todo.md`
+  (live checklist, updated as you work).
+- On completion or cancellation, move the entire folder to
+  `.agents/tasks/completed/<task_id>/` and update `.agents/tasks/TODO.md`. Never leave a
+  finished task in `planning/`.
+- Invariant: `ls .agents/tasks/planning` must exactly match the Active table in
+  `.agents/tasks/TODO.md`.
+
+### Key format
+
+`<agent-id>-<YYYYMMDDTHHMMSSZ>-<task_id>` — e.g.
+`codex-20260115T093000Z-auth-api`. `<agent-id>` is a short session handle,
+datetime is UTC (`date -u +%Y%m%dT%H%M%SZ`), `<task_id>` is a short
+kebab-case handle and is the folder name.
+
+### Durable memory — `.agents/contexts/`
+
+- Before starting: read `.agents/contexts/overview.md` (the task → context
+  mapping table) and any context files mapped to your task.
+- After finishing: write what was done, key decisions, patterns used, and file
+  locations to `.agents/contexts/<task_name>.md`, and add the row to
+  `overview.md`. This is the project's long-term memory — future agents resume
+  from these files, not from chat history.
+- Keep one authoritative file per subject; extend an existing file instead of
+  creating a parallel one.
+
+### Research tasks
+
+If a task is primarily research (spike, investigation, literature review, library evaluation, etc.):
+
+- Follow the normal task lifecycle (claim, plan, complete).
+- Write a detailed findings document at
+  `.agents/tasks/research/<research_task_name>.md`. Include: goal, sources consulted, key findings, options considered, recommendation, and any open questions.
+- **This file is committed** — it is the permanent record for the team.
+  Stage and commit it when the task is done.
+- The corresponding `planning/<task_id>/` folder is still ignored and should be moved to `completed/` as usual.
+
+### Git rules
+
+- Never stage, add, or commit anything under `.agents/tasks/` **except**
+  `.agents/tasks/research/` (research findings are intentionally committed).
+
+</critical_rules>
+
 ## Project intent
 
 This is an early-stage Tauri 2 desktop app and native-widget project for AI subscription statistics, account/service status, and related automation. Intended provider coverage includes Codex, Claude Code, Z.ai, and additional services over time. The primary platform goals are macOS, Windows, and Linux.
