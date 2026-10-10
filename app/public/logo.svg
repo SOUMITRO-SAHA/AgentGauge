@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">AgentGauge</title>
+  <style>
+    .mark { fill: #17191d; }
+    @media (prefers-color-scheme: dark) {
+      .mark { fill: #f4f4f5; }
+    }
+  </style>
+  <path class="mark" fill-rule="evenodd" d="M256 64 456 432H344L256 300 168 432H56ZM256 145 322 300H190Z"/>
+  <g class="mark">
+    <path d="M181 302h30v40h-30zM241 302h30v40h-30zM301 302h30v40h-30z"/>
+  </g>
+</svg>
