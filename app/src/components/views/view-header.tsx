@@ -25,7 +25,7 @@ export function ViewHeader({
   return (
     <header className="flex flex-col gap-1.5">
       <h1
-        className={`${TITLE} font-semibold tracking-tight text-foreground`}
+        className={`${TITLE} font-display font-semibold tracking-tight text-foreground`}
       >
         {title}
       </h1>

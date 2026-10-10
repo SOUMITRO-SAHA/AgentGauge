@@ -51,7 +51,9 @@ export function PanelHeader({
 }) {
   return (
     <div className="mb-4 flex items-center justify-between gap-2">
-      <h2 className="truncate text-sm font-semibold text-foreground">{title}</h2>
+      <h2 className="truncate font-display text-sm font-semibold text-foreground">
+        {title}
+      </h2>
       <Button
         variant="ghost"
         size="sm"

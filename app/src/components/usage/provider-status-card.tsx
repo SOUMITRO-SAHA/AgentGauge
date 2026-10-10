@@ -36,7 +36,7 @@ export function ProviderStatusCard() {
         <ArrowClockwise aria-hidden="true" />
       </Button>
       <div className="flex flex-col gap-4 pr-8">
-        <h2 className="text-sm font-semibold text-foreground">CLI detection</h2>
+        <h2 className="font-display text-sm font-semibold text-foreground">CLI detection</h2>
         {AsyncResult.match(result, {
           onInitial: () => (
             <div className="flex flex-col gap-3" data-testid="status-loading">
