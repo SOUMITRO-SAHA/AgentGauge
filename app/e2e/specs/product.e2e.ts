@@ -3,70 +3,81 @@ import { expect, browser, $ } from "@wdio/globals";
 import {
   dashboardLive,
   dashboardUnavailable,
+  dispatchCalls,
+  gotoView,
   installDispatch,
   liveSnapshot,
   onboardingVisible,
   onboardingWithNoData,
+  openApp,
+  restoreOnboardingStore,
+  seedOnboardingStore,
+  seedRoute,
   settle,
 } from "./fixtures.js";
 
 /**
  * All product coverage, in one file and in a fixed order.
  *
- * ## Why one file
+ * ## Why one file, one worker
  *
- * The app is a single window, so every spec file drives the *same* renderer.
- * A `tauri.mock()` installed by one file therefore replaces the one the
- * previous file installed, and running files concurrently makes the fixtures
- * race — a spec asserts against whichever file installed last. Splitting this
- * into `app.e2e.ts` / `onboarding.e2e.ts` / `styling.e2e.ts` produced exactly
- * that flakiness.
- *
- * One file, one ordered sequence, one mock at a time.
+ * The app is a single window, so every spec file drives the *same* renderer and
+ * the same on-disk stores. Splitting files, or running them concurrently, made
+ * the fixtures race each other. The `specs` entry in `wdio.conf.ts` is
+ * therefore one *group* — wdio runs a group in a single instance, in order.
  *
  * ## Ordering rules (see fixtures.ts)
  *
- * 1. `boot()` navigates, then installs the mock. Never the reverse: any
- *    navigation clears `window.__wdio_mocks__`, so mocking first is a silent
- *    no-op and the app reads the real provider.
- * 2. Never write the persisted store to set up a spec — the on-disk state is
- *    shared, so writing it races every other spec.
- * 3. A mock must answer *every* request the app makes, including the onboarding
- *    write. An unhandled request falls through to the default arm, and a decode
- *    failure there silently changes which screen renders.
+ * 1. `boot()` seeds the persisted stores, navigates, then installs the mock.
+ *    Never the reverse: any navigation clears `window.__wdio_mocks__`, so
+ *    mocking first is a silent no-op and the app reads the real provider.
+ * 2. Both persisted stores are seeded before the app launches and restored when
+ *    the run finishes. The app decides its gate and its opening destination at
+ *    mount, so a spec that inherited the previous spec's disk state inherited
+ *    its screen. Seeding is safe now precisely because the run is one ordered
+ *    worker — the old "never write the store" rule existed only to stop two
+ *    workers racing it.
+ * 3. A mock must answer *every* request the app makes. An unhandled request
+ *    falls through to the default arm, and a decode failure there silently
+ *    changes which screen renders.
  *
- * ## Widget specs assert the real Rust response
+ * ## What the mock layer actually is (verified, not assumed)
  *
- * The widget specs deliberately do not assert fixture data. `bun run e2e` runs an
- * unbundled binary, so `extension_present` is genuinely false — the extension
- * lives inside the `.app` — which makes that state deterministic and independent
- * of the mock. It is also the more valuable assertion: a dev build that claimed
- * the widget was ready would send the user to the gallery for something that is
- * not there.
+ * The app's `invoke` in `~/lib/ipc` reads `window.__wdio_mocks__` at call time,
+ * so the mock is written straight into the page. The plugin's own
+ * `browser.tauri.mock()` is deliberately unused: it registers in a different
+ * WKWebView script world than the one the app reads, so its mocks were never
+ * consulted — which is why fixture-dependent specs failed for months while
+ * "mock-independent" ones passed. Three further facts, each verified against
+ * the plugin source or a page-side probe:
  *
- * ## KNOWN FAILING — the onboarding gate
+ *   - the mock receives the invoke *arguments* (`{ request, signal }`), not a
+ *     `{ payload }` wrapper — the old destructuring answered every request with
+ *     the default arm;
+ *   - the implementation must be closure-free: it runs in the page, so fixture
+ *     data crosses as JSON on `__ismFixtures__`;
+ *   - `waitForDisplayed` misreports failure for a rendered element on a comma
+ *     selector, so waits poll `isDisplayed` (`pollForDisplayed`).
  *
- * The blocks below `onboarding flow` and `onboarding when nothing can be read`
- * currently fail in `beforeEach`, and several `dashboard` specs fail alongside
- * them. The cause is a harness constraint, not a product defect, and it is
- * verified rather than assumed:
+ * ## Widget specs assert both sides
  *
- *   - the onboarding gate is decided by an atom read that happens **on mount**;
- *   - a mock cannot exist before that read (see rule 1);
- *   - the control that would trigger a re-read lives *inside* the flow, which
- *     the gate itself is hiding.
- *
- * The gate is therefore un-mockable without a product change: seeding the
- * onboarding state from the URL (as the widget surface already does with
- * `?surface=widget`) would make it settable after navigation and unblock these
- * specs. Until then they are recorded as failing rather than deleted or
- * weakened into assertions that always pass.
+ * `real dev-build widget state` (at the end of this file) installs no fixture:
+ * `bun run e2e` runs an unbundled binary, where `extension_present` is
+ * genuinely false, and a dev build that claimed the widget was ready would send
+ * the user to the gallery for something that is not there. The other widget
+ * specs assert the fixture's *embedded* presentation instead.
  *
  * Verified against the real binary on macOS; see
  * `.opencode/skills/tauri-e2e-testing/references/capabilities.md`.
  */
 
 describe("onboarding flow", () => {
+  // The run seeds the persisted gate before every boot; the original bytes go
+  // back when the whole file is done.
+  after(async () => {
+    restoreOnboardingStore();
+  });
+
   beforeEach(async () => {
     await onboardingVisible();
   });
@@ -150,17 +161,14 @@ describe("onboarding flow", () => {
   });
 
   it("persists the step through the protocol, not just local state", async () => {
-    const mock = await browser.tauri.mock("dispatch");
-    await mock.update();
-
     await $('[data-testid="onboarding-next"]').click();
     await browser.pause(400);
 
-    // The write is what makes a relaunch resume rather than restart.
-    const types = mock.mock.calls.map(
-      (call) =>
-        (call as { request?: { request?: { type?: string } } }).request?.request
-          ?.type,
+    // The write is what makes a relaunch resume rather than restart. The call
+    // log lives next to the page-side mock (the plugin's own handle records
+    // in a different script world), so it is read from the page.
+    const types = (await dispatchCalls()).map(
+      (request) => request.type as string | undefined,
     );
     expect(types).toContain("setOnboardingStep");
   });
@@ -169,8 +177,10 @@ describe("onboarding flow", () => {
     await $('[data-testid="onboarding-skip"]').click();
     await browser.pause(400);
 
-    await expect($('[data-testid="onboarding"]')).toBeDisplayed({ reverse: true });
-    await expect($('[data-testid="dashboard"]')).toBeDisplayed();
+    // `toBeDisplayed({ reverse: true })` is silently ignored by this wdio
+    // build, so absence is asserted on the displayed state directly.
+    expect(await $('[data-testid="onboarding"]').isDisplayed()).toBe(false);
+    await expect($('[data-testid="app-shell"]')).toBeDisplayed();
   });
 });
 
@@ -219,9 +229,10 @@ describe("dashboard", () => {
     await dashboardLive();
   });
 
-  it("shows the dashboard once onboarding is dismissed", async () => {
-    await expect($('[data-testid="dashboard"]')).toBeDisplayed();
-    await expect($('[data-testid="onboarding"]')).toBeDisplayed({ reverse: true });
+  it("shows the shell once onboarding is dismissed", async () => {
+    await expect($('[data-testid="app-shell"]')).toBeDisplayed();
+    // The reverse flag is ignored by this wdio build; assert absence directly.
+    expect(await $('[data-testid="onboarding"]').isDisplayed()).toBe(false);
   });
 
   it("renders the plan and freshness alongside the number", async () => {
@@ -259,27 +270,31 @@ describe("dashboard", () => {
   });
 
   it("reports the watcher as running", async () => {
+    // The watcher moved to its own destination with the navigation.
+    await gotoView("automation");
     await expect($('[data-testid="automation-status"]')).toHaveText("Running");
   });
 
-  // These two assert the *real* Rust response rather than a fixture value.
-  //
-  // `bun run e2e` runs an unbundled binary, so `extension_present` is genuinely
-  // false — the widget extension lives inside the `.app` and there is no `.app`
-  // here. That makes this state deterministic and mock-independent, and it is
-  // the more valuable assertion anyway: a dev build that claimed the widget was
-  // ready would send the user looking in the gallery for something that is not
-  // there.
-  it("reports the widget as absent from a dev build", async () => {
+  // This spec asserts the *real* Rust response rather than a fixture value:
+  // no mock is installed, so `extension_present` is genuinely false on this
+  // unbundled binary. A dev build that claimed the widget was ready would send
+  // the user looking in the gallery for something that is not there — the
+  // regression this guards.
+  // Fixture-embedded build: the guide must show the system's own procedure
+  // (`data-state="ready"` is what `extension_present: true` renders as).
+  it("guides a user through the gallery when the build embeds the widget", async () => {
+    await gotoView("settings");
     const status = $('[data-testid="widget-status"]');
     await expect(status).toBeDisplayed();
-    await expect(status).toHaveAttribute("data-state", "not-embedded");
-    await expect(status).toHaveText(
-      expect.stringContaining("packaged app"),
+    await expect(status).toHaveAttribute("data-state", "ready");
+    await expect($('[data-testid="widget-setup-steps"]')).toBeDisplayed();
+    await expect($('[data-testid="widget-setup-steps"]')).toHaveText(
+      expect.stringContaining("widget gallery"),
     );
   });
 
   it("offers no install control, because macOS owns widget placement", async () => {
+    await gotoView("settings");
     // The old affordance opened a floating always-on-top window. A control that
     // implies the app can install a widget is the regression to catch.
     expect(await $('[data-testid="widget-toggle"]').isExisting()).toBe(false);
@@ -287,9 +302,13 @@ describe("dashboard", () => {
   });
 
   it("tells the user what to do about a missing extension", async () => {
+    await gotoView("settings");
+    // With the fixture's embedded extension the guide walks the user through
+    // the gallery; the dev-build warning is covered by the real-response spec
+    // above.
     await expect($('[data-testid="widget-setup-steps"]')).toBeDisplayed();
     await expect($('[data-testid="widget-setup-steps"]')).toHaveText(
-      expect.stringContaining("tauri build"),
+      expect.stringContaining("gallery"),
     );
   });
 });
@@ -324,9 +343,10 @@ describe("dashboard when Codex is unavailable", () => {
   it("keeps widget guidance independent of usage availability", async () => {
     // Widget support and provider availability are separate facts: a broken
     // Codex login must not remove the explanation of how to add the widget.
+    await gotoView("settings");
     await expect($('[data-testid="widget-status"]')).toHaveAttribute(
       "data-state",
-      "not-embedded",
+      "ready",
     );
     await expect($('[data-testid="widget-setup-steps"]')).toBeDisplayed();
   });
@@ -448,5 +468,150 @@ describe("responsive layout", () => {
         .map((el) => el.getAttribute("data-testid")),
     );
     expect(overflows).toEqual([]);
+  });
+});
+
+describe("navigation", () => {
+  beforeEach(async () => {
+    await dashboardLive();
+  });
+
+  it("starts on Home with exactly the four destinations", async () => {
+    for (const id of ["home", "automation", "stats", "settings"]) {
+      await expect($(`[data-testid="nav-${id}"]`)).toBeDisplayed();
+    }
+    await expect(
+      $('[data-testid="nav-home"]'),
+    ).toHaveAttribute("aria-current", "page");
+    await expect($('[data-testid="view-home"]')).toBeDisplayed();
+  });
+
+  it("moves between destinations when the navigation is used", async () => {
+    await gotoView("stats");
+    await expect($('[data-testid="view-stats"]')).toBeDisplayed();
+    await expect(
+      $('[data-testid="nav-stats"]'),
+    ).toHaveAttribute("aria-current", "page");
+    // `reverse: true` is silently ignored by this wdio build, so absence is
+    // asserted on the displayed state directly.
+    expect(await $('[data-testid="view-home"]').isDisplayed()).toBe(false);
+
+    await gotoView("automation");
+    await expect($('[data-testid="view-automation"]')).toBeDisplayed();
+    expect(await $('[data-testid="view-stats"]').isDisplayed()).toBe(false);
+  });
+
+  it("switches a destination with the command digits", async () => {
+    // ⌘3 = Stats, derived from ROUTES order (see navigation.test.ts).
+    await browser.keys(["Meta", "3"]);
+    await browser.pause(300);
+    await expect($('[data-testid="view-stats"]')).toBeDisplayed();
+  });
+
+  it("persists a navigation through the protocol, not just local state", async () => {
+    await gotoView("settings");
+    await browser.pause(300);
+
+    // The write is what makes the app reopen where the user left it. The mock
+    // records it in the page, so a spec never writes the on-disk settings
+    // file while still proving the protocol write happened.
+    const writes = (await dispatchCalls()).filter(
+      (request) => request.type === "setUiState",
+    );
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.at(-1)?.lastRoute).toBe("settings");
+  });
+
+  it("is a sidebar on a wide window and a floating tab bar on a narrow one", async () => {
+    // Asserted by geometry, not by class strings: the same testid serves both
+    // presentations, and which one is right is a fact about its box.
+    const navShape = () =>
+      browser.execute(() => {
+        const el = document.querySelector('[data-testid="nav"]');
+        if (!el) return null;
+        const rect = el.getBoundingClientRect();
+        return {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          left: Math.round(rect.left),
+          bottom: Math.round(rect.bottom),
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+        };
+      });
+
+    // `setWindowRect` is not instantaneous, can be clamped by the work area
+    // (a wide request at a nonzero x runs off the screen edge and macOS
+    // shrinks it), and React swaps the nav a frame after the viewport agrees
+    // — so move to the screen origin, drive to a *range*, and poll until the
+    // nav POSITION matches it: a floating pill is anchored to the BOTTOM of
+    // the viewport; the sidebar is a narrow column flush with the LEFT edge.
+    // (Position, not height: `h-svh` in WKWebView reported an unstable height
+    // after programmatic window moves, which made height comparisons flaky.)
+    const resizeUntil = async (
+      width: number,
+      widthOk: (innerWidth: number) => boolean,
+      mode: "sidebar" | "tabBar",
+    ) => {
+      await browser.setWindowRect(60, 60, width, 700);
+      let last: Record<string, number> | null = null;
+      for (let waited = 0; waited < 8000; waited += 250) {
+        const shape = await navShape();
+        last = shape;
+        if (
+          shape &&
+          widthOk(shape.innerWidth) &&
+          (mode === "sidebar"
+            ? shape.left <= 1 && shape.width <= 300
+            : shape.bottom >= shape.innerHeight - 48)
+        ) {
+          return;
+        }
+        await browser.pause(250);
+      }
+      throw new Error(
+        `the window did not reach ${mode} mode; last shape: ${JSON.stringify(last)}`,
+      );
+    };
+
+    // Narrow: the floating pill. Wide: the sidebar.
+    await resizeUntil(500, (w) => w <= 600, "tabBar");
+    const pill = await navShape();
+    expect(pill).not.toBeNull();
+    expect(pill!.bottom).toBeGreaterThanOrEqual(pill!.innerHeight - 48);
+
+    await resizeUntil(1200, (w) => w >= 900, "sidebar");
+    const sidebar = await navShape();
+    expect(sidebar).not.toBeNull();
+    expect(sidebar!.left).toBeLessThanOrEqual(1);
+    expect(sidebar!.width).toBeLessThanOrEqual(300);
+
+    // Leave the window where the reporter and later runs expect it.
+    await resizeUntil(960, (w) => w >= 768, "sidebar");
+  });
+});
+
+/**
+ * The real Rust response, with no fixture installed.
+ *
+ * `url()` clears the mock registry, so this block reads the genuine backend:
+ * `bun run e2e` runs an unbundled binary, where `extension_present` is
+ * genuinely false — the widget extension lives inside the `.app`. A dev build
+ * that claimed the widget was ready would send the user looking in the gallery
+ * for something that is not there; this is the regression guard for that.
+ */
+describe("real dev-build widget state", () => {
+  it("reports the extension as absent before any mock exists", async () => {
+    // Seed first: the app reopens on whatever route the last run left, and a
+    // destination other than Settings has no widget guide on screen.
+    seedOnboardingStore(false);
+    seedRoute("home");
+    await openApp();
+
+    await gotoView("settings");
+    const status = $('[data-testid="widget-status"]');
+    await expect(status).toBeDisplayed();
+    await expect(status).toHaveAttribute("data-state", "not-embedded");
+    await expect(status).toHaveText(expect.stringContaining("packaged app"));
   });
 });

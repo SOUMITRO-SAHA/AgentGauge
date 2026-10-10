@@ -3,6 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, browser, $ } from "@wdio/globals";
 
+import { installDispatch, liveSnapshot, openApp, seedOnboardingStore, seedRoute } from "./fixtures.js";
+
 // Repo-root `.temp/e2e`, resolved from this file so the path holds regardless
 // of the working directory the runner was launched from.
 const repoRoot = path.resolve(
@@ -23,14 +25,48 @@ if (!fs.existsSync(shotDir)) fs.mkdirSync(shotDir, { recursive: true });
  * result in the run can be trusted.
  */
 describe("E2E capability verification", () => {
+  /**
+   * The first *displayed* h1, whatever destination the app reopened on.
+   *
+   * All views stay mounted (hidden by display), so `$("h1")` matches the
+   * hidden shell heading of a non-active view and every isDisplayed check on
+   * it fails forever.
+   */
+  async function visibleHeading() {
+    for (const heading of await $$("h1")) {
+      if (await heading.isDisplayed()) return heading;
+    }
+    return $("h1");
+  }
+
   before(async () => {
     // Runs before any product mock is installed, so it observes the real app.
     // `beforeAll`-style setup here is safe because this file installs a mock
     // only inside the one test that exercises mocking, and restores it after.
-    await browser.tauri.switchWindow("main");
-    await browser.url("tauri://localhost");
-    await $('[data-testid="dashboard"], [data-testid="onboarding"]').waitForDisplayed({
-      timeout: 10_000,
+    // Seed a DISMISSED gate for this file: it exercises the shell, and product
+    // specs seed their own gate before each of their boots. The seeding is
+    // order-sensitive on purpose — the values on disk when a spec runs decide
+    // what the app opens as — so every file seeds before it navigates and
+    // nothing is inherited from whoever ran before it.
+    seedOnboardingStore(false);
+    seedRoute("home");
+
+    await openApp();
+
+    // The app's mount-time read is real and unavoidable (the gate and first
+    // read start before any harness can exist). A SECOND real read — from a
+    // later refresh or one of this file's bridge calls — races the spawned
+    // `codex app-server` and kills the webview mid-file. Installing the
+    // page-side mock here means every read after the first is served, and the
+    // real provider is out of the path for the rest of the run.
+    await installDispatch({
+      visible: false,
+      usage: liveSnapshot(),
+      installed: true,
+      version: "codex-cli 0.159.0",
+      widgetEmbedded: true,
+      widgetSupported: true,
+      automationRunning: true,
     });
   });
 
@@ -103,7 +139,7 @@ describe("E2E capability verification", () => {
       expect(Array.isArray(result.providers)).toBe(true);
     });
 
-    it("reports onboarding progress from the real store", async () => {
+    it("answers onboarding progress with the canonical step count", async () => {
       const result = await browser.tauri.execute(({ core }) =>
         core.invoke("dispatch", { request: { type: "onboardingProgress" } }),
       );
@@ -155,7 +191,11 @@ describe("E2E capability verification", () => {
 
     it("switches to the main window", async () => {
       await browser.tauri.switchWindow("main");
-      await expect($("h1")).toBeDisplayed();
+      // Route-agnostic: the app reopens on whatever destination was persisted,
+      // so the visible h1 may belong to any view.
+      const heading = await visibleHeading();
+      await heading.waitForDisplayed({ timeout: 10_000 });
+      await expect(heading).toBeDisplayed();
     });
   });
 
@@ -163,7 +203,8 @@ describe("E2E capability verification", () => {
     it("reads text, attributes and state", async () => {
       // Whichever surface happens to be up, the harness must be able to read
       // it — these assertions are about the harness, not about a screen.
-      const heading = await $("h1");
+      const heading = await visibleHeading();
+      await heading.waitForDisplayed({ timeout: 10_000 });
       expect(await heading.isDisplayed()).toBe(true);
       expect((await heading.getText()).length).toBeGreaterThan(0);
       expect(await heading.isExisting()).toBe(true);

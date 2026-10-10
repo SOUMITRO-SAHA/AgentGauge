@@ -13,7 +13,17 @@ const appBinaryPath = path.resolve(
 
 export const config: WebdriverIO.Config = {
   runner: "local",
-  specs: [path.join(here, "specs", "**", "*.e2e.ts")],
+  // One *group*, not a glob: a grouped array runs in a single worker instance,
+  // in order. A glob lets wdio run files as parallel instances, and every file
+  // drives the SAME renderer — parallel files raced each other's mocks and
+  // boots (verified: product boots failed while capabilities ran alongside).
+  // capabilities first: it probes the harness itself, not fixtures.
+  specs: [
+    [
+      path.join(here, "specs", "capabilities.e2e.ts"),
+      path.join(here, "specs", "product.e2e.ts"),
+    ],
+  ],
   maxInstances: 1,
   // Every spec file drives the SAME renderer, because the app is a single
   // window. A `tauri.mock()` installed by one file therefore replaces the one
@@ -55,6 +65,10 @@ export const config: WebdriverIO.Config = {
 
   mochaOpts: {
     ui: "bdd",
-    timeout: 60_000,
+    // Generous: a boot waits for the native window, remounts the app, settles
+    // the mount-time read, then nudges every atom twice — measured past 60s on
+    // a cold start. The default cut specs off mid-boot and every later spec in
+    // the file then failed behind it.
+    timeout: 150_000,
   },
 };
