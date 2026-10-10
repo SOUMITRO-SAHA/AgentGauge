@@ -70,11 +70,28 @@ export function usageForAtom(kind: Ipc.ProviderKind) {
   return atom;
 }
 
-/** Codex account activity; callers must gate reads behind explicit consent. */
-export const accountUsageAtom = runtime.atom(Ipc.getAccountUsage);
+/**
+ * Codex account activity, retained for the session.
+ *
+ * The read runs only while the stats view is showing, and the infinite idle
+ * TTL holds the last reading between visits, so returning to Stats renders it
+ * immediately while a refresh runs underneath.
+ */
+export const accountUsageAtom = Atom.setIdleTTL(Infinity)(
+  runtime.atom(Ipc.getAccountUsage),
+);
 
-/** Hydrated from persisted UI preferences before the user enters the stats view. */
-export const analyticsConsentAtom = Atom.make(false);
+/**
+ * Whether local analytics is on.
+ *
+ * A preference that defaults on — it reads only what the user's own tools
+ * already report on this device — hydrated from the persisted state at mount.
+ * `false` here means the user turned it off, never "not asked yet".
+ */
+export const analyticsConsentAtom = Atom.make(true);
+
+/** Which connected plan's stats the Stats view is showing. */
+export const statsTabAtom = Atom.make("codex");
 
 /** The Codex account's plan tier. */
 export const planAtom = runtime.atom(Ipc.getPlan("codex"));

@@ -6,6 +6,8 @@
  * absent reset time as "now" — are stated once and unit-tested.
  */
 
+import type * as Ipc from "~/lib/ipc";
+
 /** How a reading should be presented, derived from freshness and permission. */
 export type Tone = "healthy" | "warning" | "critical" | "unknown";
 
@@ -140,4 +142,54 @@ export function formatPlan(plan: string | null): string {
   if (plan === "proLite") return "Pro Lite";
   if (plan === "proMax") return "Pro Max";
   return plan.charAt(0).toUpperCase() + plan.slice(1);
+}
+
+/**
+ * One tab beside Codex: the value it selects, and what it is called.
+ *
+ * `kind` is `null` when the plan is connected but this build has no reader for
+ * it; the tab still exists and says so.
+ */
+export interface UsageTab {
+  readonly value: string;
+  readonly label: string;
+  readonly kind: Ipc.ProviderKind | null;
+}
+
+/** Codex is always present, connected or not. */
+export const CODEX_TAB: UsageTab = {
+  value: "codex",
+  label: "Codex",
+  kind: "codex",
+};
+
+/**
+ * The tab set for a surface that switches between connected plans.
+ *
+ * Codex first; every OpenCode-reported plan after. Plans sharing one
+ * integration (regional variants of one vendor) are one tab, and a plan with
+ * no reader keeps its catalog id as the value so its tab can still explain
+ * itself.
+ */
+export function tabsFrom(
+  subscriptions: readonly Ipc.CodingSubscription[],
+): UsageTab[] {
+  const tabs: UsageTab[] = [CODEX_TAB];
+  for (const subscription of subscriptions) {
+    if (subscription.integration === null) {
+      tabs.push({
+        value: subscription.providerId,
+        label: subscription.label,
+        kind: null,
+      });
+      continue;
+    }
+    if (tabs.some((tab) => tab.kind === subscription.integration)) continue;
+    tabs.push({
+      value: subscription.integration,
+      label: subscription.label,
+      kind: subscription.integration,
+    });
+  }
+  return tabs;
 }

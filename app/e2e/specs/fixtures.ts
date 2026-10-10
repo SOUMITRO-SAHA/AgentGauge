@@ -443,6 +443,10 @@ export interface DispatchFixtures {
   readonly widgetEmbedded: boolean;
   readonly widgetSupported: boolean;
   readonly automationRunning: boolean;
+  /**
+   * The analytics preference the `uiState` answer carries. Absent means the
+   * app default — enabled — mirroring the Rust settings store.
+   */
   readonly analyticsEnabled?: boolean;
 }
 
@@ -521,7 +525,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       step: f().visible ? "welcome" : "done",
       dismissed: !f().visible,
     };
-    w.__ismAnalyticsEnabled__ = f().analyticsEnabled === true;
+    w.__ismAnalyticsEnabled__ = f().analyticsEnabled !== false;
     const dispatcher = async (args?: {
       request?: Record<string, unknown>;
     }): Promise<Record<string, unknown>> => {

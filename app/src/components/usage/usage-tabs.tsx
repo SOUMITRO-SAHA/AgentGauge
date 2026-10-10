@@ -39,41 +39,12 @@ import {
   formatPlan,
   millisUntilReset,
   safeResetAt,
+  tabsFrom,
   toneFor,
   windowTitle,
+  type UsageTab,
 } from "~/lib/usage";
 import { cn } from "~/lib/utils";
-
-/** One tab: the value it selects, and what it is called. */
-interface Tab {
-  readonly value: string;
-  readonly label: string;
-  /** `null` when this plan is connected but has no usage reader. */
-  readonly kind: Ipc.ProviderKind | null;
-}
-
-const CODEX_TAB: Tab = { value: "codex", label: "Codex", kind: "codex" };
-
-function tabsFrom(subscriptions: readonly Ipc.CodingSubscription[]): Tab[] {
-  const tabs: Tab[] = [CODEX_TAB];
-  for (const subscription of subscriptions) {
-    if (subscription.integration === null) {
-      tabs.push({
-        value: subscription.providerId,
-        label: subscription.label,
-        kind: null,
-      });
-      continue;
-    }
-    if (tabs.some((tab) => tab.kind === subscription.integration)) continue;
-    tabs.push({
-      value: subscription.integration,
-      label: subscription.label,
-      kind: subscription.integration,
-    });
-  }
-  return tabs;
-}
 
 export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
   const subscriptions = useAtomValue(subscriptionsAtom);
@@ -190,7 +161,7 @@ function PlanTabBody({
   nowMs,
   refreshers,
 }: {
-  readonly tab: Tab;
+  readonly tab: UsageTab;
   readonly nowMs: number;
   readonly refreshers: React.RefObject<Map<string, () => void>>;
 }) {
