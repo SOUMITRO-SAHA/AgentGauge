@@ -35,28 +35,28 @@ const HEIGHTS = [480, 700];
 
 const STEPS = [
   {
-    title: "A clear, honest view of Codex usage",
-    copy: "Other harness integrations are planned, not assumed.",
+    title: "Your coding limits, in view",
+    copy: "Codex is supported today; OpenCode and Pi are on the roadmap.",
     demo: "demo-welcome",
   },
   {
-    title: "Every reading keeps its source",
-    copy: "source and freshness, with a capture time when available",
+    title: "Know what you can trust",
+    copy: "Missing or stale data is called out—not turned into zero.",
     demo: "demo-status",
   },
   {
-    title: "Notice when Codex reports a new window",
-    copy: "never resets or extends it",
+    title: "Catch the next reported window",
+    copy: "a prompt cannot start or extend a window",
     demo: "demo-rollover",
   },
   {
-    title: "Your usage, at a glance",
-    copy: "macOS widget gallery",
+    title: "Keep usage in sight",
+    copy: "You place it; macOS controls refresh timing.",
     demo: "demo-widget",
   },
   {
-    title: "A read-only rollover monitor",
-    copy: "never sends a prompt or spends quota",
+    title: "Watch without spending quota",
+    copy: "An optional, model-selected 'Hi' kickoff after a verified rollover is planned",
     demo: "demo-automation",
   },
 ];

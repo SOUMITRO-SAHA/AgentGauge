@@ -2,8 +2,8 @@
  * The honesty rules, stated as tests.
  *
  * These are the invariants that stop the UI showing a number without its
- * provenance, or a bar that runs the opposite way round. They live next to the
- * pure helpers so a refactor cannot quietly break one.
+ * provenance, or a bar that runs the opposite way round. They pin the pure
+ * helpers so a refactor cannot quietly break one.
  */
 
 import { describe, expect, it } from "vitest";

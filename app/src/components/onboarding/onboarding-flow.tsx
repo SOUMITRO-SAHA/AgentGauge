@@ -52,41 +52,41 @@ const STEPS: ReadonlyArray<{
 }> = [
   {
     id: "welcome",
-    title: "A clear, honest view of Codex usage",
+    title: "Your coding limits, in view",
     blurb:
-      "AgentGauge currently reads usage and reset information reported by your local Codex app-server. Other harness integrations are planned, not assumed.",
+      "AgentGauge brings the usage windows your installed coding harness actually reports into one local view. Codex is supported today; OpenCode and Pi are on the roadmap.",
     Art: WelcomeArt,
     demo: "demo-welcome",
   },
   {
     id: "statusCheck",
-    title: "Every reading keeps its source",
+    title: "Know what you can trust",
     blurb:
-      "Codex readings keep their source and freshness, with a capture time when available. Missing values stay marked unavailable instead of appearing as zero.",
+      "See Codex's reported five-hour and weekly usage, reset times, source, and last check. Missing or stale data is called out—not turned into zero.",
     Art: StatusArt,
     demo: "demo-status",
   },
   {
     id: "windowRollover",
-    title: "Notice when Codex reports a new window",
+    title: "Catch the next reported window",
     blurb:
-      "AgentGauge compares the reported reset time between polls and marks a changed window. Codex controls the schedule; this app never resets or extends it.",
+      "When Codex reports a new reset time, AgentGauge can notice the change between checks. Codex controls the schedule; a prompt cannot start or extend a window.",
     Art: RolloverArt,
     demo: "demo-rollover",
   },
   {
     id: "widget",
-    title: "Your usage, at a glance",
+    title: "Keep usage in sight",
     blurb:
-      "Add the AgentGauge widget from the macOS widget gallery. It shows Codex's five-hour and weekly readings; macOS manages when the snapshot refreshes.",
+      "Add the AgentGauge widget from the macOS widget gallery to glance at Codex's five-hour and weekly snapshots. You place it; macOS controls refresh timing.",
     Art: WidgetArt,
     demo: "demo-widget",
   },
   {
     id: "automation",
-    title: "A read-only rollover monitor",
+    title: "Watch without spending quota",
     blurb:
-      "While AgentGauge is open, the monitor checks Codex's reported usage state. Monitoring never sends a prompt or spends quota.",
+      "The current monitor checks Codex without sending prompts or using quota. An optional, model-selected 'Hi' kickoff after a verified rollover is planned; it would consume usage and require your opt-in.",
     Art: AutomationArt,
     demo: "demo-automation",
   },

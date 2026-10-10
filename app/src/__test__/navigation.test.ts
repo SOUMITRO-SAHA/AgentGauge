@@ -17,7 +17,7 @@ import {
   routeForShortcut,
   routeLabel,
   routesNeedingNavigation,
-} from "./navigation";
+} from "~/lib/navigation";
 
 describe("ROUTES", () => {
   it("is exactly the four destinations, in the order they read", () => {

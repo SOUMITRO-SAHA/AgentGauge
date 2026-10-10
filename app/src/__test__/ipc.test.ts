@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
-import * as Ipc from "./ipc";
+import * as Ipc from "~/lib/ipc";
 
 /**
  * Cross-boundary contract tests.

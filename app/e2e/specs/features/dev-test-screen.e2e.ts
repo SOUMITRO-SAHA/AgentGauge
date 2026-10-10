@@ -18,11 +18,11 @@ const repoRoot = path.resolve(
 const OUT = path.join(repoRoot, ".temp", "e2e", "dev-test-screen");
 
 const STEPS = [
-  { id: "welcome", title: "A clear, honest view of Codex usage" },
-  { id: "statusCheck", title: "Every reading keeps its source" },
-  { id: "windowRollover", title: "Notice when Codex reports a new window" },
-  { id: "widget", title: "Your usage, at a glance" },
-  { id: "automation", title: "A read-only rollover monitor" },
+  { id: "welcome", title: "Your coding limits, in view" },
+  { id: "statusCheck", title: "Know what you can trust" },
+  { id: "windowRollover", title: "Catch the next reported window" },
+  { id: "widget", title: "Keep usage in sight" },
+  { id: "automation", title: "Watch without spending quota" },
 ];
 
 async function expectTestFollowsSettings(): Promise<void> {
