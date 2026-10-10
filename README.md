@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="app/public/brand_logo.png" alt="AgentGauge logo" width="128" />
+</div>
+
 # AgentGauge
 
 **AgentGauge is a local-first desktop companion for AI coding harnesses.** It brings together the usage and reset information those harnesses actually expose, with planned, opt-in kickoff automation after a verified usage-window rollover.
