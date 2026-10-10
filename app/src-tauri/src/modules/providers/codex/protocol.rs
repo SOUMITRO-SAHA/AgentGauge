@@ -14,8 +14,8 @@
 use serde::Deserialize;
 
 use crate::shared::domain::{
-    freshness_for, window_label, PlanKind, ProviderKind, UsagePermission, UsageSnapshot,
-    UsageWindow, SOURCE_APP_SERVER,
+    freshness_for, window_label, AccountUsage, AccountUsageSummary, DailyUsageBucket, PlanKind,
+    ProviderKind, UsagePermission, UsageSnapshot, UsageWindow, SOURCE_APP_SERVER,
 };
 use crate::shared::error::Error;
 
@@ -46,6 +46,30 @@ struct WireSnapshot {
 struct WireRateLimitsResponse {
     ordinary_usage_allowed: Option<bool>,
     rate_limits: Option<WireSnapshot>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireAccountUsage {
+    summary: Option<WireAccountUsageSummary>,
+    daily_usage_buckets: Option<Vec<WireDailyUsageBucket>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireAccountUsageSummary {
+    lifetime_tokens: Option<u64>,
+    peak_daily_tokens: Option<u64>,
+    longest_running_turn_sec: Option<u64>,
+    current_streak_days: Option<u64>,
+    longest_streak_days: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireDailyUsageBucket {
+    start_date: Option<String>,
+    tokens: Option<u64>,
 }
 
 /// Turns a decoded window into the domain shape, labelling it by duration.
@@ -125,6 +149,35 @@ pub fn decode_rate_limits(
         five_hour,
         weekly,
         windows,
+    })
+}
+
+/// Decodes Codex account token activity without deriving credits or quotas.
+pub fn decode_account_usage(payload: &str, now_ms: i64) -> Result<AccountUsage, Error> {
+    let parsed: WireAccountUsage =
+        serde_json::from_str(payload).map_err(|err| decode_error(err, "account/usage/read"))?;
+    let summary = parsed.summary.unwrap_or_default();
+
+    Ok(AccountUsage {
+        fetched_at: now_ms,
+        summary: AccountUsageSummary {
+            lifetime_tokens: summary.lifetime_tokens,
+            peak_daily_tokens: summary.peak_daily_tokens,
+            longest_running_turn_sec: summary.longest_running_turn_sec,
+            current_streak_days: summary.current_streak_days,
+            longest_streak_days: summary.longest_streak_days,
+        },
+        daily_usage_buckets: parsed
+            .daily_usage_buckets
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|bucket| {
+                Some(DailyUsageBucket {
+                    start_date: bucket.start_date?,
+                    tokens: bucket.tokens,
+                })
+            })
+            .collect(),
     })
 }
 
@@ -344,6 +397,32 @@ mod tests {
         let weekly = snapshot.weekly.expect("a weekly window");
         assert_eq!(weekly.used_percent, 54);
         assert_eq!(weekly.duration_mins, Some(10_080));
+    }
+
+    #[test]
+    fn decodes_reported_activity_summary_and_daily_buckets() {
+        let payload = r#"{"summary":{"lifetimeTokens":1234567,"peakDailyTokens":45678,"longestRunningTurnSec":540,"currentStreakDays":8,"longestStreakDays":14},"dailyUsageBuckets":[{"startDate":"2026-10-09","tokens":12345},{"startDate":"2026-10-10","tokens":null}]}"#;
+        let usage = decode_account_usage(payload, NOW).expect("decodes");
+
+        assert_eq!(usage.summary.lifetime_tokens, Some(1_234_567));
+        assert_eq!(usage.summary.peak_daily_tokens, Some(45_678));
+        assert_eq!(usage.summary.longest_running_turn_sec, Some(540));
+        assert_eq!(usage.summary.current_streak_days, Some(8));
+        assert_eq!(usage.summary.longest_streak_days, Some(14));
+        assert_eq!(usage.daily_usage_buckets.len(), 2);
+        assert_eq!(usage.daily_usage_buckets[0].tokens, Some(12_345));
+        assert_eq!(usage.daily_usage_buckets[1].tokens, None);
+        assert_eq!(usage.fetched_at, NOW);
+    }
+
+    #[test]
+    fn missing_activity_summary_fields_remain_unknown() {
+        let usage = decode_account_usage(r#"{"summary":null,"dailyUsageBuckets":null}"#, NOW)
+            .expect("nullable response decodes");
+
+        assert_eq!(usage.summary.lifetime_tokens, None);
+        assert_eq!(usage.summary.current_streak_days, None);
+        assert!(usage.daily_usage_buckets.is_empty());
     }
 
     #[test]

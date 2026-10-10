@@ -365,6 +365,7 @@ export interface DispatchFixtures {
   readonly widgetEmbedded: boolean;
   readonly widgetSupported: boolean;
   readonly automationRunning: boolean;
+  readonly analyticsEnabled?: boolean;
 }
 
 /**
@@ -412,6 +413,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       __ismFixtures__?: Record<string, unknown>;
       __ismMockCalls__?: Array<Record<string, unknown>>;
       __ismOnboarding__?: { step: string; dismissed: boolean };
+      __ismAnalyticsEnabled__?: boolean;
       __wdio_mocks__: Record<
         string,
         (args: unknown) => Promise<Record<string, unknown>>
@@ -441,6 +443,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       step: f().visible ? "welcome" : "done",
       dismissed: !f().visible,
     };
+    w.__ismAnalyticsEnabled__ = f().analyticsEnabled === true;
     const dispatcher = async (
       args?: { request?: Record<string, unknown> },
     ): Promise<Record<string, unknown>> => {
@@ -478,6 +481,25 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
         }
         case "readUsage":
           return { type: "usage", snapshots: [data.usage] };
+        case "readAccountUsage":
+          return {
+            type: "accountUsage",
+            usage: {
+              fetchedAt: 1791561935000,
+              summary: {
+                lifetimeTokens: 1234567,
+                peakDailyTokens: 45678,
+                longestRunningTurnSec: 540,
+                currentStreakDays: 8,
+                longestStreakDays: 14,
+              },
+              dailyUsageBuckets: [
+                { startDate: "2026-10-07", tokens: 2300 },
+                { startDate: "2026-10-08", tokens: 0 },
+                { startDate: "2026-10-09", tokens: 12345 },
+              ],
+            },
+          };
         case "providerStatus":
           return {
             type: "providerStatuses",
@@ -613,6 +635,16 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                 request?.type === "setUiState"
                   ? ((request.lastRoute as string | null) ?? null)
                   : null,
+              analyticsEnabled: w.__ismAnalyticsEnabled__ === true,
+            },
+          };
+        case "setAnalyticsConsent":
+          w.__ismAnalyticsEnabled__ = request.enabled === true;
+          return {
+            type: "uiState",
+            state: {
+              lastRoute: null,
+              analyticsEnabled: w.__ismAnalyticsEnabled__,
             },
           };
         default:

@@ -36,6 +36,12 @@ export const cliDetectionAtom = runtime.atom(Ipc.getCliDetection);
  */
 export const usageAtom = runtime.atom(Ipc.getUsage);
 
+/** Codex account activity; callers must gate reads behind explicit consent. */
+export const accountUsageAtom = runtime.atom(Ipc.getAccountUsage);
+
+/** Hydrated from persisted UI preferences before the user enters the stats view. */
+export const analyticsConsentAtom = Atom.make(false);
+
 /** The Codex account's plan tier. */
 export const planAtom = runtime.atom(Ipc.getPlan("codex"));
 

@@ -15,7 +15,7 @@ pub(crate) mod codex;
 #[cfg(not(any(test, feature = "testkit")))]
 mod codex;
 
-use crate::shared::domain::{PlanKind, ProviderKind, UsageSnapshot};
+use crate::shared::domain::{AccountUsage, PlanKind, ProviderKind, UsageSnapshot};
 use crate::shared::error::{Error, ErrorKind};
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
 
@@ -81,6 +81,10 @@ impl ProviderRegistry {
     /// Reads usage for one provider.
     pub fn usage(&self, kind: ProviderKind) -> Result<UsageSnapshot, Error> {
         self.find(kind)?.read_usage()
+    }
+
+    pub fn account_usage(&self, kind: ProviderKind) -> Result<AccountUsage, Error> {
+        self.find(kind)?.read_account_usage()
     }
 
     /// Sends a minimal prompt. Callers must gate this behind an explicit,

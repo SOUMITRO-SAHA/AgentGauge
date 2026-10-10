@@ -19,7 +19,7 @@ import * as Effect from "effect/Effect";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useCallback, useEffect, useRef } from "react";
 
-import { routeAtom } from "~/atoms";
+import { analyticsConsentAtom, routeAtom } from "~/atoms";
 import { AutomationView } from "~/components/views/automation-view";
 import { HomeView } from "~/components/views/home-view";
 import { SettingsView } from "~/components/views/settings-view";
@@ -50,6 +50,7 @@ const PAGE =
 export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
   const route = useAtomValue(routeAtom);
   const setRoute = useAtomSet(routeAtom);
+  const setAnalyticsConsent = useAtomSet(analyticsConsentAtom);
   // Set the moment the user navigates this session, so the mount-time read of
   // the stored preference can never outrun them and yank the view back.
   const navigatedRef = useRef(false);
@@ -72,6 +73,7 @@ export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
   useEffect(() => {
     void Effect.runPromise(Ipc.getUiState())
       .then((state) => {
+        setAnalyticsConsent(state.analyticsEnabled);
         // A stored value from an older build whose route set differed must
         // fall back to Home, not break the shell.
         if (!navigatedRef.current && isRoute(state.lastRoute)) {
@@ -81,7 +83,7 @@ export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
       .catch(() => {
         // Restoring is best-effort; the shell stays on Home.
       });
-  }, [setRoute]);
+  }, [setAnalyticsConsent, setRoute]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

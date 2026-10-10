@@ -12,17 +12,30 @@
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
+import * as Effect from "effect/Effect";
+import { useState, type ReactNode } from "react";
+import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
+import { ChartBar, Fire, Lightning } from "@phosphor-icons/react";
 
-import { usageAtom } from "~/atoms";
+import { accountUsageAtom, analyticsConsentAtom, usageAtom } from "~/atoms";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "~/components/ui/chart";
+import { Button } from "~/components/ui/button";
 import { ViewHeader } from "~/components/views/view-header";
-import type * as Ipc from "~/lib/ipc";
+import * as Ipc from "~/lib/ipc";
 import { safeResetAt, windowTitle } from "~/lib/usage";
 
 export function StatsView({ visible }: { readonly visible: boolean }) {
   const usage = useAtomValue(usageAtom);
   const refreshUsage = useAtomRefresh(usageAtom);
+  const analyticsEnabled = useAtomValue(analyticsConsentAtom);
+  const setAnalyticsEnabled = useAtomSet(analyticsConsentAtom);
 
   return (
     <div className={visible ? "flex flex-col gap-4" : "hidden"} data-testid="view-stats">
@@ -100,6 +113,224 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
           null,
         onFailure: () => null,
       })} />
+
+      {analyticsEnabled ? (
+        <AccountAnalytics onRevoke={() => setAnalyticsEnabled(false)} />
+      ) : (
+        <AnalyticsConsent onEnabled={() => setAnalyticsEnabled(true)} />
+      )}
+    </div>
+  );
+}
+
+function AnalyticsConsent({ onEnabled }: { readonly onEnabled: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const enable = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await Effect.runPromise(Ipc.setAnalyticsConsent(true));
+      onEnabled();
+    } catch {
+      setError("Your analytics preference could not be saved. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className={`${PANEL} flex flex-col gap-4`} data-testid="stats-analytics-consent">
+      <div className="flex items-start gap-3">
+        <div className="rounded-md bg-accent-glass p-2 text-brand-teal">
+          <ChartBar aria-hidden="true" className="size-5" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-semibold text-foreground">Codex activity analytics</h2>
+          <p className="text-sm text-muted-foreground">
+            Allow AgentGauge to request Codex-reported token history and account
+            summaries through the installed Codex app-server. This stays on this
+            device and is not saved by AgentGauge. It does not read conversations
+            or credentials.
+          </p>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Token activity is not subscription-credit consumption or historical
+        five-hour/weekly quota usage. You can turn this off at any time.
+      </p>
+      {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+      <Button
+        type="button"
+        className="self-start"
+        disabled={saving}
+        onClick={() => void enable()}
+        data-testid="stats-enable-analytics"
+      >
+        {saving ? "Saving…" : "Enable local analytics"}
+      </Button>
+    </section>
+  );
+}
+
+function AccountAnalytics({ onRevoke }: { readonly onRevoke: () => void }) {
+  const usage = useAtomValue(accountUsageAtom);
+  const refresh = useAtomRefresh(accountUsageAtom);
+  const [saving, setSaving] = useState(false);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
+
+  const disable = async () => {
+    setSaving(true);
+    setRevokeError(null);
+    try {
+      await Effect.runPromise(Ipc.setAnalyticsConsent(false));
+      onRevoke();
+    } catch {
+      setRevokeError("Your analytics permission could not be turned off. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className={`${PANEL} flex flex-col gap-4`} data-testid="stats-account-analytics">
+      <PanelHeader title="Token activity" testId="stats-analytics-refresh" onRefresh={refresh} />
+      <p className="-mt-3 text-xs text-muted-foreground">
+        Reported by Codex · activity tokens only, not plan credits or quota-window history.
+      </p>
+      {AsyncResult.match(usage, {
+        onInitial: () => <p className="text-sm text-muted-foreground" data-testid="stats-analytics-loading">Reading Codex activity…</p>,
+        onSuccess: (result) => (
+          <AnalyticsContent usage={result.value} refreshing={result.waiting} />
+        ),
+        onFailure: () => (
+          <p className="text-sm text-muted-foreground" data-testid="stats-analytics-unavailable">
+            Codex account activity is unavailable. Your usage-window readings are not affected.
+          </p>
+        ),
+      })}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/70 pt-3">
+        {revokeError ? <p className="text-sm text-destructive" role="alert">{revokeError}</p> : null}
+        <p className="text-xs text-muted-foreground" data-testid="stats-analytics-source">
+          Source: Codex app-server · read locally at {AsyncResult.match(usage, {
+            onInitial: () => "—",
+            onSuccess: (result) => formatAbsolute(result.value.fetchedAt),
+            onFailure: () => "—",
+          })}
+        </p>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={saving}
+          onClick={() => void disable()}
+          data-testid="stats-disable-analytics"
+        >
+          {saving ? "Saving…" : "Turn off analytics"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+const activityChartConfig = {
+  tokens: { label: "Tokens", color: "var(--chart-1)" },
+} satisfies ChartConfig;
+
+function AnalyticsContent({
+  usage,
+  refreshing,
+}: {
+  readonly usage: Ipc.AccountUsage;
+  readonly refreshing: boolean;
+}) {
+  const buckets = [...usage.dailyUsageBuckets].sort((left, right) =>
+    left.startDate.localeCompare(right.startDate),
+  );
+  const chartData = buckets.map((bucket) => ({
+    date: bucket.startDate,
+    tokens: bucket.tokens,
+  }));
+  const knownBuckets = buckets.filter((bucket) => bucket.tokens !== null);
+  const range = buckets.length
+    ? `${buckets[0].startDate} – ${buckets[buckets.length - 1].startDate}`
+    : "No daily history reported";
+
+  return (
+    <div className="flex flex-col gap-4">
+      {refreshing ? (
+        <p className="text-xs text-muted-foreground" data-testid="stats-analytics-refreshing">
+          Refreshing · showing the previous reading until it completes.
+        </p>
+      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Lifetime tokens" value={formatCount(usage.summary.lifetimeTokens)} testId="stats-lifetime-tokens" />
+        <MetricCard label="Peak day" value={formatCount(usage.summary.peakDailyTokens)} testId="stats-peak-daily" />
+        <MetricCard label="Current streak" value={formatDays(usage.summary.currentStreakDays)} testId="stats-current-streak" icon={<Fire aria-hidden="true" className="size-4" />} />
+        <MetricCard label="Longest streak" value={formatDays(usage.summary.longestStreakDays)} testId="stats-longest-streak" icon={<Lightning aria-hidden="true" className="size-4" />} />
+      </div>
+      <div className="flex flex-col gap-1">
+        <h3 className="text-sm font-medium text-foreground">Daily tokens</h3>
+        <p className="text-xs text-muted-foreground" data-testid="stats-activity-coverage">Reported dates: {range}</p>
+      </div>
+      {knownBuckets.length === 0 ? (
+        <p className="text-sm text-muted-foreground" data-testid="stats-no-daily-usage">
+          Codex has not provided daily token buckets for this account.
+        </p>
+      ) : (
+        <ChartContainer
+          config={activityChartConfig}
+          className="aspect-auto h-56 w-full"
+          data-testid="stats-daily-chart"
+          aria-label={`Daily Codex token activity, ${range}`}
+        >
+          <BarChart accessibilityLayer data={chartData} margin={{ left: 4, right: 4 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis
+              dataKey="date"
+              tickLine={false}
+              axisLine={false}
+              tickMargin={8}
+              minTickGap={24}
+              tickFormatter={(value: string) => formatDateTick(value)}
+            />
+            <ChartTooltip
+              content={<ChartTooltipContent labelFormatter={(value) => formatDate(value)} />}
+            />
+            <Bar dataKey="tokens" fill="var(--color-tokens)" radius={4} maxBarSize={28} />
+          </BarChart>
+        </ChartContainer>
+      )}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+        <span data-testid="stats-reported-total">
+          {knownBuckets.length === buckets.length
+            ? `Tokens in reported days: ${formatCount(knownBuckets.reduce((sum, bucket) => sum + (bucket.tokens ?? 0), 0))}`
+            : `Partial daily totals: ${formatCount(knownBuckets.reduce((sum, bucket) => sum + (bucket.tokens ?? 0), 0))}`}
+        </span>
+        <span>Longest running turn: {formatDuration(usage.summary.longestRunningTurnSec)}</span>
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  testId,
+  icon,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly testId: string;
+  readonly icon?: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3">
+      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+        {icon}{label}
+      </span>
+      <span className="text-xl font-semibold tabular text-foreground" data-testid={testId}>{value}</span>
     </div>
   );
 }
@@ -190,4 +421,32 @@ function formatAbsolute(ms: number): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(ms));
+}
+
+function formatCount(value: number | null): string {
+  return value === null ? "Not reported" : new Intl.NumberFormat().format(value);
+}
+
+function formatDays(value: number | null): string {
+  return value === null ? "Not reported" : `${new Intl.NumberFormat().format(value)} days`;
+}
+
+function formatDuration(seconds: number | null): string {
+  if (seconds === null) return "Not reported";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds === 0 ? `${minutes}m` : `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatDateTick(value: string): string {
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+}
+
+function formatDate(value: unknown): string {
+  if (typeof value !== "string") return "Date unavailable";
+  return formatDateTick(value);
 }

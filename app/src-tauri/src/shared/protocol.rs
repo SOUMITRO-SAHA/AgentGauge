@@ -17,7 +17,7 @@ use crate::modules::automation::AutomationState;
 use crate::modules::cli_detection::CliToolStatus;
 use crate::modules::onboarding::{OnboardingProgress, OnboardingStep};
 use crate::modules::widget::SystemWidgetStatus;
-use crate::shared::domain::{PlanKind, ProviderKind, UsageSnapshot};
+use crate::shared::domain::{AccountUsage, PlanKind, ProviderKind, UsageSnapshot};
 use crate::shared::error::Error;
 use crate::shared::provider::{PingOutcome, ProviderStatus};
 
@@ -42,6 +42,8 @@ pub enum AppRequest {
     ReadUsage,
     /// Reads usage for one provider, propagating its failure.
     ReadUsageFor { provider: ProviderKind },
+    /// Reads account activity only after the explicit analytics opt-in.
+    ReadAccountUsage { provider: ProviderKind },
     /// Reads the account plan tier, which an API-key account does not have.
     ReadPlan { provider: ProviderKind },
     /// Sends the minimal prompt that proves the account can still answer.
@@ -85,6 +87,8 @@ pub enum AppRequest {
         #[serde(default, rename = "lastRoute")]
         last_route: Option<String>,
     },
+    /// Persists the separate local analytics permission.
+    SetAnalyticsConsent { enabled: bool },
 }
 
 impl AppRequest {
@@ -99,6 +103,7 @@ impl AppRequest {
             Self::CliDetection => "cliDetection",
             Self::ReadUsage => "readUsage",
             Self::ReadUsageFor { .. } => "readUsageFor",
+            Self::ReadAccountUsage { .. } => "readAccountUsage",
             Self::ReadPlan { .. } => "readPlan",
             Self::SendPing { .. } => "sendPing",
             Self::AutomationState => "automationState",
@@ -110,6 +115,7 @@ impl AppRequest {
             Self::SystemWidgetStatus => "systemWidgetStatus",
             Self::UiState => "uiState",
             Self::SetUiState { .. } => "setUiState",
+            Self::SetAnalyticsConsent { .. } => "setAnalyticsConsent",
         }
     }
 }
@@ -134,6 +140,9 @@ pub enum AppResponse {
     },
     Usage {
         snapshots: Vec<UsageSnapshot>,
+    },
+    AccountUsage {
+        usage: AccountUsage,
     },
     Plan {
         plan: Option<PlanKind>,
@@ -267,6 +276,9 @@ mod tests {
             AppRequest::ReadUsageFor {
                 provider: ProviderKind::Codex,
             },
+            AppRequest::ReadAccountUsage {
+                provider: ProviderKind::Codex,
+            },
             AppRequest::ReadPlan {
                 provider: ProviderKind::Codex,
             },
@@ -280,6 +292,7 @@ mod tests {
                 step: OnboardingStep::Done,
                 dismissed: false,
             },
+            AppRequest::SetAnalyticsConsent { enabled: true },
             AppRequest::SystemWidgetStatus,
         ];
         let mut names: Vec<&str> = all.iter().map(AppRequest::name).collect();

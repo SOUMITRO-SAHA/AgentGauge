@@ -87,6 +87,32 @@ impl UsageWindow {
     }
 }
 
+/// Codex-reported account token activity, distinct from subscription limits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUsage {
+    pub fetched_at: i64,
+    pub summary: AccountUsageSummary,
+    pub daily_usage_buckets: Vec<DailyUsageBucket>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUsageSummary {
+    pub lifetime_tokens: Option<u64>,
+    pub peak_daily_tokens: Option<u64>,
+    pub longest_running_turn_sec: Option<u64>,
+    pub current_streak_days: Option<u64>,
+    pub longest_streak_days: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyUsageBucket {
+    pub start_date: String,
+    pub tokens: Option<u64>,
+}
+
 /// The account plan behind the numbers, kept coarse so plan churn does not
 /// break decoding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -18,7 +18,7 @@ use crate::modules::onboarding::{
     OnboardingProgress, OnboardingState, OnboardingStep, OnboardingStore,
 };
 use crate::modules::providers::{ProviderRegistry, PING_PROMPT};
-use crate::modules::settings::{SettingsStore, UiState};
+use crate::modules::settings::SettingsStore;
 use crate::modules::widget::{now_secs, SnapshotStore, SystemWidgetStatus, WidgetSnapshot};
 use crate::shared::domain::{ProviderKind, UsageSnapshot};
 use crate::shared::error::Error;
@@ -78,6 +78,18 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
             let snapshots = vec![state.registry.usage(provider)?];
             publish_snapshot(state, &snapshots);
             Ok(AppResponse::Usage { snapshots })
+        }
+
+        AppRequest::ReadAccountUsage { provider } => {
+            if !state.settings.load().analytics_enabled {
+                return Err(Error::new(
+                    crate::shared::error::ErrorKind::InvalidRequest,
+                    "Enable local analytics before reading account activity.",
+                ));
+            }
+            Ok(AppResponse::AccountUsage {
+                usage: state.registry.account_usage(provider)?,
+            })
         }
 
         AppRequest::ReadPlan { provider } => Ok(AppResponse::Plan {
@@ -141,10 +153,17 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
         }),
 
         AppRequest::SetUiState { last_route } => {
-            let next = UiState::default().with_last_route(last_route);
+            let current = state.settings.load();
+            let next = current.with_last_route(last_route);
             // Same rule as onboarding: a failed write is reported, because a
             // preference lost silently is a preference that lies about having
             // been kept.
+            state.settings.save(&next)?;
+            Ok(AppResponse::UiState { state: next })
+        }
+
+        AppRequest::SetAnalyticsConsent { enabled } => {
+            let next = state.settings.load().with_analytics_enabled(enabled);
             state.settings.save(&next)?;
             Ok(AppResponse::UiState { state: next })
         }
@@ -259,6 +278,9 @@ mod tests {
             AppRequest::ProviderStatus,
             AppRequest::ReadUsage,
             AppRequest::ReadUsageFor {
+                provider: ProviderKind::Codex,
+            },
+            AppRequest::ReadAccountUsage {
                 provider: ProviderKind::Codex,
             },
             AppRequest::ReadPlan {

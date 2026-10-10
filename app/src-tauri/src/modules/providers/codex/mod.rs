@@ -150,6 +150,17 @@ impl Provider for CodexProvider {
         })
     }
 
+    fn read_account_usage(&self) -> Result<crate::shared::domain::AccountUsage, Error> {
+        self.with_server(|server| {
+            let payload = server.request("account/usage/read", Some(serde_json::json!({})))?;
+            let fetched_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            protocol::decode_account_usage(&payload, fetched_at)
+        })
+    }
+
     fn account(&self) -> Result<Option<PlanKind>, Error> {
         self.with_server(|server| {
             let payload = server.request("account/read", Some(serde_json::json!({})))?;

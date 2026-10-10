@@ -165,6 +165,24 @@ export const UsageSnapshot = Schema.Struct({
 });
 export type UsageSnapshot = typeof UsageSnapshot.Type;
 
+export const AccountUsage = Schema.Struct({
+  fetchedAt: Schema.Number,
+  summary: Schema.Struct({
+    lifetimeTokens: Schema.NullOr(Schema.Number),
+    peakDailyTokens: Schema.NullOr(Schema.Number),
+    longestRunningTurnSec: Schema.NullOr(Schema.Number),
+    currentStreakDays: Schema.NullOr(Schema.Number),
+    longestStreakDays: Schema.NullOr(Schema.Number),
+  }),
+  dailyUsageBuckets: Schema.Array(
+    Schema.Struct({
+      startDate: Schema.String,
+      tokens: Schema.NullOr(Schema.Number),
+    }),
+  ),
+});
+export type AccountUsage = typeof AccountUsage.Type;
+
 export const ProviderStatus = Schema.Struct({
   kind: ProviderKind,
   executable: Schema.String,
@@ -225,6 +243,7 @@ export type OnboardingProgress = typeof OnboardingProgress.Type;
  */
 export const UiState = Schema.Struct({
   lastRoute: Schema.NullOr(Schema.String),
+  analyticsEnabled: Schema.Boolean,
 });
 export type UiState = typeof UiState.Type;
 
@@ -276,6 +295,7 @@ export const AppRequest = Schema.Union([
   Schema.Struct({ type: Schema.Literal("cliDetection") }),
   Schema.Struct({ type: Schema.Literal("readUsage") }),
   Schema.Struct({ type: Schema.Literal("readUsageFor"), provider: ProviderKind }),
+  Schema.Struct({ type: Schema.Literal("readAccountUsage"), provider: ProviderKind }),
   Schema.Struct({ type: Schema.Literal("readPlan"), provider: ProviderKind }),
   Schema.Struct({
     type: Schema.Literal("sendPing"),
@@ -296,6 +316,10 @@ export const AppRequest = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("setUiState"),
     lastRoute: Schema.NullOr(Schema.String),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("setAnalyticsConsent"),
+    enabled: Schema.Boolean,
   }),
 ]);
 export type AppRequest = typeof AppRequest.Type;
@@ -320,6 +344,7 @@ export const AppResponse = Schema.Union([
     type: Schema.Literal("usage"),
     snapshots: Schema.Array(UsageSnapshot),
   }),
+  Schema.Struct({ type: Schema.Literal("accountUsage"), usage: AccountUsage }),
   Schema.Struct({ type: Schema.Literal("plan"), plan: Schema.NullOr(PlanKind) }),
   Schema.Struct({ type: Schema.Literal("ping"), outcome: PingOutcome }),
   Schema.Struct({ type: Schema.Literal("automation"), state: AutomationState }),
@@ -441,6 +466,12 @@ export const getUsageFor = (provider: ProviderKind) =>
     Effect.map((response) => expectType(response, "usage").snapshots),
   );
 
+/** Reads account-wide Codex token activity after explicit local analytics opt-in. */
+export const getAccountUsage = () =>
+  request({ type: "readAccountUsage", provider: "codex" }).pipe(
+    Effect.map((response) => expectType(response, "accountUsage").usage),
+  );
+
 /** Reads the account plan tier, which an API-key account does not have. */
 export const getPlan = (provider: ProviderKind) =>
   request({ type: "readPlan", provider }).pipe(
@@ -508,6 +539,11 @@ export const getUiState = () =>
     Effect.map((response) => expectType(response, "uiState").state),
   );
 
+export const setAnalyticsConsent = (enabled: boolean) =>
+  request({ type: "setAnalyticsConsent", enabled }).pipe(
+    Effect.map((response) => expectType(response, "uiState").state),
+  );
+
 /**
  * Persists the renderer's preferences, so a choice survives a relaunch.
  *
@@ -515,7 +551,7 @@ export const getUiState = () =>
  * progress: silently losing a preference is a preference that lies about
  * having been kept.
  */
-export const setUiState = (state: UiState) =>
+export const setUiState = (state: Pick<UiState, "lastRoute">) =>
   request({ type: "setUiState", lastRoute: state.lastRoute }).pipe(
     Effect.map((response) => expectType(response, "uiState").state),
   );

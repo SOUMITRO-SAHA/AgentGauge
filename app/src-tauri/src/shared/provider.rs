@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::shared::domain::{ProviderKind, UsageSnapshot};
+use crate::shared::domain::{AccountUsage, ProviderKind, UsageSnapshot};
 use crate::shared::error::Error;
 
 /// What a provider can tell us about itself, checked before anything else.
@@ -40,6 +40,9 @@ pub trait Provider: Send + Sync {
     /// `Unavailable` snapshot rather than an `Err` for "no data yet", so the
     /// UI renders a state instead of a failure.
     fn read_usage(&self) -> Result<UsageSnapshot, Error>;
+
+    /// Reads account-wide token activity after the user explicitly opts in.
+    fn read_account_usage(&self) -> Result<AccountUsage, Error>;
 
     /// Reads the account's plan tier, when the provider reports one.
     ///
