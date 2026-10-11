@@ -121,6 +121,10 @@ pub struct AccountUsage {
     pub fetched_at: i64,
     pub summary: AccountUsageSummary,
     pub daily_usage_buckets: Vec<DailyUsageBucket>,
+    /// Per-model breakdown, when the provider reports one. Empty is a real
+    /// answer ("this provider totals only"), never a failed decode.
+    #[serde(default)]
+    pub models: Vec<ModelUsage>,
     /// How many days the reported window covers, when the provider reports a
     /// bounded span rather than the account's lifetime. `None` means the
     /// numbers are lifetime, so the UI may label them "lifetime"; a present
@@ -149,6 +153,23 @@ pub struct AccountUsageSummary {
 pub struct DailyUsageBucket {
     pub start_date: String,
     pub tokens: Option<u64>,
+}
+
+/// One model's share of the reported usage, when the provider breaks its
+/// totals down by model.
+///
+/// `id` is the normalised catalog slug (lowercase, price-list compatible) so
+/// the renderer can join pricing without pattern-matching display names;
+/// `display_name` keeps exactly what the provider reported.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsage {
+    pub id: String,
+    pub display_name: String,
+    pub tokens: u64,
+    /// Model calls attributed to this model, when the provider counts them.
+    #[serde(default)]
+    pub requests: Option<u64>,
 }
 
 /// The account plan behind the numbers, kept coarse so plan churn does not
@@ -653,6 +674,30 @@ mod tests {
         assert_eq!(snapshot.freshness, Freshness::Unavailable);
         assert_eq!(snapshot.reason.as_deref(), Some("codex not found"));
         assert!(snapshot.five_hour.is_none());
+    }
+
+    #[test]
+    fn model_usage_rows_serialize_camel_cased_for_the_client() {
+        let model = ModelUsage {
+            id: "glm-5.3-flash".to_string(),
+            display_name: "GLM-5.3-Flash".to_string(),
+            tokens: 2_247_671_759,
+            requests: None,
+        };
+        let json = serde_json::to_value(&model).expect("serializes");
+        assert_eq!(json["id"], "glm-5.3-flash");
+        assert_eq!(json["displayName"], "GLM-5.3-Flash");
+        assert_eq!(json["tokens"], 2_247_671_759u64);
+        assert_eq!(json["requests"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn an_account_usage_without_models_still_decodes() {
+        // `models` is `#[serde(default)]`, so a payload from an older build
+        // (or a provider that totals only) must not fail the decode.
+        let json = r#"{"fetchedAt":1,"summary":{},"dailyUsageBuckets":[]}"#;
+        let usage: AccountUsage = serde_json::from_str(json).expect("decodes");
+        assert!(usage.models.is_empty());
     }
 
     #[test]

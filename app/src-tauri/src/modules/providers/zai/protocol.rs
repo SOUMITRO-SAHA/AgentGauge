@@ -15,8 +15,8 @@
 use serde::Deserialize;
 
 use crate::shared::domain::{
-    AccountUsage, AccountUsageSummary, DailyUsageBucket, Freshness, PlanKind, ProviderKind,
-    UsagePermission, UsageSnapshot, UsageWindow,
+    AccountUsage, AccountUsageSummary, DailyUsageBucket, Freshness, ModelUsage, PlanKind,
+    ProviderKind, UsagePermission, UsageSnapshot, UsageWindow,
 };
 use crate::shared::error::{Error, ErrorKind};
 
@@ -219,6 +219,21 @@ struct WireTotalUsage {
     #[serde(default)]
     #[serde(rename = "totalTokensUsage")]
     total_tokens_usage: Option<u64>,
+    /// Per-model rollup rows. The vendor reports display-case names
+    /// (`GLM-5.3`); `id` normalises to the catalog slug for price joins.
+    #[serde(default)]
+    #[serde(rename = "modelSummaryList")]
+    model_summary_list: Vec<WireModelSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireModelSummary {
+    #[serde(rename = "modelName")]
+    model_name: String,
+    #[serde(rename = "totalTokens")]
+    total_tokens: u64,
+    #[serde(default)]
+    sort_order: Option<i64>,
 }
 
 /// The query string for one analytics read: the model-usage path plus a
@@ -331,6 +346,39 @@ pub fn decode_model_usage(payload: &str, now_ms: i64) -> Result<AccountUsage, Er
     let peak = buckets.iter().filter_map(|bucket| bucket.tokens).max();
     let (current_streak, longest_streak) = streak_days(&buckets);
 
+    let mut ranked: Vec<(Option<i64>, ModelUsage)> = data
+        .total_usage
+        .as_ref()
+        .map(|total| total.model_summary_list.as_slice())
+        .unwrap_or(&[])
+        .iter()
+        .map(|row| {
+            (
+                row.sort_order,
+                ModelUsage {
+                    id: row.model_name.to_lowercase(),
+                    display_name: row.model_name.clone(),
+                    tokens: row.total_tokens,
+                    requests: None,
+                },
+            )
+        })
+        .collect();
+    // The vendor's own ranking (`sortOrder`, the plan's primary model first)
+    // is the reported truth; unranked rows keep arrival order after ranked
+    // ones, with the name as a deterministic tiebreak.
+    ranked.sort_by(|left, right| {
+        let left_rank = left.0.unwrap_or(i64::MAX);
+        let right_rank = right.0.unwrap_or(i64::MAX);
+        left_rank
+            .cmp(&right_rank)
+            .then_with(|| left.1.display_name.cmp(&right.1.display_name))
+    });
+    let models = ranked
+        .into_iter()
+        .map(|(_, model)| model)
+        .collect::<Vec<_>>();
+
     Ok(AccountUsage {
         fetched_at: now_ms,
         summary: AccountUsageSummary {
@@ -350,6 +398,7 @@ pub fn decode_model_usage(payload: &str, now_ms: i64) -> Result<AccountUsage, Er
                 .or((!data.model_call_count.is_empty()).then_some(series_calls)),
         },
         daily_usage_buckets: buckets,
+        models,
         window_days: Some(ANALYTICS_WINDOW_DAYS as u64),
     })
 }
@@ -779,6 +828,33 @@ mod tests {
         assert_eq!(usage.summary.longest_streak_days, Some(16));
         assert_eq!(usage.window_days, Some(30));
         assert_eq!(usage.fetched_at, 5_000);
+    }
+
+    #[test]
+    fn the_live_reply_carries_the_per_model_breakdown() {
+        let usage = decode_model_usage(LIVE_MODEL_USAGE, 0).expect("decodes");
+        assert_eq!(usage.models.len(), 2);
+        assert_eq!(usage.models[0].id, "glm-5.3");
+        assert_eq!(usage.models[0].display_name, "GLM-5.3");
+        assert_eq!(usage.models[0].tokens, 1_438_489_431);
+        assert_eq!(usage.models[1].id, "glm-5.3-flash");
+        assert_eq!(usage.models[1].tokens, 2_247_671_759);
+    }
+
+    #[test]
+    fn the_synthetic_fixture_also_decodes_its_model_summary() {
+        let usage = decode_model_usage(MODEL_USAGE, 0).expect("decodes");
+        assert_eq!(usage.models.len(), 1);
+        assert_eq!(usage.models[0].id, "glm-4.6");
+        assert_eq!(usage.models[0].tokens, 800);
+    }
+
+    #[test]
+    fn a_reply_without_model_rows_decodes_to_no_models() {
+        let payload = r#"{"code":200,"msg":"ok","success":true,"data":{
+            "x_time": [1767225600], "tokensUsage": [700]}}"#;
+        let usage = decode_model_usage(payload, 0).expect("decodes");
+        assert!(usage.models.is_empty());
     }
 
     #[test]

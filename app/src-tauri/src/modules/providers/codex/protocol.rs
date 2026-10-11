@@ -179,6 +179,10 @@ pub fn decode_account_usage(payload: &str, now_ms: i64) -> Result<AccountUsage, 
                 })
             })
             .collect(),
+        // The app-server account summary totals only; it reports no
+        // per-model breakdown (verified against the upstream protocol —
+        // the per-model shape exists only on the thread-scoped read).
+        models: Vec::new(),
         window_days: None,
     })
 }
