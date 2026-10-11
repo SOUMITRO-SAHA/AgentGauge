@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Which provider a snapshot describes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
     Codex,

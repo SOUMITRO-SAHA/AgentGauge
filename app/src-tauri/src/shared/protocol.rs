@@ -58,14 +58,15 @@ pub enum AppRequest {
     ///
     /// Spends quota. Nothing may send this on a timer the user did not opt into.
     SendPing { prompt: Option<String> },
-    /// Current watcher state.
+    /// Every sub's rollover-monitor state.
     AutomationState,
-    /// Starts the watcher. Idempotent.
-    StartAutomation,
-    /// Stops the watcher.
-    StopAutomation,
+    /// Starts one sub's rollover monitor. Idempotent, and persisted: the
+    /// choice survives a relaunch.
+    StartAutomation { kind: ProviderKind },
+    /// Stops one sub's rollover monitor. Persisted.
+    StopAutomation { kind: ProviderKind },
     /// Clears a detected rollover once the UI has shown it.
-    AcknowledgeRollover,
+    AcknowledgeRollover { kind: ProviderKind },
     /// The scheduled kickoff's per-subscription state and scheduler status.
     KickoffState,
     /// Opts one subscription into (or out of) the scheduled kickoff.
@@ -128,9 +129,9 @@ impl AppRequest {
             Self::ReadPlan { .. } => "readPlan",
             Self::SendPing { .. } => "sendPing",
             Self::AutomationState => "automationState",
-            Self::StartAutomation => "startAutomation",
-            Self::StopAutomation => "stopAutomation",
-            Self::AcknowledgeRollover => "acknowledgeRollover",
+            Self::StartAutomation { .. } => "startAutomation",
+            Self::StopAutomation { .. } => "stopAutomation",
+            Self::AcknowledgeRollover { .. } => "acknowledgeRollover",
             Self::KickoffState => "kickoffState",
             Self::SetKickoffEnabled { .. } => "setKickoffEnabled",
             Self::SetKickoffModel { .. } => "setKickoffModel",
@@ -178,7 +179,7 @@ pub enum AppResponse {
         outcome: PingOutcome,
     },
     Automation {
-        state: AutomationState,
+        monitors: Vec<AutomationState>,
     },
     /// The scheduled kickoff's overview: per-subscription state plus the
     /// system scheduler's status.
@@ -317,9 +318,15 @@ mod tests {
             },
             AppRequest::SendPing { prompt: None },
             AppRequest::AutomationState,
-            AppRequest::StartAutomation,
-            AppRequest::StopAutomation,
-            AppRequest::AcknowledgeRollover,
+            AppRequest::StartAutomation {
+                kind: ProviderKind::Codex,
+            },
+            AppRequest::StopAutomation {
+                kind: ProviderKind::Codex,
+            },
+            AppRequest::AcknowledgeRollover {
+                kind: ProviderKind::Codex,
+            },
             AppRequest::OnboardingProgress,
             AppRequest::OpenCodeSubscriptions,
             AppRequest::KickoffState,
@@ -399,9 +406,15 @@ mod tests {
             },
             AppRequest::SendPing { prompt: None },
             AppRequest::AutomationState,
-            AppRequest::StartAutomation,
-            AppRequest::StopAutomation,
-            AppRequest::AcknowledgeRollover,
+            AppRequest::StartAutomation {
+                kind: ProviderKind::Codex,
+            },
+            AppRequest::StopAutomation {
+                kind: ProviderKind::Codex,
+            },
+            AppRequest::AcknowledgeRollover {
+                kind: ProviderKind::Codex,
+            },
             AppRequest::OnboardingProgress,
             AppRequest::OpenCodeSubscriptions,
             AppRequest::KickoffState,

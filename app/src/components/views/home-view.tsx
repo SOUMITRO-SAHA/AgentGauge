@@ -13,7 +13,8 @@
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
-import { useAtomValue } from "@effect/atom-react";
+import { useEffect } from "react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 
 import { automationAtom } from "~/atoms";
 import { PANEL } from "~/components/dashboard/panel";
@@ -21,10 +22,20 @@ import { ProviderStatusCard } from "~/components/usage/provider-status-card";
 import { UsageTabs } from "~/components/usage/usage-tabs";
 import { ViewHeader } from "~/components/views/view-header";
 import { useClock } from "~/hooks/use-clock";
+import type * as Ipc from "~/lib/ipc";
 
 export function HomeView({ visible }: { readonly visible: boolean }) {
   const automation = useAtomValue(automationAtom);
+  const refreshAutomation = useAtomRefresh(automationAtom);
   const nowMs = useClock();
+
+  // The glance re-reads whenever Home becomes visible, so the monitor counts
+  // reflect the persisted choices as they are now, not as they were at mount.
+  useEffect(() => {
+    if (visible) {
+      refreshAutomation();
+    }
+  }, [visible, refreshAutomation]);
 
   return (
     <div className={visible ? "flex flex-col gap-4" : "hidden"} data-testid="view-home">
@@ -39,33 +50,40 @@ export function HomeView({ visible }: { readonly visible: boolean }) {
         <UsageTabs nowMs={nowMs} />
       </section>
 
-      <MonitorGlance running={AsyncResult.match(automation, {
-        onInitial: () => null,
-        onSuccess: (result) => result.value.running,
-        onFailure: () => null,
-      })} />
+      <MonitorGlance
+        monitors={AsyncResult.match(automation, {
+          onInitial: () => null,
+          onSuccess: (result) => result.value,
+          onFailure: () => null,
+        })}
+      />
     </div>
   );
 }
 
 /**
- * Whether the monitor is on, stated as a fact rather than a control.
- *
- * Set apart from the panels above it: this is context for what was just shown,
- * not another panel, so it reads as a footnote with its own rule above it rather
- * than as loose text flush against a panel's edge.
+ * How many of the per-sub rollover monitors are on, stated as a fact rather
+ * than a control. Set apart from the panels above it: this is context for what
+ * was just shown, not another panel.
  */
-function MonitorGlance({ running }: { readonly running: boolean | null }) {
+function MonitorGlance({
+  monitors,
+}: {
+  readonly monitors: readonly Ipc.AutomationState[] | null;
+}) {
+  const running = monitors?.filter((monitor) => monitor.running).length ?? null;
   return (
     <p
       className="border-t border-border/60 pt-4 text-xs text-muted-foreground"
       data-testid="home-watcher"
     >
       {running === null
-        ? "The rollover monitor could not be reached."
-        : running
-          ? "The rollover monitor is running."
-          : "The rollover monitor is stopped."}
+        ? "The rollover monitors could not be reached."
+        : running === 0
+          ? "No rollover monitors are running."
+          : running === 1
+            ? "1 rollover monitor is running."
+            : `${running} rollover monitors are running.`}
     </p>
   );
 }

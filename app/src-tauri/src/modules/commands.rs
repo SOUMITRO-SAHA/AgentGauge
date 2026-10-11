@@ -28,9 +28,9 @@ use crate::shared::protocol::{AppRequest, AppResponse, PROTOCOL_VERSION};
 
 /// Shared state, assembled once in `lib.rs`.
 ///
-/// Cloned per request so the blocking read can leave the main thread: the
-/// work runs on another thread and needs its own handle on the state. Every
-/// field is a handle or a path, so a clone costs nothing and shares state.
+/// Cloned per request so the blocking read can leave the main thread: the work
+/// runs on another thread and needs its own handle on the state. Every field is
+/// a handle or a path, so a clone costs nothing and shares the same state.
 #[derive(Clone)]
 pub struct AppState {
     pub registry: Arc<ProviderRegistry>,
@@ -40,7 +40,8 @@ pub struct AppState {
     pub settings: SettingsStore,
     /// The kickoff schedule's home. `None` only when there is no home
     /// directory, in which case every kickoff capability reports unsupported.
-    pub kickoff: Option<KickoffStore>,
+    /// Shared because the automation reading hook also folds into it.
+    pub kickoff: Option<Arc<KickoffStore>>,
 }
 
 /// The single entry point for every renderer capability.
@@ -48,6 +49,14 @@ pub struct AppState {
 /// A failure is returned as `AppResponse::Failure` rather than a rejected
 /// promise, so the client can branch on a stable tag. Only a bridge-level
 /// fault (the command was never invoked) reaches the renderer as an exception.
+///
+/// Async on purpose. Every arm below is blocking work — a provider read spawns
+/// the OpenCode CLI and waits on a network call — and a *synchronous* Tauri
+/// command runs on the main thread, which on macOS is the thread WKWebView
+/// paints on. Reading inline therefore froze the window: the tab would not
+/// switch and no skeleton could appear, because nothing could be painted while
+/// the read was in flight. The work moves to a blocking thread so the renderer
+/// keeps painting and the skeleton lands immediately.
 #[tauri::command]
 pub async fn dispatch(request: AppRequest, app: AppHandle) -> Result<AppResponse, ()> {
     // `AppHandle`, not `State`: an async command may not borrow its state, and
@@ -74,6 +83,10 @@ pub async fn dispatch(request: AppRequest, app: AppHandle) -> Result<AppResponse
 }
 
 /// Runs blocking work on a blocking thread, leaving the caller's thread free.
+///
+/// A panic or a cancelled join is reported as a typed failure rather than
+/// unwinding into the async runtime, so the renderer still receives a response
+/// it can branch on instead of a rejected promise.
 fn off_thread(
     work: impl FnOnce() -> AppResponse + Send + 'static,
 ) -> tauri::async_runtime::JoinHandle<AppResponse> {
@@ -146,32 +159,32 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
         }
 
         AppRequest::AutomationState => Ok(AppResponse::Automation {
-            state: state.automation.state(),
+            monitors: state.automation.overview(),
         }),
 
-        AppRequest::StartAutomation => {
-            state.automation.start();
+        AppRequest::StartAutomation { kind } => {
+            state.automation.start(kind);
             Ok(AppResponse::Automation {
-                state: state.automation.state(),
+                monitors: state.automation.overview(),
             })
         }
 
-        AppRequest::StopAutomation => {
-            state.automation.stop();
+        AppRequest::StopAutomation { kind } => {
+            state.automation.stop(kind);
             Ok(AppResponse::Automation {
-                state: state.automation.state(),
+                monitors: state.automation.overview(),
             })
         }
 
-        AppRequest::AcknowledgeRollover => {
-            state.automation.acknowledge_rollover();
+        AppRequest::AcknowledgeRollover { kind } => {
+            state.automation.acknowledge_rollover(kind);
             Ok(AppResponse::Automation {
-                state: state.automation.state(),
+                monitors: state.automation.overview(),
             })
         }
 
         AppRequest::KickoffState => Ok(AppResponse::Kickoff {
-            state: kickoff::overview(state.kickoff.as_ref()),
+            state: kickoff::overview(state.kickoff.as_deref()),
         }),
 
         AppRequest::SetKickoffEnabled { kind, enabled } => {
@@ -189,7 +202,7 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
                 &store.load(),
             )?;
             Ok(AppResponse::Kickoff {
-                state: kickoff::overview(state.kickoff.as_ref()),
+                state: kickoff::overview(state.kickoff.as_deref()),
             })
         }
 
@@ -206,7 +219,7 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
                 sub
             })?;
             Ok(AppResponse::Kickoff {
-                state: kickoff::overview(state.kickoff.as_ref()),
+                state: kickoff::overview(state.kickoff.as_deref()),
             })
         }
 
@@ -258,7 +271,7 @@ fn now_millis() -> i64 {
 /// The kickoff store, or the honest refusal when there is nowhere to keep a
 /// schedule.
 fn require_kickoff_store(state: &AppState) -> Result<&KickoffStore, Error> {
-    state.kickoff.as_ref().ok_or_else(|| {
+    state.kickoff.as_deref().ok_or_else(|| {
         Error::new(
             crate::shared::error::ErrorKind::InvalidRequest,
             "No home directory is available, so the kickoff schedule cannot be stored.",
@@ -273,7 +286,7 @@ fn require_kickoff_store(state: &AppState) -> Result<&KickoffStore, Error> {
 /// A schedule write that fails must not break the read the user asked for,
 /// so this is reported and not propagated.
 fn sync_reset_times(state: &AppState, snapshots: &[UsageSnapshot]) {
-    let Some(store) = state.kickoff.as_ref() else {
+    let Some(store) = state.kickoff.as_deref() else {
         return;
     };
     for snapshot in snapshots {
@@ -493,9 +506,15 @@ mod tests {
                 provider: ProviderKind::Codex,
             },
             AppRequest::AutomationState,
-            AppRequest::StartAutomation,
-            AppRequest::StopAutomation,
-            AppRequest::AcknowledgeRollover,
+            AppRequest::StartAutomation {
+                kind: ProviderKind::Codex,
+            },
+            AppRequest::StopAutomation {
+                kind: ProviderKind::Codex,
+            },
+            AppRequest::AcknowledgeRollover {
+                kind: ProviderKind::Codex,
+            },
             AppRequest::KickoffState,
             AppRequest::SetKickoffEnabled {
                 kind: ProviderKind::Codex,

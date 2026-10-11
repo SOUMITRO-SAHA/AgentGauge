@@ -434,6 +434,11 @@ export interface DispatchFixtures {
    */
   readonly usageForDelay?: { readonly provider: string; readonly ms: number };
   /**
+   * Delays one provider's `readAccountUsage` answer, so specs can observe the
+   * analytics skeleton a first token-history read shows.
+   */
+  readonly accountUsageDelay?: { readonly provider: string; readonly ms: number };
+  /**
    * Per-provider account-analytics replies for `readAccountUsage`, keyed by
    * provider kind. Absent means the default Codex-shaped answer serves.
    */
@@ -461,6 +466,14 @@ export interface DispatchFixtures {
   readonly widgetEmbedded: boolean;
   readonly widgetSupported: boolean;
   readonly automationRunning: boolean;
+  /**
+   * Per-sub running overrides for the automation monitors, layered over
+   * `automationRunning` (which answers for Codex, the always-present sub).
+   * Toggling writes through, so a spec can assert the choice sticks.
+   */
+  readonly automationRunningByKind?: Record<string, boolean>;
+  /** Marks one sub's monitor as having an unacknowledged rollover. */
+  readonly automationRolledOver?: string;
   /**
    * The analytics preference the `uiState` answer carries. Absent means the
    * app default — enabled — mirroring the Rust settings store.
@@ -515,6 +528,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       __ismOnboarding__?: { step: string; dismissed: boolean };
       __ismAnalyticsEnabled__?: boolean;
       __ismKickoffEnabled__?: Record<string, boolean>;
+      __ismAutomationRunning__?: Record<string, boolean>;
       __wdio_mocks__: Record<
         string,
         (args: unknown) => Promise<Record<string, unknown>>
@@ -546,6 +560,10 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
     };
     w.__ismAnalyticsEnabled__ = f().analyticsEnabled !== false;
     w.__ismKickoffEnabled__ = { ...(f().kickoff?.enabledByKind ?? {}) };
+    w.__ismAutomationRunning__ = {
+      codex: f().automationRunning === true,
+      ...(f().automationRunningByKind ?? {}),
+    };
     const dispatcher = async (args?: {
       request?: Record<string, unknown>;
     }): Promise<Record<string, unknown>> => {
@@ -597,6 +615,11 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
             subscriptions: data.subscriptions ?? [],
           };
         case "readAccountUsage": {
+          if (data.accountUsageDelay?.provider === request.provider) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, data.accountUsageDelay?.ms ?? 0),
+            );
+          }
           const perProviderUsage =
             data.accountUsageByProvider?.[request.provider as string];
           if (perProviderUsage) {
@@ -665,19 +688,33 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
         case "automationState":
         case "startAutomation":
         case "stopAutomation":
-        case "acknowledgeRollover":
+        case "acknowledgeRollover": {
+          if (
+            (request.type === "startAutomation" ||
+              request.type === "stopAutomation") &&
+            typeof request.kind === "string"
+          ) {
+            w.__ismAutomationRunning__[request.kind] =
+              request.type === "startAutomation";
+          }
+          const kinds = ["codex", "zai", "minimax", "kimi"];
+          const running = w.__ismAutomationRunning__;
           return {
             type: "automation",
-            state: {
-              running: data.automationRunning,
-              usage: null,
-              lastPolledAt: Date.now(),
-              rolledOver: false,
-              observedResetsAt: Math.floor(Date.now() / 1000) + 3600,
-              rolledOverAt: null,
-              nextPollAt: null,
-            },
+            monitors: kinds.map((kind) => ({
+              kind,
+              running: running[kind] === true,
+              lastPolledAt: running[kind] === true ? Date.now() : null,
+              nextPollAt: running[kind] === true ? Date.now() + 300_000 : null,
+              observedResetsAt:
+                running[kind] === true
+                  ? Math.floor(Date.now() / 1000) + 3600
+                  : null,
+              rolledOver: data.automationRolledOver === kind,
+              rolledOverAt: data.automationRolledOver === kind ? Date.now() : null,
+            })),
           };
+        }
         case "kickoffState":
         case "setKickoffEnabled":
         case "setKickoffModel": {
@@ -1248,6 +1285,27 @@ export async function dashboardWithSlowPlans(): Promise<void> {
     ],
     usageByProvider: { zai: zaiSnapshot() },
     usageForDelay: { provider: "zai", ms: 800 },
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+  });
+}
+
+/**
+ * The Z.AI stats dashboard, with both of Z.AI's reads arriving late, so specs
+ * can observe the skeletons a first stats read shows.
+ */
+export async function dashboardWithSlowStats(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    subscriptions: [subscription()],
+    usageByProvider: { zai: zaiSnapshot() },
+    accountUsageByProvider: { zai: zaiAccountUsage() },
+    usageForDelay: { provider: "zai", ms: 800 },
+    accountUsageDelay: { provider: "zai", ms: 800 },
     installed: true,
     version: "codex-cli 0.159.0",
     widgetEmbedded: true,

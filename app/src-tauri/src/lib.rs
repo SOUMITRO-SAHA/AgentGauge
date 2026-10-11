@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tauri::Manager;
 
 use modules::automation::AutomationRunner;
+use modules::automation::AutomationStore;
 use modules::commands::AppState;
 use modules::kickoff::KickoffStore;
 use modules::onboarding::OnboardingStore;
@@ -47,14 +48,14 @@ pub fn run() {
     // see the same provider instances, or a poll and a manual read could each
     // spawn their own app-server process.
     let registry = Arc::new(ProviderRegistry::new());
-    let automation = Arc::new(AutomationRunner::new(Arc::clone(&registry)));
     // Where the macOS system widget reads its snapshot from. `None` only when
     // there is no home directory, in which case the widget has nowhere to read
     // either and the setup guide says so.
     let widget_snapshots = SnapshotStore::from_env();
     // The kickoff schedule lives beside the widget snapshot: the headless
-    // worker reads the same file without this app running.
-    let kickoff_store = KickoffStore::from_env();
+    // worker reads the same file without this app running. Shared with the
+    // automation reading hook, which folds fresh reset times in.
+    let kickoff_shared = KickoffStore::from_env().map(Arc::new);
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -84,8 +85,42 @@ pub fn run() {
                 ),
             };
 
+            // The automation runner owns its persisted per-sub choices: the
+            // same durability rule as preferences, and the same fallback.
+            let automation = {
+                let store = match app.path().app_data_dir() {
+                    Ok(dir) => AutomationStore::new(dir.join("automation.json")),
+                    Err(_) => AutomationStore::new(
+                        std::env::temp_dir()
+                            .join("agentgauge")
+                            .join("automation.json"),
+                    ),
+                };
+                let mut runner = AutomationRunner::new(Arc::clone(&registry)).with_store(store);
+                // Every monitor reading also feeds the kickoff schedule, so
+                // its worker stays on the freshest window boundary without
+                // polling providers itself.
+                if let Some(kickoff) = kickoff_shared.clone() {
+                    runner = runner.with_on_reading(Arc::new(move |kind, resets_at| {
+                        if let Some(secs) = resets_at {
+                            let now = crate::shared::clock::Clock::now_ms(
+                                &crate::shared::clock::SystemClock,
+                            );
+                            let _ = kickoff.update(kind, |mut sub| {
+                                sub.apply_reset(secs, now);
+                                sub
+                            });
+                        }
+                    }));
+                }
+                // The persisted choices run again before the first frame
+                // renders.
+                runner.resume_persisted();
+                Arc::new(runner)
+            };
+
             let app_registry = Arc::clone(&registry);
-            let has_kickoff_store = kickoff_store.is_some();
+            let has_kickoff_store = kickoff_shared.is_some();
 
             // Behind an `Arc` because a dispatch runs its blocking read on
             // another thread: the command hands that read an owned handle
@@ -96,7 +131,7 @@ pub fn run() {
                 onboarding,
                 widget_snapshots,
                 settings,
-                kickoff: kickoff_store,
+                kickoff: kickoff_shared,
             }));
 
             // While the app is open it runs the kickoff tick itself, so a

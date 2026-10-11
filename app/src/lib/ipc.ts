@@ -238,9 +238,13 @@ export const ProviderStatus = Schema.Struct({
 });
 export type ProviderStatus = typeof ProviderStatus.Type;
 
+/**
+ * One sub's rollover-monitor state. `kind` is on the wire so the renderer can
+ * place each monitor on its sub's card without assuming an order.
+ */
 export const AutomationState = Schema.Struct({
+  kind: ProviderKind,
   running: Schema.Boolean,
-  usage: Schema.NullOr(UsageSnapshot),
   lastPolledAt: Schema.NullOr(Schema.Number),
   rolledOver: Schema.Boolean,
   observedResetsAt: Schema.NullOr(Schema.Number),
@@ -392,9 +396,18 @@ export const AppRequest = Schema.Union([
     prompt: Schema.optional(Schema.String),
   }),
   Schema.Struct({ type: Schema.Literal("automationState") }),
-  Schema.Struct({ type: Schema.Literal("startAutomation") }),
-  Schema.Struct({ type: Schema.Literal("stopAutomation") }),
-  Schema.Struct({ type: Schema.Literal("acknowledgeRollover") }),
+  Schema.Struct({
+    type: Schema.Literal("startAutomation"),
+    kind: ProviderKind,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("stopAutomation"),
+    kind: ProviderKind,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("acknowledgeRollover"),
+    kind: ProviderKind,
+  }),
   Schema.Struct({ type: Schema.Literal("kickoffState") }),
   Schema.Struct({
     type: Schema.Literal("setKickoffEnabled"),
@@ -452,7 +465,10 @@ export const AppResponse = Schema.Union([
   Schema.Struct({ type: Schema.Literal("accountUsage"), usage: AccountUsage }),
   Schema.Struct({ type: Schema.Literal("plan"), plan: Schema.NullOr(PlanKind) }),
   Schema.Struct({ type: Schema.Literal("ping"), outcome: PingOutcome }),
-  Schema.Struct({ type: Schema.Literal("automation"), state: AutomationState }),
+  Schema.Struct({
+    type: Schema.Literal("automation"),
+    monitors: Schema.Array(AutomationState),
+  }),
   Schema.Struct({
     type: Schema.Literal("kickoff"),
     state: KickoffOverview,
@@ -610,26 +626,34 @@ export const sendPing = (prompt?: string) =>
     Effect.map((response) => expectType(response, "ping").outcome),
   );
 
+/** Every sub's rollover-monitor state, one entry per known sub. */
 export const getAutomationState = () =>
   request({ type: "automationState" }).pipe(
-    Effect.map((response) => expectType(response, "automation").state),
+    Effect.map((response) => expectType(response, "automation").monitors),
   );
 
-/** Starts the rollover monitor. Idempotent, so a double call cannot double-poll. */
-export const startAutomation = () =>
-  request({ type: "startAutomation" }).pipe(
-    Effect.map((response) => expectType(response, "automation").state),
+/**
+ * Starts one sub's rollover monitor.
+ *
+ * Idempotent, so a double call cannot double-poll — and persisted, so the
+ * choice survives a relaunch: the monitor is running again before the first
+ * frame renders.
+ */
+export const startAutomation = (kind: ProviderKind) =>
+  request({ type: "startAutomation", kind }).pipe(
+    Effect.map((response) => expectType(response, "automation").monitors),
   );
 
-export const stopAutomation = () =>
-  request({ type: "stopAutomation" }).pipe(
-    Effect.map((response) => expectType(response, "automation").state),
+/** Stops one sub's rollover monitor. Persisted like the start. */
+export const stopAutomation = (kind: ProviderKind) =>
+  request({ type: "stopAutomation", kind }).pipe(
+    Effect.map((response) => expectType(response, "automation").monitors),
   );
 
-/** Clears a detected rollover once the UI has shown it. */
-export const acknowledgeRollover = () =>
-  request({ type: "acknowledgeRollover" }).pipe(
-    Effect.map((response) => expectType(response, "automation").state),
+/** Clears one sub's detected rollover once the UI has shown it. */
+export const acknowledgeRollover = (kind: ProviderKind) =>
+  request({ type: "acknowledgeRollover", kind }).pipe(
+    Effect.map((response) => expectType(response, "automation").monitors),
   );
 
 /** Reads every subscription's scheduled-kickoff state. */
