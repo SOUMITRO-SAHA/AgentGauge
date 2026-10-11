@@ -16,6 +16,36 @@ import { StatsView } from "~/components/views/stats-view";
 
 type Request = { readonly type: string; readonly provider?: string };
 
+function codexSnapshot() {
+  const resetsAt = Math.floor(Date.now() / 1000) + 7_200;
+  const fiveHour = {
+    label: "5h",
+    usedPercent: 32,
+    durationMins: 300,
+    resetsAt,
+    remainingPercent: 68,
+  };
+  const weekly = {
+    label: "weekly",
+    usedPercent: 11,
+    durationMins: 10_080,
+    resetsAt: resetsAt + 345_600,
+    remainingPercent: 89,
+  };
+  return {
+    provider: "codex",
+    freshness: "live",
+    fetchedAt: Date.now(),
+    source: "codex app-server",
+    reason: null,
+    plan: "pro",
+    permission: "allowed",
+    fiveHour,
+    weekly,
+    windows: [fiveHour, weekly],
+  };
+}
+
 function zaiSnapshot() {
   const resetsAt = Math.floor(Date.now() / 1000) + 3_600;
   const fiveHour = {
@@ -109,7 +139,12 @@ function installDispatch(): void {
         case "readUsageFor":
           return {
             type: "usage",
-            snapshots: request.provider === "zai" ? [zaiSnapshot()] : [],
+            snapshots:
+              request.provider === "zai"
+                ? [zaiSnapshot()]
+                : request.provider === "codex"
+                  ? [codexSnapshot()]
+                  : [],
           };
         default:
           return {
@@ -139,6 +174,24 @@ it("renders analytics immediately, with no consent gate", async () => {
   ).toBeTruthy();
   expect(screen.queryByTestId("stats-analytics-consent")).toBeNull();
   expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
+});
+
+it("shows Codex's window reading below its analytics, like Z.AI's tab", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  expect(
+    await screen.findByTestId("stats-account-analytics"),
+  ).toBeTruthy();
+  expect(await screen.findByTestId("stats-plan-reading")).toBeTruthy();
+
+  const plan = screen.getByTestId("stats-plan-name");
+  expect(plan.textContent).toBe("Pro");
+  const fiveHour = await screen.findByTestId("stats-plan-window-used-5h");
+  expect(fiveHour.textContent).toContain("32% used");
+  const weekly = await screen.findByTestId("stats-plan-window-used-weekly");
+  expect(weekly.textContent).toContain("11% used");
 });
 
 it("gives every connected plan a tab and shows its stats there", async () => {

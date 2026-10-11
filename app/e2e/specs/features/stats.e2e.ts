@@ -56,6 +56,23 @@ describe("stats", () => {
     await expectDisplayed('[data-testid="stats-daily-chart"]');
     await expectDisplayed('[data-testid="stats-current-streak"]');
     await expectDisplayed('[data-testid="stats-analytics-source"]');
+
+    // The window reading rides below the analytics, exactly like the other
+    // token-history tabs: the chart answers what the tokens did, the windows
+    // answer how full the plan is.
+    await expectDisplayed('[data-testid="stats-plan-reading"]');
+    const reading = await browser.execute(() => ({
+      plan: document.querySelector('[data-testid="stats-plan-name"]')
+        ?.textContent,
+      fiveHour: document.querySelector(
+        '[data-testid="stats-plan-window-used-5h"]',
+      )?.textContent,
+      source: document.querySelector('[data-testid="stats-plan-source"]')
+        ?.textContent,
+    }));
+    expect(reading.plan).toBeTruthy();
+    expect(reading.fiveHour).toContain("used");
+    expect(reading.source).toContain("app-server");
   });
 
   it("gives every connected plan a tab and shows its stats there", async () => {

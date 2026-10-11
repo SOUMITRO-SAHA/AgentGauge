@@ -143,7 +143,10 @@ function StatsTabBody({
 
   if (tab.kind === "codex") {
     return analyticsEnabled ? (
-      <CodexActivity onDisable={() => onSetAnalytics(false)} />
+      <div className="flex flex-col gap-4">
+        <CodexActivity onDisable={() => onSetAnalytics(false)} />
+        <PlanReading kind={tab.kind} label={tab.label} />
+      </div>
     ) : (
       <AnalyticsOff onEnable={() => onSetAnalytics(true)} />
     );
@@ -153,14 +156,14 @@ function StatsTabBody({
     return analyticsEnabled ? (
       <div className="flex flex-col gap-4">
         <PlanAnalytics kind={tab.kind} label={tab.label} />
-        <PlanReading kind={tab.kind} />
+        <PlanReading kind={tab.kind} label={tab.label} />
       </div>
     ) : (
       <AnalyticsOff onEnable={() => onSetAnalytics(true)} />
     );
   }
 
-  return <PlanReading kind={tab.kind} />;
+  return <PlanReading kind={tab.kind} label={tab.label} />;
 }
 
 /**
@@ -391,14 +394,23 @@ function PlanAnalytics({
 }
 
 /**
- * Another plan's tab: its latest window reading, as stats.
+ * A plan's window reading, as its tab describes them.
  *
- * These providers publish no token history, so the reading is their stats;
- * the panel says so rather than presenting percentages as activity. The atom
- * is the same session-retained one Home reads, so a plan read once is not
- * fetched again just because Stats opened.
+ * For MiniMax/Kimi this is the whole tab — they publish no token history, and
+ * the panel says so rather than presenting percentages as activity. For the
+ * token-history providers it rides *below* the analytics: the windows answer
+ * "how full is the plan", the chart answers "what did the tokens do", and
+ * neither substitutes for the other. The atom is the same session-retained one
+ * Home reads, so a plan read once is not fetched again just because Stats
+ * opened.
  */
-function PlanReading({ kind }: { readonly kind: Ipc.ProviderKind }) {
+function PlanReading({
+  kind,
+  label,
+}: {
+  readonly kind: Ipc.ProviderKind;
+  readonly label: string;
+}) {
   const usage = useAtomValue(usageForAtom(kind));
   const refresh = useAtomRefresh(usageForAtom(kind));
   const nowMs = useClock();
@@ -414,8 +426,9 @@ function PlanReading({ kind }: { readonly kind: Ipc.ProviderKind }) {
         onRefresh={refresh}
       />
       <p className="-mt-3 text-xs text-muted-foreground">
-        This plan does not report token history; these are its latest window
-        readings.
+        {TOKEN_HISTORY_PROVIDERS.includes(kind)
+          ? `${label}'s latest window readings, reported beside its token activity.`
+          : "This plan does not report token history; these are its latest window readings."}
       </p>
       {AsyncResult.match(usage, {
         onInitial: () => (
