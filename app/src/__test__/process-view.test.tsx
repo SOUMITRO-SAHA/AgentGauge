@@ -11,7 +11,7 @@
  * test's cached answer instead of its own mock.
  */
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement, type ComponentType } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -156,6 +156,24 @@ it("says explicitly when a group has nothing running", async () => {
   expect(screen.getByTestId("process-empty-opencode")?.textContent).toContain(
     "No OpenCode processes",
   );
+});
+
+it("marks a re-read in flight instead of rendering it as fresh", async () => {
+  installDispatch([group("agentgauge"), group("codex"), group("opencode")]);
+  await renderView();
+
+  // Swap the mock for one that never answers, then refresh: the retained
+  // snapshot must stay on screen *and* say a re-read is running.
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: () =>
+      new Promise(() => {
+        // Deliberately unresolved: the read stays in flight.
+      }),
+  };
+  fireEvent.click(screen.getByTestId("refresh-processes-agentgauge"));
+
+  expect(await screen.findByTestId("process-refreshing")).toBeTruthy();
+  expect(screen.getByTestId("process-panel-agentgauge")).toBeTruthy();
 });
 
 it("offers no control beyond refresh, because the capability has no write", async () => {

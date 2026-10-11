@@ -9,8 +9,8 @@
  * a reason.
  *
  * Owns the process testids (`process-panel-*`, `process-row-*`,
- * `process-storage-*`, `process-readonly-note`) and the loading/error states
- * for the whole read.
+ * `process-storage-*`, `process-refreshing`, `process-readonly-note`) and
+ * the loading/error states for the whole read.
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
@@ -62,6 +62,14 @@ export function ProcessView({ visible }: { readonly visible: boolean }) {
         onFailure: () => <ProcessInsightsError />,
         onSuccess: (result) => (
           <>
+            {result.waiting ? (
+              <p
+                className="text-xs text-muted-foreground"
+                data-testid="process-refreshing"
+              >
+                Refreshing · showing the previous reading until it completes.
+              </p>
+            ) : null}
             {result.value.groups.map((group) => (
               <ProcessGroupPanel key={group.id} group={group} nowMs={nowMs} />
             ))}

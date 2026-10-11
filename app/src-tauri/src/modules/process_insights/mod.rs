@@ -137,9 +137,12 @@ fn normalized_stem(value: &str) -> String {
 
 /// Whether a process belongs to the given executable's group.
 ///
-/// Matches the executable path, the process name, or any command argument —
-/// CLIs launched through wrappers (`npx codex`, `bun opencode`) carry the
-/// tool in their arguments while the executable is the runtime.
+/// Matches the executable path or the process name directly. Command
+/// arguments count only when the process was launched by a known runtime
+/// (`npx codex`, `bun opencode`) — the runtime is the executable and the
+/// tool rides in its arguments. For anything else an argument is just a
+/// mention: `rg codex src/` takes the name as a bare argument and must not
+/// land in Codex's panel.
 fn matches_tool(process: &RawProcess, executable: &str) -> bool {
     if process
         .exe
@@ -151,10 +154,31 @@ fn matches_tool(process: &RawProcess, executable: &str) -> bool {
     if normalized_stem(&process.name) == executable {
         return true;
     }
+    launched_by_runtime(process)
+        && process
+            .cmd
+            .iter()
+            .any(|arg| normalized_stem(arg) == executable)
+}
+
+/// Launchers whose arguments may name the real tool being run.
+///
+/// Windows npm shims appear as `.cmd`, which [`normalized_stem`] does not
+/// strip, so they are listed explicitly. `cmd` is deliberately absent: its
+/// arguments are as often mentions as tool names, and Windows is not an
+/// exercised platform yet.
+const RUNTIME_LAUNCHERS: &[&str] = &[
+    "node", "bun", "bunx", "npx", "npm", "pnpm", "yarn", "deno", "sh", "bash", "zsh", "env",
+    "npx.cmd", "npm.cmd",
+];
+
+/// Whether the process was launched by a runtime that execs the real tool
+/// from its own arguments.
+fn launched_by_runtime(process: &RawProcess) -> bool {
     process
         .cmd
-        .iter()
-        .any(|arg| normalized_stem(arg) == executable)
+        .first()
+        .is_some_and(|first| RUNTIME_LAUNCHERS.contains(&normalized_stem(first).as_str()))
 }
 
 /// Whether a process is a root of the AgentGauge group: this very process,
@@ -325,9 +349,15 @@ fn measure_storage(root: &Path, components: &[(&str, &str)]) -> StorageReport {
 /// Unlike a tool's single home, the app owns two directories — its private
 /// app data and the legacy shared directory the widget and kickoff worker
 /// read — so each measured root is a row and the total spans them.
+///
+/// When nothing could be measured, the reason distinguishes the two ways
+/// that happens: roots that do not exist (nothing written yet) from roots
+/// that exist but could not be read. A permission failure must not render
+/// as "never wrote anything".
 fn agentgauge_storage(paths: &PathEnv) -> StorageReport {
     let mut rows = Vec::new();
     let mut total = Walked::default();
+    let mut any_unreadable = false;
 
     for (label, root) in [
         ("App data", paths.agentgauge_data.as_deref()),
@@ -343,12 +373,18 @@ fn agentgauge_storage(paths: &PathEnv) -> StorageReport {
                 bytes: walked.bytes,
                 file_count: walked.file_count,
             });
+        } else if root.exists() {
+            any_unreadable = true;
         }
     }
 
     if rows.is_empty() {
         return StorageReport::Absent {
-            reason: "AgentGauge has not written any data yet.".to_owned(),
+            reason: if any_unreadable {
+                "AgentGauge's data directories exist but could not be read.".to_owned()
+            } else {
+                "AgentGauge has not written any data yet.".to_owned()
+            },
         };
     }
 
@@ -360,6 +396,11 @@ fn agentgauge_storage(paths: &PathEnv) -> StorageReport {
 }
 
 /// One tracked tool's footprint, from its resolved data root.
+///
+/// An executable with no defined root reports exactly that. It must never
+/// fall through to another tool's directories: a future tracked tool that
+/// reaches here without storage support would otherwise display OpenCode's
+/// footprint under its own name, and nothing would look wrong.
 fn tool_storage(executable: &str, paths: &PathEnv) -> StorageReport {
     let (display_name, root, components) = match executable {
         "codex" => (
@@ -371,11 +412,16 @@ fn tool_storage(executable: &str, paths: &PathEnv) -> StorageReport {
             ]
             .as_slice(),
         ),
-        _ => (
+        "opencode" => (
             "OpenCode",
             paths.opencode_data.as_deref(),
             [("Session storage", "storage"), ("Logs", "log")].as_slice(),
         ),
+        other => {
+            return StorageReport::Absent {
+                reason: format!("No data directory is defined for `{other}` in this build."),
+            };
+        }
     };
 
     let Some(root) = root else {
@@ -577,6 +623,35 @@ mod tests {
     }
 
     #[test]
+    fn a_wrapper_path_argument_matches_through_a_runtime() {
+        let wrapped = RawProcess {
+            cmd: vec![
+                "/usr/local/bin/bun".into(),
+                "/usr/local/bin/opencode".into(),
+            ],
+            ..process(7, "bun", Some("/usr/local/bin/bun"))
+        };
+        assert!(matches_tool(&wrapped, "opencode"));
+    }
+
+    #[test]
+    fn an_unrelated_command_mentioning_the_tool_does_not_match() {
+        // `rg codex src/` takes the tool name as a bare argument; listing it
+        // under Codex would put an unrelated process in the panel.
+        let searcher = RawProcess {
+            cmd: vec!["/usr/local/bin/rg".into(), "codex".into(), "src/".into()],
+            ..process(4, "rg", Some("/usr/local/bin/rg"))
+        };
+        assert!(!matches_tool(&searcher, "codex"));
+
+        let grep = RawProcess {
+            cmd: vec!["/usr/bin/grep".into(), "codex".into(), "log.txt".into()],
+            ..process(5, "grep", Some("/usr/bin/grep"))
+        };
+        assert!(!matches_tool(&grep, "codex"));
+    }
+
+    #[test]
     fn a_similar_name_is_not_a_match() {
         let notes = process(4, "codex-notes", Some("/tmp/codex-notes.txt"));
         assert!(!matches_tool(&notes, "codex"));
@@ -742,6 +817,43 @@ mod tests {
             &[("Sessions", "sessions")],
         );
         assert!(matches!(report, StorageReport::Absent { .. }));
+    }
+
+    #[test]
+    fn a_tool_without_a_defined_root_reports_that_instead_of_another_tools() {
+        let report = tool_storage("claude", &PathEnv::default());
+        let StorageReport::Absent { reason } = report else {
+            panic!("expected an absent report");
+        };
+        assert!(reason.contains("claude"));
+        assert!(!reason.contains("opencode"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_app_root_is_not_claimed_as_never_written() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root("unreadable-app");
+        fs::write(root.join("settings.json"), vec![0u8; 2]).expect("writes settings");
+        let mut permissions = fs::metadata(&root).expect("reads metadata").permissions();
+        permissions.set_mode(0o000);
+        fs::set_permissions(&root, permissions).expect("locks the root");
+
+        let report = agentgauge_storage(&PathEnv {
+            agentgauge_data: Some(root.clone()),
+            ..PathEnv::default()
+        });
+
+        let mut permissions = fs::metadata(&root).expect("reads metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&root, permissions).expect("unlocks the root");
+
+        let StorageReport::Absent { reason } = report else {
+            panic!("expected an absent report for an unreadable root");
+        };
+        assert!(reason.contains("could not be read"));
+        assert!(!reason.contains("not written"));
     }
 
     #[test]
