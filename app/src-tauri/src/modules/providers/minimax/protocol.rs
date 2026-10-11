@@ -215,9 +215,92 @@ pub fn is_auth_refusal(payload: &str) -> bool {
     inner(payload).unwrap_or(false)
 }
 
+// ---------------------------------------------------------------------------
+// Scheduled kickoff
+// ---------------------------------------------------------------------------
+
+/// The reply budget for a kickoff. The prompt opens a window; the reply is
+/// context only.
+pub const KICKOFF_MAX_TOKENS: i64 = 32;
+
+/// Builds the chat-completions request body for the scheduled kickoff.
+///
+/// MiniMax has deprecated `max_tokens` in favour of `max_completion_tokens`,
+/// and buries business errors inside HTTP 200 under `base_resp` — both are
+/// this vendor's documented chat shape, so both are handled here.
+pub fn kickoff_body(model: &str, prompt: &str) -> String {
+    serde_json::json!({
+        "model": model,
+        "messages": [{ "role": "user", "content": prompt }],
+        "max_completion_tokens": KICKOFF_MAX_TOKENS,
+        "stream": false,
+    })
+    .to_string()
+}
+
+/// Extracts the agent reply text from a chat-completions response.
+///
+/// A `base_resp` status other than the vendor's zero is a failure even though
+/// the HTTP status was 200 — the same envelope rule the usage decoder keeps.
+pub fn decode_kickoff_reply(payload: &str) -> Result<String, Error> {
+    let wire: serde_json::Value = serde_json::from_str(payload).map_err(|error| {
+        Error::new(
+            ErrorKind::InvalidPayload,
+            format!("The kickoff reply could not be decoded ({error})."),
+        )
+    })?;
+
+    let status = wire["base_resp"]["status_code"].as_i64().unwrap_or(0);
+    if status != 0 {
+        let message = wire["base_resp"]["status_msg"]
+            .as_str()
+            .unwrap_or("unknown");
+        return Err(Error::new(
+            ErrorKind::ProviderError,
+            format!("MiniMax refused the kickoff ({status}: {message})."),
+        ));
+    }
+
+    Ok(wire["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_kickoff_body_uses_completion_tokens_not_max_tokens() {
+        // MiniMax deprecates `max_tokens`; the wrong field would be ignored.
+        let body = kickoff_body("MiniMax-M2", "hi");
+        let value: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(value["model"], "MiniMax-M2");
+        assert_eq!(value["max_completion_tokens"], KICKOFF_MAX_TOKENS);
+        assert!(value.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn the_kickoff_reply_is_the_first_choice_content() {
+        let payload =
+            r#"{"base_resp":{"status_code":0},"choices":[{"message":{"content":"Hello!"}}]}"#;
+        assert_eq!(decode_kickoff_reply(payload).expect("decodes"), "Hello!");
+    }
+
+    #[test]
+    fn a_business_error_inside_http_200_is_a_kickoff_failure() {
+        let payload =
+            r#"{"base_resp":{"status_code":1004,"status_msg":"invalid key"},"choices":[]}"#;
+        let err = decode_kickoff_reply(payload).expect_err("must fail");
+        assert_eq!(err.kind, ErrorKind::ProviderError);
+        assert!(err.message.contains("1004"));
+    }
+
+    #[test]
+    fn garbage_kickoff_replies_are_rejected() {
+        assert!(decode_kickoff_reply("not json").is_err());
+    }
 
     const REMAINS: &str = r#"{
         "model_remains": [

@@ -72,6 +72,16 @@ impl Provider for MinimaxProvider {
     fn send_ping(&self, _prompt: &str) -> Result<PingOutcome, Error> {
         Err(coding_plan::unsupported(ProviderKind::Minimax, "a ping"))
     }
+
+    fn send_kickoff(&self, prompt: &str, model: Option<&str>) -> Result<PingOutcome, Error> {
+        coding_plan::send_kickoff(
+            &Self::spec(),
+            prompt,
+            model,
+            protocol::kickoff_body,
+            protocol::decode_kickoff_reply,
+        )
+    }
 }
 
 #[cfg(test)]

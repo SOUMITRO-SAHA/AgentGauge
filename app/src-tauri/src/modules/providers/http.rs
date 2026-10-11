@@ -26,9 +26,28 @@ pub(crate) enum AuthHeader {
 /// state, because some vendors put business errors inside HTTP 200 and others
 /// inside 401s.
 pub(crate) fn get_json(url: &str, auth: &AuthHeader) -> Result<String, Error> {
+    request_json(|client| client.get(url), auth, None)
+}
+
+/// Performs a POST with a JSON body and returns the body text.
+///
+/// Used by the scheduled kickoff, whose request carries the model and prompt.
+/// The timeout is longer than the read path's because a chat completion waits
+/// on the model rather than on a quota counter.
+pub(crate) fn post_json(url: &str, auth: &AuthHeader, body: &str) -> Result<String, Error> {
+    request_json(|client| client.post(url), auth, Some(body))
+}
+
+/// The single outbound-request path every call shares: one vetted client, one
+/// timeout policy, one error shape.
+fn request_json(
+    build: impl FnOnce(reqwest::Client) -> reqwest::RequestBuilder,
+    auth: &AuthHeader,
+    body: Option<&str>,
+) -> Result<String, Error> {
     async_runtime::block_on(async move {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
+            .timeout(Duration::from_secs(if body.is_some() { 60 } else { 20 }))
             .connect_timeout(Duration::from_secs(10))
             .build()
             .map_err(|error| {
@@ -38,16 +57,20 @@ pub(crate) fn get_json(url: &str, auth: &AuthHeader) -> Result<String, Error> {
                 )
             })?;
 
-        let mut request = client.get(url);
+        let mut request = build(client);
         request = match auth {
             AuthHeader::Raw(key) => request.header(header::AUTHORIZATION, key),
             AuthHeader::Bearer(key) => request.bearer_auth(key),
         };
+        if let Some(body) = body {
+            request = request.header(header::CONTENT_TYPE, "application/json");
+            request = request.body(body.to_string());
+        }
 
         let response = request.send().await.map_err(|error| {
             Error::new(
                 ErrorKind::TransportClosed,
-                format!("The request to the plan's usage endpoint failed ({error})."),
+                format!("The request to the provider failed ({error})."),
             )
         })?;
 
@@ -55,14 +78,14 @@ pub(crate) fn get_json(url: &str, auth: &AuthHeader) -> Result<String, Error> {
         let body = response.text().await.map_err(|error| {
             Error::new(
                 ErrorKind::InvalidPayload,
-                format!("The usage reply could not be read ({error})."),
+                format!("The provider's reply could not be read ({error})."),
             )
         })?;
 
         if !status.is_success() {
             return Err(Error::new(
                 ErrorKind::ProviderError,
-                format!("The usage endpoint answered HTTP {status}."),
+                format!("The provider answered HTTP {status}."),
             ));
         }
         Ok(body)

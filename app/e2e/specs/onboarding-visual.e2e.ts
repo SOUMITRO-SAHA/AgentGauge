@@ -56,7 +56,7 @@ const STEPS = [
   },
   {
     title: "Watch without spending quota",
-    copy: "An optional, model-selected 'Hi' kickoff after a verified rollover is planned",
+    copy: "An optional kickoff can send one trivial 'Hi' with a model you choose about a minute after each 5-hour reset",
     demo: "demo-automation",
   },
 ];

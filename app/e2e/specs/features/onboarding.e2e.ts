@@ -287,13 +287,13 @@ describe("onboarding flow", () => {
     }
     await expectDisplayed('[data-testid="demo-automation"]');
     await expect($('[data-testid="onboarding"]')).toHaveText(
-      expect.stringContaining("An optional, model-selected 'Hi' kickoff after a verified rollover is planned"),
+      expect.stringContaining("An optional kickoff can send one trivial 'Hi' with a model you choose about a minute after each 5-hour reset"),
     );
     await expect($('[data-testid="onboarding"]')).toHaveText(
       expect.stringContaining("without sending prompts or using quota"),
     );
     await expect($('[data-testid="onboarding"]')).toHaveText(
-      expect.stringContaining("would consume usage and require your opt-in"),
+      expect.stringContaining("runs only if you opt in"),
     );
     await expectDisplayed('[data-testid="demo-automation"] svg[data-art-icon="watch"]');
     await expectDisplayed('[data-testid="demo-automation"] svg[data-art-icon="no-send"]');

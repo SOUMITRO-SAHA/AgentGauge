@@ -107,6 +107,18 @@ impl ProviderRegistry {
     pub fn ping(&self, kind: ProviderKind, prompt: &str) -> Result<PingOutcome, Error> {
         self.find(kind)?.send_ping(prompt)
     }
+
+    /// Sends the scheduled kickoff prompt. Same rule as [`Self::ping`], one
+    /// level stricter: the only legitimate caller is the kickoff scheduler,
+    /// which runs only for subscriptions the user explicitly opted in.
+    pub fn kickoff(
+        &self,
+        kind: ProviderKind,
+        prompt: &str,
+        model: Option<&str>,
+    ) -> Result<PingOutcome, Error> {
+        self.find(kind)?.send_kickoff(prompt, model)
+    }
 }
 
 #[cfg(test)]
@@ -138,9 +150,8 @@ mod tests {
         // A status row must never describe another provider's transport.
         let registry = ProviderRegistry::new();
         for status in registry.status() {
-            assert_eq!(
+            assert!(
                 registry.find(status.kind).is_ok(),
-                true,
                 "{} reported a status without a provider",
                 status.kind.as_str()
             );

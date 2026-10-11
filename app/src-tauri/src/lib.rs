@@ -15,6 +15,7 @@ use tauri::Manager;
 
 use modules::automation::AutomationRunner;
 use modules::commands::AppState;
+use modules::kickoff::KickoffStore;
 use modules::onboarding::OnboardingStore;
 use modules::providers::ProviderRegistry;
 use modules::settings::SettingsStore;
@@ -34,6 +35,14 @@ pub mod testkit {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The headless kickoff worker: the system scheduler starts this same
+    // binary with the `kickoff-worker` argument once a minute, with no app
+    // window, no Tauri runtime, and no renderer. It must be decided before
+    // anything Tauri is built — a worker tick must never open the UI.
+    if std::env::args().nth(1).as_deref() == Some("kickoff-worker") {
+        std::process::exit(run_kickoff_worker());
+    }
+
     // Built once here and shared: the watcher and the command dispatcher must
     // see the same provider instances, or a poll and a manual read could each
     // spawn their own app-server process.
@@ -43,6 +52,9 @@ pub fn run() {
     // there is no home directory, in which case the widget has nowhere to read
     // either and the setup guide says so.
     let widget_snapshots = SnapshotStore::from_env();
+    // The kickoff schedule lives beside the widget snapshot: the headless
+    // worker reads the same file without this app running.
+    let kickoff_store = KickoffStore::from_env();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -72,13 +84,50 @@ pub fn run() {
                 ),
             };
 
+            let app_registry = Arc::clone(&registry);
+            let has_kickoff_store = kickoff_store.is_some();
+
             app.manage(AppState {
                 registry,
                 automation,
                 onboarding,
                 widget_snapshots,
                 settings,
+                kickoff: kickoff_store,
             });
+
+            // While the app is open it runs the kickoff tick itself, so a
+            // subscription is never silently unscheduled just because the
+            // system agent is missing or between launches. The system agent
+            // (installed on opt-in) carries the same tick when the app is
+            // closed; the two share one schedule file, and a near-simultaneous
+            // double fire costs one extra trivial prompt, never a wrong
+            // schedule — each executor re-anchors the same window.
+            if has_kickoff_store {
+                let registry = app_registry;
+                std::thread::Builder::new()
+                    .name("agentgauge-kickoff".to_string())
+                    .spawn(move || {
+                        let kick = |kind: crate::shared::domain::ProviderKind,
+                                    prompt: &str,
+                                    model: Option<&str>| {
+                            registry.kickoff(kind, prompt, model)
+                        };
+                        loop {
+                            std::thread::sleep(std::time::Duration::from_secs(30));
+                            let Some(store) = KickoffStore::from_env() else {
+                                return;
+                            };
+                            let now = crate::shared::clock::Clock::now_ms(
+                                &crate::shared::clock::SystemClock,
+                            );
+                            if let Err(error) = modules::kickoff::worker::tick(&store, now, &kick) {
+                                eprintln!("agentgauge: kickoff tick failed: {}", error.message);
+                            }
+                        }
+                    })
+                    .ok();
+            }
             Ok(())
         })
         // One command implements the whole request/response protocol defined in
@@ -104,4 +153,37 @@ pub fn run() {
             modules::app_icon::install();
         }
     });
+}
+
+/// One headless kickoff tick, from the system scheduler.
+///
+/// Exit code 0 covers every tick that did its job — including "nothing was
+/// due" and "a provider refused this attempt", both of which are recorded in
+/// the schedule file for the UI to show. Only a tick that could not do its
+/// job at all (unreadable schedule) exits non-zero, so launchd's own logging
+/// stays meaningful.
+fn run_kickoff_worker() -> i32 {
+    let Some(store) = KickoffStore::from_env() else {
+        eprintln!("agentgauge: no home directory; the kickoff worker cannot run.");
+        return 0;
+    };
+
+    let registry = ProviderRegistry::new();
+    let now = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
+    let kick = |kind: crate::shared::domain::ProviderKind, prompt: &str, model: Option<&str>| {
+        registry.kickoff(kind, prompt, model)
+    };
+
+    match modules::kickoff::worker::tick(&store, now, &kick) {
+        Ok(fired) => {
+            if fired > 0 {
+                eprintln!("agentgauge: kickoff worker fired {fired} attempt(s).");
+            }
+            0
+        }
+        Err(error) => {
+            eprintln!("agentgauge: kickoff worker failed: {}", error.message);
+            1
+        }
+    }
 }

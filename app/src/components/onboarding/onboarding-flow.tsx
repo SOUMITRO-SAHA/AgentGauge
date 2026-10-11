@@ -86,7 +86,7 @@ const STEPS: ReadonlyArray<{
     id: "automation",
     title: "Watch without spending quota",
     blurb:
-      "The current monitor checks Codex without sending prompts or using quota. An optional, model-selected 'Hi' kickoff after a verified rollover is planned; it would consume usage and require your opt-in.",
+      "The monitor checks Codex without sending prompts or using quota. An optional kickoff can send one trivial 'Hi' with a model you choose about a minute after each 5-hour reset; it uses a little quota and runs only if you opt in.",
     Art: AutomationArt,
     demo: "demo-automation",
   },

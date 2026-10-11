@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::modules::automation::AutomationState;
 use crate::modules::cli_detection::CliToolStatus;
+use crate::modules::kickoff::KickoffOverview;
 use crate::modules::onboarding::{OnboardingProgress, OnboardingStep};
 use crate::modules::widget::SystemWidgetStatus;
 use crate::shared::domain::{
@@ -65,6 +66,18 @@ pub enum AppRequest {
     StopAutomation,
     /// Clears a detected rollover once the UI has shown it.
     AcknowledgeRollover,
+    /// The scheduled kickoff's per-subscription state and scheduler status.
+    KickoffState,
+    /// Opts one subscription into (or out of) the scheduled kickoff.
+    ///
+    /// This is the explicit quota-spending opt-in: nothing may schedule a
+    /// prompt without a `true` that arrived through this request.
+    SetKickoffEnabled { kind: ProviderKind, enabled: bool },
+    /// Selects the model the scheduled kickoff uses for one subscription.
+    SetKickoffModel {
+        kind: ProviderKind,
+        model_id: String,
+    },
     /// Onboarding progress, shaped for a progress indicator.
     OnboardingProgress,
     /// Persists onboarding progress.
@@ -118,6 +131,9 @@ impl AppRequest {
             Self::StartAutomation => "startAutomation",
             Self::StopAutomation => "stopAutomation",
             Self::AcknowledgeRollover => "acknowledgeRollover",
+            Self::KickoffState => "kickoffState",
+            Self::SetKickoffEnabled { .. } => "setKickoffEnabled",
+            Self::SetKickoffModel { .. } => "setKickoffModel",
             Self::OnboardingProgress => "onboardingProgress",
             Self::SetOnboardingStep { .. } => "setOnboardingStep",
             Self::SystemWidgetStatus => "systemWidgetStatus",
@@ -163,6 +179,11 @@ pub enum AppResponse {
     },
     Automation {
         state: AutomationState,
+    },
+    /// The scheduled kickoff's overview: per-subscription state plus the
+    /// system scheduler's status.
+    Kickoff {
+        state: KickoffOverview,
     },
     Onboarding {
         progress: OnboardingProgress,
@@ -301,6 +322,15 @@ mod tests {
             AppRequest::AcknowledgeRollover,
             AppRequest::OnboardingProgress,
             AppRequest::OpenCodeSubscriptions,
+            AppRequest::KickoffState,
+            AppRequest::SetKickoffEnabled {
+                kind: ProviderKind::Codex,
+                enabled: false,
+            },
+            AppRequest::SetKickoffModel {
+                kind: ProviderKind::Codex,
+                model_id: "gpt-6-luna".into(),
+            },
             AppRequest::SetOnboardingStep {
                 step: OnboardingStep::Done,
                 dismissed: false,
@@ -374,6 +404,15 @@ mod tests {
             AppRequest::AcknowledgeRollover,
             AppRequest::OnboardingProgress,
             AppRequest::OpenCodeSubscriptions,
+            AppRequest::KickoffState,
+            AppRequest::SetKickoffEnabled {
+                kind: ProviderKind::Codex,
+                enabled: false,
+            },
+            AppRequest::SetKickoffModel {
+                kind: ProviderKind::Codex,
+                model_id: "gpt-6-luna".into(),
+            },
             AppRequest::SetOnboardingStep {
                 step: OnboardingStep::Done,
                 dismissed: false,

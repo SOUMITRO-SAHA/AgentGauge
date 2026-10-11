@@ -14,6 +14,7 @@ use tauri::State;
 
 use crate::modules::automation::AutomationRunner;
 use crate::modules::cli_detection;
+use crate::modules::kickoff::{self, KickoffStore};
 use crate::modules::onboarding::{
     OnboardingProgress, OnboardingState, OnboardingStep, OnboardingStore,
 };
@@ -32,6 +33,9 @@ pub struct AppState {
     pub onboarding: OnboardingStore,
     pub widget_snapshots: Option<SnapshotStore>,
     pub settings: SettingsStore,
+    /// The kickoff schedule's home. `None` only when there is no home
+    /// directory, in which case every kickoff capability reports unsupported.
+    pub kickoff: Option<KickoffStore>,
 }
 
 /// The single entry point for every renderer capability.
@@ -76,12 +80,14 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
         AppRequest::ReadUsage => {
             let snapshots = read_all(state);
             publish_snapshot(state, &snapshots);
+            sync_reset_times(state, &snapshots);
             Ok(AppResponse::Usage { snapshots })
         }
 
         AppRequest::ReadUsageFor { provider } => {
             let snapshots = vec![state.registry.usage(provider)?];
             publish_snapshot(state, &snapshots);
+            sync_reset_times(state, &snapshots);
             Ok(AppResponse::Usage { snapshots })
         }
 
@@ -135,6 +141,46 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
             })
         }
 
+        AppRequest::KickoffState => Ok(AppResponse::Kickoff {
+            state: kickoff::overview(state.kickoff.as_ref()),
+        }),
+
+        AppRequest::SetKickoffEnabled { kind, enabled } => {
+            let store = require_kickoff_store(state)?;
+            store.update(kind, |mut sub| {
+                sub.set_enabled(enabled, now_millis());
+                sub
+            })?;
+            // The system scheduler exists exactly while a sub is opted in:
+            // enabling installs it, the last disable removes it. A failure is
+            // propagated — silently running (or not running) a quota-spending
+            // timer is the one thing this feature must never do.
+            kickoff::agent::install(
+                &std::env::current_exe().unwrap_or_else(|_| "agentgauge".into()),
+                &store.load(),
+            )?;
+            Ok(AppResponse::Kickoff {
+                state: kickoff::overview(state.kickoff.as_ref()),
+            })
+        }
+
+        AppRequest::SetKickoffModel { kind, model_id } => {
+            let store = require_kickoff_store(state)?;
+            if !kickoff::is_known_model(kind, &model_id) {
+                return Err(Error::invalid_request(format!(
+                    "`{model_id}` is not a model this build offers for {}.",
+                    kind.display_name()
+                )));
+            }
+            store.update(kind, |mut sub| {
+                sub.set_model(Some(model_id));
+                sub
+            })?;
+            Ok(AppResponse::Kickoff {
+                state: kickoff::overview(state.kickoff.as_ref()),
+            })
+        }
+
         AppRequest::OnboardingProgress => Ok(AppResponse::Onboarding {
             progress: progress_of(state.onboarding.load()),
         }),
@@ -171,6 +217,50 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
             let next = state.settings.load().with_analytics_enabled(enabled);
             state.settings.save(&next)?;
             Ok(AppResponse::UiState { state: next })
+        }
+    }
+}
+
+/// The clock at the moment a kickoff decision is made.
+fn now_millis() -> i64 {
+    crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock)
+}
+
+/// The kickoff store, or the honest refusal when there is nowhere to keep a
+/// schedule.
+fn require_kickoff_store(state: &AppState) -> Result<&KickoffStore, Error> {
+    state.kickoff.as_ref().ok_or_else(|| {
+        Error::new(
+            crate::shared::error::ErrorKind::InvalidRequest,
+            "No home directory is available, so the kickoff schedule cannot be stored.",
+        )
+    })
+}
+
+/// Folds every fresh reset time into the kickoff schedule, so the worker —
+/// which may run while the app is closed — always has the latest window
+/// boundary without polling the providers itself.
+///
+/// A schedule write that fails must not break the read the user asked for,
+/// so this is reported and not propagated.
+fn sync_reset_times(state: &AppState, snapshots: &[UsageSnapshot]) {
+    let Some(store) = state.kickoff.as_ref() else {
+        return;
+    };
+    for snapshot in snapshots {
+        let Some(resets_at) = snapshot.five_hour.as_ref().and_then(|w| w.resets_at) else {
+            continue;
+        };
+        let now = now_millis();
+        let result = store.update(snapshot.provider, |mut sub| {
+            sub.apply_reset(resets_at, now);
+            sub
+        });
+        if let Err(error) = result {
+            eprintln!(
+                "agentgauge: could not sync the kickoff schedule: {}",
+                error.message
+            );
         }
     }
 }
@@ -264,9 +354,17 @@ fn validate(request: &AppRequest) -> Result<(), Error> {
         AppRequest::SendPing { prompt: Some(text) } if text.chars().count() > MAX_PROMPT_CHARS => {
             Err(Error::invalid_request("The ping message is too long."))
         }
+        AppRequest::SetKickoffModel { model_id, .. }
+            if model_id.is_empty() || model_id.chars().count() > MAX_MODEL_ID_CHARS =>
+        {
+            Err(Error::invalid_request("The model id is not a model id."))
+        }
         _ => Ok(()),
     }
 }
+
+/// Longest model id accepted, in characters.
+const MAX_MODEL_ID_CHARS: usize = 64;
 
 #[cfg(test)]
 mod tests {
@@ -298,6 +396,23 @@ mod tests {
     }
 
     #[test]
+    fn an_over_long_model_id_is_rejected_at_the_boundary() {
+        let request = AppRequest::SetKickoffModel {
+            kind: ProviderKind::Codex,
+            model_id: "x".repeat(MAX_MODEL_ID_CHARS + 1),
+        };
+        assert_eq!(
+            validate(&request).expect_err("must reject").kind,
+            ErrorKind::InvalidRequest
+        );
+        assert!(validate(&AppRequest::SetKickoffModel {
+            kind: ProviderKind::Codex,
+            model_id: "gpt-6-luna".into(),
+        })
+        .is_ok());
+    }
+
+    #[test]
     fn every_other_request_passes_validation() {
         let all = [
             AppRequest::Hello,
@@ -316,6 +431,11 @@ mod tests {
             AppRequest::StartAutomation,
             AppRequest::StopAutomation,
             AppRequest::AcknowledgeRollover,
+            AppRequest::KickoffState,
+            AppRequest::SetKickoffEnabled {
+                kind: ProviderKind::Codex,
+                enabled: true,
+            },
             AppRequest::OnboardingProgress,
             AppRequest::SystemWidgetStatus,
         ];

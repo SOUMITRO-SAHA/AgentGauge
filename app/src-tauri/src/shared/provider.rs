@@ -55,6 +55,14 @@ pub trait Provider: Send + Sync {
     /// This consumes quota; it exists for an explicitly enabled automation, not
     /// as a side effect of reading.
     fn send_ping(&self, prompt: &str) -> Result<PingOutcome, Error>;
+
+    /// Sends the scheduled kickoff prompt with an explicit model.
+    ///
+    /// `None` selects the provider's cheapest default. Like
+    /// [`Provider::send_ping`] this spends quota: only the kickoff scheduler —
+    /// behind the user's explicit per-subscription opt-in — may call it on a
+    /// timer.
+    fn send_kickoff(&self, prompt: &str, model: Option<&str>) -> Result<PingOutcome, Error>;
 }
 
 /// The result of a ping, including the fresh reading that followed it.

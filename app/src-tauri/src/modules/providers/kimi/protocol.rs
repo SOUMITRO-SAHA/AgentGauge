@@ -212,9 +212,67 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
+// ---------------------------------------------------------------------------
+// Scheduled kickoff
+// ---------------------------------------------------------------------------
+
+/// The reply budget for a kickoff. The prompt opens a window; the reply is
+/// context only.
+pub const KICKOFF_MAX_TOKENS: i64 = 32;
+
+/// Builds the chat-completions request body for the scheduled kickoff.
+///
+/// The coding API takes the OpenAI-compatible chat shape; the budget keeps the
+/// answer — which is context only, the request's job is to open the window —
+/// at its floor.
+pub fn kickoff_body(model: &str, prompt: &str) -> String {
+    serde_json::json!({
+        "model": model,
+        "messages": [{ "role": "user", "content": prompt }],
+        "max_tokens": KICKOFF_MAX_TOKENS,
+        "stream": false,
+    })
+    .to_string()
+}
+
+/// Extracts the agent reply text from a chat-completions response.
+pub fn decode_kickoff_reply(payload: &str) -> Result<String, Error> {
+    let wire: serde_json::Value = serde_json::from_str(payload).map_err(|error| {
+        Error::new(
+            ErrorKind::InvalidPayload,
+            format!("The kickoff reply could not be decoded ({error})."),
+        )
+    })?;
+    Ok(wire["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_kickoff_body_is_the_documented_chat_shape_at_its_smallest() {
+        let body = kickoff_body("k3-256k", "hi");
+        let value: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(value["model"], "k3-256k");
+        assert_eq!(value["messages"][0]["content"], "hi");
+        assert_eq!(value["max_tokens"], KICKOFF_MAX_TOKENS);
+        assert_eq!(value["stream"], false);
+    }
+
+    #[test]
+    fn the_kickoff_reply_is_the_first_choice_content() {
+        let payload = r#"{"choices":[{"message":{"content":"Hello!"}}]}"#;
+        assert_eq!(decode_kickoff_reply(payload).expect("decodes"), "Hello!");
+    }
+
+    #[test]
+    fn garbage_kickoff_replies_are_rejected() {
+        assert!(decode_kickoff_reply("not json").is_err());
+    }
 
     const USAGES: &str = r#"{
         "usages": {

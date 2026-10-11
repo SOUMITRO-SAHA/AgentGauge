@@ -177,20 +177,27 @@ impl Provider for CodexProvider {
     }
 
     fn send_ping(&self, prompt: &str) -> Result<PingOutcome, Error> {
+        self.send_kickoff(prompt, None)
+    }
+
+    fn send_kickoff(&self, prompt: &str, model: Option<&str>) -> Result<PingOutcome, Error> {
         let trimmed: String = prompt.chars().take(MAX_REPLY_CHARS).collect();
 
         let outcome = self.with_server(|server| {
             // A thread that cannot touch the user's files, cannot ask for
             // approval, and is not persisted to disk.
-            let started = server.request(
-                "thread/start",
-                Some(serde_json::json!({
-                    "cwd": PING_CWD,
-                    "approvalPolicy": "never",
-                    "sandbox": "read-only",
-                    "ephemeral": true,
-                })),
-            )?;
+            let mut thread_params = serde_json::json!({
+                "cwd": PING_CWD,
+                "approvalPolicy": "never",
+                "sandbox": "read-only",
+                "ephemeral": true,
+            });
+            // The protocol names the model at thread start (`ThreadStartParams.model`);
+            // the effort stays at its cheapest tier regardless of model.
+            if let Some(model) = model {
+                thread_params["model"] = serde_json::Value::String(model.to_string());
+            }
+            let started = server.request("thread/start", Some(thread_params))?;
 
             let thread_id = parse_nested_id(&started, "thread").ok_or_else(|| {
                 Error::invalid_payload("Codex did not return a thread id.".to_string())

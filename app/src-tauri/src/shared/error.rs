@@ -37,7 +37,8 @@ impl ErrorKind {
     ///
     /// Kept as an explicit function, and asserted against serde's own output in
     /// the tests below, so a client matching on the string and a log line
-    /// reading the enum can never disagree.
+    /// reading the enum can never disagree. Tests are the only readers today.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ProviderMissing => "providerMissing",
@@ -99,6 +100,9 @@ impl Error {
         Self::new(ErrorKind::InvalidRequest, message)
     }
 
+    /// The widget surface's own kind. No caller today; kept so the taxonomy
+    /// stays complete and the day it is needed the constructor is here.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn widget(message: impl Into<String>) -> Self {
         Self::new(ErrorKind::Widget, message)
     }
