@@ -685,13 +685,15 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
             request.type === "setKickoffEnabled" &&
             typeof request.kind === "string"
           ) {
-            w.__ismKickoffEnabled__[request.kind] =
-              request.enabled === true;
+            w.__ismKickoffEnabled__[request.kind] = request.enabled === true;
           }
           const enabled = w.__ismKickoffEnabled__;
           const kickoff = data.kickoff ?? {};
           const kinds = ["codex", "zai", "minimax", "kimi"];
-          const models: Record<string, Array<{ id: string; label: string; cheapest: boolean }>> = {
+          const models: Record<
+            string,
+            Array<{ id: string; label: string; cheapest: boolean }>
+          > = {
             codex: [
               { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", cheapest: false },
               { id: "gpt-6-luna", label: "GPT-6 Luna", cheapest: true },
@@ -700,7 +702,9 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               { id: "glm-5.3", label: "GLM-5.3", cheapest: false },
               { id: "glm-5.3-flash", label: "GLM-5.3 Flash", cheapest: true },
             ],
-            minimax: [{ id: "MiniMax-M2", label: "MiniMax M2", cheapest: true }],
+            minimax: [
+              { id: "MiniMax-M2", label: "MiniMax M2", cheapest: true },
+            ],
             kimi: [{ id: "k3-256k", label: "K3 256K", cheapest: true }],
           };
           return {
@@ -720,11 +724,11 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                   nextKickAt: isEnabled
                     ? Date.now() + (kickoff.nextKickInMs ?? 3_600_000)
                     : null,
-                  lastKickAt: kickoff.lastAccepted === undefined ? null : Date.now(),
+                  lastKickAt:
+                    kickoff.lastAccepted === undefined ? null : Date.now(),
                   lastAccepted: kickoff.lastAccepted ?? null,
-                  lastDetail: kickoff.lastAccepted === undefined
-                    ? null
-                    : "Hello!",
+                  lastDetail:
+                    kickoff.lastAccepted === undefined ? null : "Hello!",
                 };
               }),
               scheduler: {
@@ -1228,7 +1232,8 @@ export async function dashboardWithZaiAnalytics(): Promise<void> {
 }
 
 /** The same dashboard, with the Z.AI reading arriving late. */
-export async function dashboardWithSlowPlans(): Promise<void> {  await boot({
+export async function dashboardWithSlowPlans(): Promise<void> {
+  await boot({
     visible: false,
     usage: liveSnapshot(),
     subscriptions: [

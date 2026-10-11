@@ -30,9 +30,7 @@ after(() => {
 });
 
 /** Boots onto Home and re-reads, so the fixture's provider set is what shows. */
-async function bootOnHome(
-  boot: () => Promise<void>,
-): Promise<void> {
+async function bootOnHome(boot: () => Promise<void>): Promise<void> {
   await boot();
   await gotoView("home");
   await clickDisplayed('[data-testid="refresh-usage"]');
@@ -102,6 +100,27 @@ describe("usage tabs", () => {
     await expect($('[data-testid="plan"]')).toHaveText("Pro");
     const skeletonAfter = await $$('[data-testid="usage-skeleton"]');
     expect(skeletonAfter).toHaveLength(0);
+  });
+
+  it("reserves the whole panel while loading, so nothing jumps when it lands", async () => {
+    await bootOnHome(dashboardWithSlowPlans);
+
+    await clickDisplayed('[data-testid="usage-tab-zai"]');
+    await expectDisplayed('[data-testid="usage-skeleton"]');
+
+    // A skeleton shorter than the reading it becomes makes the panel collapse
+    // and then snap back. The Z.AI panel is a status row, a headline, and two
+    // windows, so the skeleton must stand in for all three.
+    await expectDisplayed('[data-testid="usage-skeleton-status"]');
+    await expectDisplayed('[data-testid="usage-skeleton-headline"]');
+    const skeletonWindows = await $$(
+      '[data-testid="usage-skeleton"] [data-testid="window-skeleton"]',
+    );
+    expect(skeletonWindows).toHaveLength(2);
+
+    await expect($('[data-testid="plan"]')).toHaveText("Pro");
+    const loadedWindows = await $$('[data-testid="window-bar-row"]');
+    expect(loadedWindows).toHaveLength(2);
   });
 
   it("renders a revisited tab from its retained reading without reloading", async () => {

@@ -18,11 +18,7 @@ import * as Cause from "effect/Cause";
 import { useEffect, useRef } from "react";
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 
-import {
-  selectedTabAtom,
-  subscriptionsAtom,
-  usageForAtom,
-} from "~/atoms";
+import { selectedTabAtom, subscriptionsAtom, usageForAtom } from "~/atoms";
 import { PanelHeader } from "~/components/dashboard/panel";
 import { KickoffSection } from "~/components/usage/kickoff-section";
 import { FreshnessPill } from "~/components/usage/provider-status-card";
@@ -66,7 +62,9 @@ export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
     }),
   );
 
-  const active = tabs.some((tab) => tab.value === selected) ? selected : "codex";
+  const active = tabs.some((tab) => tab.value === selected)
+    ? selected
+    : "codex";
 
   // The tab set refreshes with the reading it belongs to: a plan connected
   // while the app was open appears on the next refresh, not on a relaunch.
@@ -77,11 +75,7 @@ export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <PanelHeader
-        title="Usage"
-        testId="refresh-usage"
-        onRefresh={refresh}
-      />
+      <PanelHeader title="Usage" testId="refresh-usage" onRefresh={refresh} />
       <Tabs
         value={active}
         onValueChange={setSelected}
@@ -174,8 +168,8 @@ function PlanTabBody({
         className="text-sm text-muted-foreground"
         data-testid="usage-plan-unreadable"
       >
-        This plan is connected in OpenCode, but AgentGauge cannot read its
-        usage yet.
+        This plan is connected in OpenCode, but AgentGauge cannot read its usage
+        yet.
       </p>
     );
   }
@@ -268,17 +262,38 @@ function ProviderUsage({
 }
 
 /**
- * The shape of a reading while it is being read, so a first visit fills the
- * space the reading will occupy instead of collapsing the panel to one line.
+ * The shape of a reading while it is being read.
+ *
+ * This stands in for the whole panel — status row, headline, and one row per
+ * window — not a placeholder line. A skeleton shorter than the reading it
+ * becomes makes the container collapse and then snap back when the data lands,
+ * which is the same visual disruption as blocking the switch. The window count
+ * mirrors the two windows a coding plan reports (its rolling window and its
+ * weekly cap); a provider reporting a different count is corrected the instant
+ * its reading arrives.
  */
 function UsageLoadingSkeleton() {
   return (
     <div className="flex flex-col gap-4" data-testid="usage-skeleton">
-      <div className="flex items-center gap-2">
+      <div
+        className="flex flex-wrap items-center gap-2"
+        data-testid="usage-skeleton-status"
+      >
         <Skeleton className="h-5 w-20 rounded-full" />
         <Skeleton className="h-4 w-14" />
       </div>
-      <UsageWindowSkeleton />
+      <div
+        className="flex flex-col gap-2"
+        data-testid="usage-skeleton-headline"
+      >
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-10 w-32" />
+        <Skeleton className="h-4 w-52" />
+      </div>
+      <div className="flex flex-col gap-5">
+        <UsageWindowSkeleton />
+        <UsageWindowSkeleton />
+      </div>
     </div>
   );
 }
@@ -303,16 +318,9 @@ function SnapshotBody({
     <div className="flex flex-col gap-4">
       <SnapshotHeader snapshot={snapshot} nowMs={nowMs} />
       {headline && (
-        <Headline
-          window={headline}
-          snapshot={snapshot}
-          nowMs={nowMs}
-        />
+        <Headline window={headline} snapshot={snapshot} nowMs={nowMs} />
       )}
-      <UsageWindowList
-        result={AsyncResult.success(snapshot)}
-        nowMs={nowMs}
-      />
+      <UsageWindowList result={AsyncResult.success(snapshot)} nowMs={nowMs} />
     </div>
   );
 }
