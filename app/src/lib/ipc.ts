@@ -161,6 +161,8 @@ export const PlanKind = Schema.Literals([
   "pro",
   "proLite",
   "proMax",
+  "lite",
+  "max",
   "team",
   "business",
   "enterprise",
@@ -203,6 +205,20 @@ export const UsageSnapshot = Schema.Struct({
 });
 export type UsageSnapshot = typeof UsageSnapshot.Type;
 
+/**
+ * One model's share of a provider-reported breakdown.
+ *
+ * `id` is the normalised catalog slug (the price-list join key); the provider
+ * display name rides beside it.
+ */
+export const ModelUsage = Schema.Struct({
+  id: Schema.String,
+  displayName: Schema.String,
+  tokens: Schema.Number,
+  requests: Schema.NullOr(Schema.Number),
+});
+export type ModelUsage = typeof ModelUsage.Type;
+
 export const AccountUsage = Schema.Struct({
   fetchedAt: Schema.Number,
   summary: Schema.Struct({
@@ -219,6 +235,11 @@ export const AccountUsage = Schema.Struct({
       tokens: Schema.NullOr(Schema.Number),
     }),
   ),
+  /**
+   * The per-model breakdown, when the provider reports one. Empty means the
+   * provider totals only — a real answer, not a failed read.
+   */
+  models: Schema.Array(ModelUsage),
   /**
    * Days the reported window covers, when the provider reports a bounded span
    * rather than the account's lifetime. `null` means lifetime, so the cards

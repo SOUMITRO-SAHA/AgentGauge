@@ -84,6 +84,7 @@ function codexAccountUsage() {
     },
     windowDays: null,
     dailyUsageBuckets: [{ startDate: "2026-10-07", tokens: 2300 }],
+    models: [],
   };
 }
 
@@ -102,6 +103,20 @@ function zaiAccountUsage() {
     dailyUsageBuckets: [
       { startDate: "2026-10-08", tokens: 1_470_000_000 },
       { startDate: "2026-10-09", tokens: 275_000_000 },
+    ],
+    models: [
+      {
+        id: "glm-5.3",
+        displayName: "GLM-5.3",
+        tokens: 8_472_310_570,
+        requests: null,
+      },
+      {
+        id: "glm-5.3-flash",
+        displayName: "GLM-5.3-Flash",
+        tokens: 13_227_689_430,
+        requests: null,
+      },
     ],
   };
 }
