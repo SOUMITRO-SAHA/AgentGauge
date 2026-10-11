@@ -579,7 +579,7 @@ function AnalyticsContent({
               ? `Tokens in ${usage.windowDays} days`
               : "Lifetime tokens"
           }
-          value={formatCount(usage.summary.totalTokens)}
+          tokenValue={usage.summary.totalTokens}
           testId="stats-total-tokens"
         />
         {usage.summary.totalRequests !== null ? (
@@ -595,7 +595,7 @@ function AnalyticsContent({
         ) : null}
         <MetricCard
           label="Peak day"
-          value={formatCount(usage.summary.peakDailyTokens)}
+          tokenValue={usage.summary.peakDailyTokens}
           testId="stats-peak-daily"
         />
         <MetricCard
@@ -684,12 +684,15 @@ function AnalyticsContent({
 function MetricCard({
   label,
   value,
+  tokenValue,
   testId,
   icon,
   detail,
 }: {
   readonly label: string;
-  readonly value: string;
+  readonly value?: string;
+  /** Token counts render compact-first, hover the exact number, click to pin. */
+  readonly tokenValue?: number | null;
   readonly testId: string;
   readonly icon?: ReactNode;
   readonly detail?: string;
@@ -700,17 +703,75 @@ function MetricCard({
         {icon}
         {label}
       </span>
-      <span
-        className="text-xl font-semibold tabular text-foreground"
-        data-testid={testId}
-      >
-        {value}
-      </span>
+      {tokenValue !== undefined ? (
+        <TokenCount value={tokenValue} testId={testId} />
+      ) : (
+        <span
+          className="text-xl font-semibold tabular text-foreground"
+          data-testid={testId}
+        >
+          {value}
+        </span>
+      )}
       {detail ? (
         <span className="text-xs text-muted-foreground">{detail}</span>
       ) : null}
     </div>
   );
+}
+
+/**
+ * A token count that opens compact — millions and billions, not a digit wall.
+ *
+ * Hovering previews the exact number, and clicking pins this one card to the
+ * exact form (a second click returns to compact). Each card holds its own
+ * state on purpose: the user toggles one number, never the whole view.
+ */
+function TokenCount({
+  value,
+  testId,
+}: {
+  readonly value: number | null;
+  readonly testId: string;
+}) {
+  const [pinned, setPinned] = useState(false);
+  const [hovering, setHovering] = useState(false);
+
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      aria-pressed={pinned}
+      title={formatCount(value)}
+      className="cursor-pointer rounded-sm text-left text-xl font-semibold tabular text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+      onClick={() => setPinned((current) => !current)}
+    >
+      {pinned || hovering ? formatCount(value) : formatCompactCount(value)}
+    </button>
+  );
+}
+
+/**
+ * The compact token form. Counts under a million stay grouped — there is
+ * nothing to gain from "0.4M" over "412,300".
+ */
+function formatCompactCount(value: number | null): string {
+  if (value === null) return "Not reported";
+  if (value >= 1_000_000_000) {
+    return `${compactNumber(value / 1_000_000_000)}B`;
+  }
+  if (value >= 1_000_000) {
+    return `${compactNumber(value / 1_000_000)}M`;
+  }
+  return formatCount(value);
+}
+
+function compactNumber(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function formatAbsolute(ms: number): string {

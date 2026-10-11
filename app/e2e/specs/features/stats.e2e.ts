@@ -52,7 +52,15 @@ describe("stats", () => {
         ).length ?? 0,
     }));
     expect(values.historyReads).toBeGreaterThan(0);
-    expect(values.total?.replace(/\D/g, "")).toBe("1234567");
+    // The token count opens compact; clicking pins the exact number.
+    expect(/1[.,]23M/.test(values.total ?? "")).toBe(true);
+    await clickDisplayed('[data-testid="stats-total-tokens"]');
+    const exact = await browser.execute(
+      () =>
+        document.querySelector('[data-testid="stats-total-tokens"]')
+          ?.textContent,
+    );
+    expect(exact?.replace(/\D/g, "")).toBe("1234567");
     await expectDisplayed('[data-testid="stats-daily-chart"]');
     await expectDisplayed('[data-testid="stats-current-streak"]');
     await expectDisplayed('[data-testid="stats-analytics-source"]');
@@ -125,8 +133,18 @@ describe("stats", () => {
         document.querySelectorAll('[data-testid="stats-plan-reading"]'),
       ).some((el) => (el as HTMLElement).offsetParent !== null),
     }));
-    expect(analytics.tokens?.replace(/\D/g, "")).toBe("21700000000");
+    expect(analytics.tokens ? /21[.,]7B/.test(analytics.tokens) : false).toBe(
+      true,
+    );
     expect(analytics.calls?.replace(/\D/g, "")).toBe("10419");
+    // Clicking the token count pins the exact number, this card only.
+    await clickDisplayed('[data-testid="stats-total-tokens"]');
+    const pinned = await browser.execute(
+      () =>
+        document.querySelector('[data-testid="stats-total-tokens"]')
+          ?.textContent,
+    );
+    expect(pinned?.replace(/\D/g, "")).toBe("21700000000");
     expect(analytics.coverage).toContain("2026-10-08");
     // The window reading stays on the tab beside the analytics.
     expect(analytics.reading).toBe(true);

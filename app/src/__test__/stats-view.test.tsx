@@ -194,6 +194,38 @@ it("shows Codex's window reading below its analytics, like Z.AI's tab", async ()
   expect(weekly.textContent).toContain("11% used");
 });
 
+it("reads token counts compact, previews exact on hover, pins on click", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const total = await screen.findByTestId("stats-total-tokens");
+  const peak = screen.getByTestId("stats-peak-daily");
+  const digits = (text: string | null) => (text ?? "").replace(/\D/g, "");
+
+  // Big counts open compact; a count under a million stays grouped.
+  expect(total.textContent).toMatch(/1[.,]23M/);
+  expect(digits(peak.textContent)).toBe("45678");
+
+  // Hover previews the exact number on this card only.
+  fireEvent.mouseEnter(total);
+  expect(digits(total.textContent)).toBe("1234567");
+  expect(digits(peak.textContent)).toBe("45678");
+  fireEvent.mouseLeave(total);
+  expect(total.textContent).toMatch(/1[.,]23M/);
+
+  // A click pins this card to the exact form — and only this card.
+  fireEvent.click(total);
+  fireEvent.mouseEnter(total);
+  fireEvent.mouseLeave(total);
+  expect(digits(total.textContent)).toBe("1234567");
+  expect(digits(peak.textContent)).toBe("45678");
+
+  // A second click returns it to compact.
+  fireEvent.click(total);
+  expect(total.textContent).toMatch(/1[.,]23M/);
+});
+
 it("gives every connected plan a tab and shows its stats there", async () => {
   installDispatch();
 
@@ -230,7 +262,7 @@ it("shows Z.AI's token analytics like Codex's, labelled with its window", async 
   expect(await screen.findByTestId("stats-daily-chart")).toBeTruthy();
 
   const cards = await readAnalyticsCards();
-  expect(cards.totalTokens).toBe("21700000000");
+  expect(cards.totalTokens).toMatch(/21[.,]7B/);
   expect(cards.totalRequests).toBe("10419");
 });
 
@@ -238,7 +270,7 @@ async function readAnalyticsCards() {
   const totals = await screen.findByTestId("stats-total-tokens");
   const requests = await screen.findByTestId("stats-total-requests");
   return {
-    totalTokens: (totals.textContent ?? "").replace(/\D/g, ""),
+    totalTokens: totals.textContent ?? "",
     totalRequests: (requests.textContent ?? "").replace(/\D/g, ""),
   };
 }
