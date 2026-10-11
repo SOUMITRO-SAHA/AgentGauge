@@ -32,24 +32,11 @@ pub struct UiState {
     /// that can drift — the exact failure mode `OnboardingStep` already had
     /// when its two lists disagreed.
     pub last_route: Option<String>,
-    #[serde(default = "default_analytics_enabled")]
-    pub analytics_enabled: bool,
-}
-
-/// Local analytics is a preference, not a permission: it reads only what the
-/// user's own tools already report on this device, so an installation that has
-/// never chosen starts with it on. An explicit `false` in the file is the only
-/// thing that turns it off.
-fn default_analytics_enabled() -> bool {
-    true
 }
 
 impl Default for UiState {
     fn default() -> Self {
-        Self {
-            last_route: None,
-            analytics_enabled: default_analytics_enabled(),
-        }
+        Self { last_route: None }
     }
 }
 
@@ -67,11 +54,6 @@ impl UiState {
     pub fn with_last_route(mut self, route: Option<String>) -> Self {
         self.last_route =
             route.filter(|value| !value.is_empty() && value.chars().count() <= MAX_ROUTE_LEN);
-        self
-    }
-
-    pub fn with_analytics_enabled(mut self, enabled: bool) -> Self {
-        self.analytics_enabled = enabled;
         self
     }
 }
@@ -148,15 +130,9 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_file_starts_with_local_analytics_enabled() {
+    fn a_missing_file_starts_with_nothing_chosen() {
         let store = SettingsStore::new(temp_path("missing"));
-        assert_eq!(
-            store.load(),
-            UiState {
-                last_route: None,
-                analytics_enabled: true
-            }
-        );
+        assert_eq!(store.load(), UiState { last_route: None });
     }
 
     #[test]
@@ -186,35 +162,20 @@ mod tests {
         let raw = fs::read_to_string(path).expect("reads");
         assert_eq!(
             raw.trim(),
-            "{\n  \"lastRoute\": \"home\",\n  \"analyticsEnabled\": true\n}",
+            "{\n  \"lastRoute\": \"home\"\n}",
             "settings.json must stay in the wire shape"
         );
     }
 
     #[test]
-    fn analytics_consent_survives_route_changes_and_relaunches() {
-        let path = temp_path("analytics-consent");
-        let store = SettingsStore::new(path.clone());
-        let state = UiState::default()
-            .with_analytics_enabled(true)
-            .with_last_route(Some("stats".into()));
-
-        store.save(&state).expect("save");
-
-        assert_eq!(SettingsStore::new(path).load(), state);
-        assert!(state.with_last_route(Some("home".into())).analytics_enabled);
-    }
-
-    #[test]
-    fn older_settings_files_default_analytics_to_enabled() {
+    fn an_older_file_with_a_removed_field_still_parses() {
         let path = temp_path("old-settings");
         std::fs::create_dir_all(path.parent().unwrap()).expect("dir");
-        std::fs::write(&path, r#"{"lastRoute":"stats"}"#).expect("write");
+        std::fs::write(&path, r#"{"lastRoute":"stats","analyticsEnabled":false}"#).expect("write");
 
         let state = SettingsStore::new(path).load();
 
         assert_eq!(state.last_route.as_deref(), Some("stats"));
-        assert!(state.analytics_enabled);
     }
 
     #[test]

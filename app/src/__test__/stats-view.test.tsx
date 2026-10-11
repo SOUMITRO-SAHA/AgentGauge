@@ -301,7 +301,7 @@ it("shows a revisited tab from its retained reading, without a skeleton", async 
   expect(screen.queryByTestId("stats-reading-skeleton")).toBeNull();
 });
 
-it("renders analytics immediately, with no consent gate", async () => {
+it("renders analytics immediately, with no consent gate and no opt-out", async () => {
   installDispatch();
 
   render(createElement(StatsView, { visible: true }));
@@ -311,6 +311,12 @@ it("renders analytics immediately, with no consent gate", async () => {
   ).toBeTruthy();
   expect(screen.queryByTestId("stats-analytics-consent")).toBeNull();
   expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
+
+  // Analytics is the product now: no off switch anywhere on the screen.
+  expect(screen.queryByTestId("stats-disable-analytics")).toBeNull();
+  expect(screen.queryByTestId("stats-enable-analytics")).toBeNull();
+  expect(screen.queryByTestId("stats-analytics-off")).toBeNull();
+  expect(screen.queryByText("Turn off analytics")).toBeNull();
 });
 
 it("shows Codex's window reading below its analytics, like Z.AI's tab", async () => {

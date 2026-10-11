@@ -19,18 +19,16 @@
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
-import * as Effect from "effect/Effect";
 import {
   useState,
   type ReactElement,
   type ReactNode,
 } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
-import { ChartBar, Fire, Lightning } from "@phosphor-icons/react";
+import { Fire, Lightning } from "@phosphor-icons/react";
 
 import {
   accountUsageForAtom,
-  analyticsConsentAtom,
   statsTabAtom,
   subscriptionsAtom,
   usageForAtom,
@@ -43,7 +41,6 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "~/components/ui/chart";
-import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { ViewHeader } from "~/components/views/view-header";
@@ -61,8 +58,6 @@ import {
 import { useClock } from "~/hooks/use-clock";
 
 export function StatsView({ visible }: { readonly visible: boolean }) {
-  const analyticsEnabled = useAtomValue(analyticsConsentAtom);
-  const setAnalyticsEnabled = useAtomSet(analyticsConsentAtom);
   const selected = useAtomValue(statsTabAtom);
   const setSelected = useAtomSet(statsTabAtom);
   const subscriptions = useAtomValue(subscriptionsAtom);
@@ -109,13 +104,7 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
 
         {tabs.map((tab) => (
           <TabsContent key={tab.value} value={tab.value}>
-            {visible ? (
-              <StatsTabBody
-                tab={tab}
-                analyticsEnabled={analyticsEnabled}
-                onSetAnalytics={setAnalyticsEnabled}
-              />
-            ) : null}
+            {visible ? <StatsTabBody tab={tab} /> : null}
           </TabsContent>
         ))}
       </Tabs>
@@ -124,15 +113,7 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
 }
 
 /** What one plan's tab shows: its stats, or the honest reason there are none. */
-function StatsTabBody({
-  tab,
-  analyticsEnabled,
-  onSetAnalytics,
-}: {
-  readonly tab: UsageTab;
-  readonly analyticsEnabled: boolean;
-  readonly onSetAnalytics: (enabled: boolean) => void;
-}) {
+function StatsTabBody({ tab }: { readonly tab: UsageTab }) {
   if (tab.kind === null) {
     return (
       <p
@@ -146,24 +127,20 @@ function StatsTabBody({
   }
 
   if (tab.kind === "codex") {
-    return analyticsEnabled ? (
+    return (
       <div className="flex flex-col gap-4">
-        <CodexActivity onDisable={() => onSetAnalytics(false)} />
+        <CodexActivity />
         <PlanReading kind={tab.kind} label={tab.label} />
       </div>
-    ) : (
-      <AnalyticsOff onEnable={() => onSetAnalytics(true)} />
     );
   }
 
   if (TOKEN_HISTORY_PROVIDERS.includes(tab.kind)) {
-    return analyticsEnabled ? (
+    return (
       <div className="flex flex-col gap-4">
         <PlanAnalytics kind={tab.kind} label={tab.label} />
         <PlanReading kind={tab.kind} label={tab.label} />
       </div>
-    ) : (
-      <AnalyticsOff onEnable={() => onSetAnalytics(true)} />
     );
   }
 
@@ -178,87 +155,10 @@ function StatsTabBody({
  */
 const TOKEN_HISTORY_PROVIDERS: readonly Ipc.ProviderKind[] = ["codex", "zai"];
 
-/**
- * The state a user's own opt-out produces.
- *
- * Deliberately smaller than the old consent gate: this is a preference turned
- * off, and the way back is one button.
- */
-function AnalyticsOff({ onEnable }: { readonly onEnable: () => void }) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const enable = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      await Effect.runPromise(Ipc.setAnalyticsConsent(true));
-      onEnable();
-    } catch {
-      setError("Your analytics preference could not be saved. Try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <section
-      className={`${PANEL} flex flex-col gap-3`}
-      data-testid="stats-analytics-off"
-    >
-      <div className="flex items-start gap-3">
-        <div className="rounded-md bg-accent-glass p-2 text-brand-teal">
-          <ChartBar aria-hidden="true" className="size-5" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <h2 className="font-display text-base font-semibold text-foreground">
-            Local analytics is off
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Codex token activity stays unread until you turn local analytics
-            back on. Your other plans' readings are not affected.
-          </p>
-        </div>
-      </div>
-      {error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <Button
-        type="button"
-        className="self-start"
-        disabled={saving}
-        onClick={() => void enable()}
-        data-testid="stats-enable-analytics"
-      >
-        {saving ? "Saving…" : "Turn back on"}
-      </Button>
-    </section>
-  );
-}
-
-/** The Codex tab: token activity, with the opt-out at the bottom. */
-function CodexActivity({ onDisable }: { readonly onDisable: () => void }) {
+/** The Codex tab: token activity, with the window reading below. */
+function CodexActivity() {
   const usage = useAtomValue(accountUsageForAtom("codex"));
   const refresh = useAtomRefresh(accountUsageForAtom("codex"));
-  const [saving, setSaving] = useState(false);
-  const [revokeError, setRevokeError] = useState<string | null>(null);
-
-  const disable = async () => {
-    setSaving(true);
-    setRevokeError(null);
-    try {
-      await Effect.runPromise(Ipc.setAnalyticsConsent(false));
-      onDisable();
-    } catch {
-      setRevokeError(
-        "Your analytics permission could not be turned off. Try again.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
 
   return (
     <section
@@ -290,11 +190,6 @@ function CodexActivity({ onDisable }: { readonly onDisable: () => void }) {
         ),
       })}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/70 pt-3">
-        {revokeError ? (
-          <p className="text-sm text-destructive" role="alert">
-            {revokeError}
-          </p>
-        ) : null}
         <p
           className="text-xs text-muted-foreground"
           data-testid="stats-analytics-source"
@@ -306,16 +201,6 @@ function CodexActivity({ onDisable }: { readonly onDisable: () => void }) {
             onFailure: () => "—",
           })}
         </p>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={saving}
-          onClick={() => void disable()}
-          data-testid="stats-disable-analytics"
-        >
-          {saving ? "Saving…" : "Turn off analytics"}
-        </Button>
       </div>
     </section>
   );

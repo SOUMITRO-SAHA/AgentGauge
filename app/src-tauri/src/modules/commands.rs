@@ -133,17 +133,9 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
             Ok(AppResponse::Usage { snapshots })
         }
 
-        AppRequest::ReadAccountUsage { provider } => {
-            if !state.settings.load().analytics_enabled {
-                return Err(Error::new(
-                    crate::shared::error::ErrorKind::InvalidRequest,
-                    "Enable local analytics before reading account activity.",
-                ));
-            }
-            Ok(AppResponse::AccountUsage {
-                usage: state.registry.account_usage(provider)?,
-            })
-        }
+        AppRequest::ReadAccountUsage { provider } => Ok(AppResponse::AccountUsage {
+            usage: state.registry.account_usage(provider)?,
+        }),
 
         AppRequest::ReadPlan { provider } => Ok(AppResponse::Plan {
             plan: state.registry.plan(provider)?,
@@ -251,12 +243,6 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
             // Same rule as onboarding: a failed write is reported, because a
             // preference lost silently is a preference that lies about having
             // been kept.
-            state.settings.save(&next)?;
-            Ok(AppResponse::UiState { state: next })
-        }
-
-        AppRequest::SetAnalyticsConsent { enabled } => {
-            let next = state.settings.load().with_analytics_enabled(enabled);
             state.settings.save(&next)?;
             Ok(AppResponse::UiState { state: next })
         }

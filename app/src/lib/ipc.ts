@@ -293,7 +293,6 @@ export type OnboardingProgress = typeof OnboardingProgress.Type;
  */
 export const UiState = Schema.Struct({
   lastRoute: Schema.NullOr(Schema.String),
-  analyticsEnabled: Schema.Boolean,
 });
 export type UiState = typeof UiState.Type;
 
@@ -430,10 +429,6 @@ export const AppRequest = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("setUiState"),
     lastRoute: Schema.NullOr(Schema.String),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("setAnalyticsConsent"),
-    enabled: Schema.Boolean,
   }),
 ]);
 export type AppRequest = typeof AppRequest.Type;
@@ -706,11 +701,6 @@ export const getSystemWidgetStatus = () =>
 /** Reads the renderer's persisted preferences. */
 export const getUiState = () =>
   request({ type: "uiState" }).pipe(
-    Effect.map((response) => expectType(response, "uiState").state),
-  );
-
-export const setAnalyticsConsent = (enabled: boolean) =>
-  request({ type: "setAnalyticsConsent", enabled }).pipe(
     Effect.map((response) => expectType(response, "uiState").state),
   );
 

@@ -119,15 +119,6 @@ export function kickoffViewOf(
   return overview.subscriptions.find((view) => view.kind === kind) ?? null;
 }
 
-/**
- * Whether local analytics is on.
- *
- * A preference that defaults on — it reads only what the user's own tools
- * already report on this device — hydrated from the persisted state at mount.
- * `false` here means the user turned it off, never "not asked yet".
- */
-export const analyticsConsentAtom = Atom.make(true);
-
 /** Which connected plan's stats the Stats view is showing. */
 export const statsTabAtom = Atom.make("codex");
 

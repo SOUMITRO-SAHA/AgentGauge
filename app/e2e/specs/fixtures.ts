@@ -475,11 +475,6 @@ export interface DispatchFixtures {
   readonly automationRunningByKind?: Record<string, boolean>;
   /** Marks one sub's monitor as having an unacknowledged rollover. */
   readonly automationRolledOver?: string;
-  /**
-   * The analytics preference the `uiState` answer carries. Absent means the
-   * app default — enabled — mirroring the Rust settings store.
-   */
-  readonly analyticsEnabled?: boolean;
 }
 
 /**
@@ -560,7 +555,6 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       step: f().visible ? "welcome" : "done",
       dismissed: !f().visible,
     };
-    w.__ismAnalyticsEnabled__ = f().analyticsEnabled !== false;
     w.__ismKickoffEnabled__ = { ...(f().kickoff?.enabledByKind ?? {}) };
     w.__ismKickoffModels__ = { ...(f().kickoff?.modelByKind ?? {}) };
     w.__ismAutomationRunning__ = {
@@ -883,16 +877,6 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                 request?.type === "setUiState"
                   ? ((request.lastRoute as string | null) ?? null)
                   : null,
-              analyticsEnabled: w.__ismAnalyticsEnabled__ === true,
-            },
-          };
-        case "setAnalyticsConsent":
-          w.__ismAnalyticsEnabled__ = request.enabled === true;
-          return {
-            type: "uiState",
-            state: {
-              lastRoute: null,
-              analyticsEnabled: w.__ismAnalyticsEnabled__,
             },
           };
         default:

@@ -50,7 +50,7 @@ pub enum AppRequest {
     ReadUsage,
     /// Reads usage for one provider, propagating its failure.
     ReadUsageFor { provider: ProviderKind },
-    /// Reads account activity only after the explicit analytics opt-in.
+    /// Reads account activity for one provider.
     ReadAccountUsage { provider: ProviderKind },
     /// Reads the account plan tier, which an API-key account does not have.
     ReadPlan { provider: ProviderKind },
@@ -108,8 +108,6 @@ pub enum AppRequest {
         #[serde(default, rename = "lastRoute")]
         last_route: Option<String>,
     },
-    /// Persists the separate local analytics permission.
-    SetAnalyticsConsent { enabled: bool },
 }
 
 impl AppRequest {
@@ -140,7 +138,6 @@ impl AppRequest {
             Self::SystemWidgetStatus => "systemWidgetStatus",
             Self::UiState => "uiState",
             Self::SetUiState { .. } => "setUiState",
-            Self::SetAnalyticsConsent { .. } => "setAnalyticsConsent",
         }
     }
 }
@@ -342,7 +339,6 @@ mod tests {
                 step: OnboardingStep::Done,
                 dismissed: false,
             },
-            AppRequest::SetAnalyticsConsent { enabled: true },
             AppRequest::SystemWidgetStatus,
         ];
         let mut names: Vec<&str> = all.iter().map(AppRequest::name).collect();
@@ -430,7 +426,6 @@ mod tests {
                 step: OnboardingStep::Done,
                 dismissed: false,
             },
-            AppRequest::SetAnalyticsConsent { enabled: true },
             AppRequest::SystemWidgetStatus,
         ];
         for request in &all {

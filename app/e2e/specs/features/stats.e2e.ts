@@ -285,18 +285,21 @@ describe("stats", () => {
     expect(await $$('[data-testid="stats-reading-skeleton"]')).toHaveLength(0);
   });
 
-  it("turns local analytics off and back on as a preference, with no gate", async () => {
+  it("offers no analytics off switch anywhere on the screen", async () => {
     await dashboardLive();
     await gotoView("stats");
 
+    // Analytics is the product: it reads by default and there is nothing to
+    // turn off — no button, no disabled state, no gate.
     await expectDisplayed('[data-testid="stats-account-analytics"]');
-    await clickDisplayed('[data-testid="stats-disable-analytics"]');
-    await expectDisplayed('[data-testid="stats-analytics-off"]');
     expect(
-      await $('[data-testid="stats-account-analytics"]').isExisting(),
+      await $('[data-testid="stats-disable-analytics"]').isExisting(),
     ).toBe(false);
-
-    await clickDisplayed('[data-testid="stats-enable-analytics"]');
-    await expectDisplayed('[data-testid="stats-account-analytics"]');
+    expect(
+      await $('[data-testid="stats-enable-analytics"]').isExisting(),
+    ).toBe(false);
+    expect(
+      await $('[data-testid="stats-analytics-off"]').isExisting(),
+    ).toBe(false);
   });
 });
