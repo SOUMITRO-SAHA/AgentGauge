@@ -227,6 +227,7 @@ impl KickoffSchedule {
 }
 
 /// Reads and writes the shared kickoff schedule.
+#[derive(Clone)]
 pub struct KickoffStore {
     path: PathBuf,
 }

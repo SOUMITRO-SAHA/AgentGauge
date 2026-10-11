@@ -87,14 +87,17 @@ pub fn run() {
             let app_registry = Arc::clone(&registry);
             let has_kickoff_store = kickoff_store.is_some();
 
-            app.manage(AppState {
+            // Behind an `Arc` because a dispatch runs its blocking read on
+            // another thread: the command hands that read an owned handle
+            // rather than a borrow, so nothing is held across the boundary.
+            app.manage(Arc::new(AppState {
                 registry,
                 automation,
                 onboarding,
                 widget_snapshots,
                 settings,
                 kickoff: kickoff_store,
-            });
+            }));
 
             // While the app is open it runs the kickoff tick itself, so a
             // subscription is never silently unscheduled just because the

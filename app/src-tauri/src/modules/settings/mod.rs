@@ -77,6 +77,7 @@ impl UiState {
 }
 
 /// Reads and writes the renderer preferences.
+#[derive(Clone)]
 pub struct SettingsStore {
     path: PathBuf,
 }

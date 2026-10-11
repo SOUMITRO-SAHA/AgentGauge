@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use tauri::State;
+use tauri::{AppHandle, Manager};
 
 use crate::modules::automation::AutomationRunner;
 use crate::modules::cli_detection;
@@ -23,10 +23,15 @@ use crate::modules::providers::{ProviderRegistry, PING_PROMPT};
 use crate::modules::settings::SettingsStore;
 use crate::modules::widget::{now_secs, SnapshotStore, SystemWidgetStatus, WidgetSnapshot};
 use crate::shared::domain::{CodingSubscription, ProviderKind, UsageSnapshot};
-use crate::shared::error::Error;
+use crate::shared::error::{Error, ErrorKind};
 use crate::shared::protocol::{AppRequest, AppResponse, PROTOCOL_VERSION};
 
 /// Shared state, assembled once in `lib.rs`.
+///
+/// Cloned per request so the blocking read can leave the main thread: the
+/// work runs on another thread and needs its own handle on the state. Every
+/// field is a handle or a path, so a clone costs nothing and shares state.
+#[derive(Clone)]
 pub struct AppState {
     pub registry: Arc<ProviderRegistry>,
     pub automation: Arc<AutomationRunner>,
@@ -44,11 +49,35 @@ pub struct AppState {
 /// promise, so the client can branch on a stable tag. Only a bridge-level
 /// fault (the command was never invoked) reaches the renderer as an exception.
 #[tauri::command]
-pub fn dispatch(request: AppRequest, state: State<'_, AppState>) -> AppResponse {
-    match handle(request, &state) {
+pub async fn dispatch(request: AppRequest, app: AppHandle) -> Result<AppResponse, ()> {
+    // `AppHandle`, not `State`: an async command may not borrow its state, and
+    // the handle is owned and `'static` so it can cross onto the runtime. An
+    // async command is spawned on the async runtime rather than the main
+    // thread, which is the point of the whole change — the blocking read is
+    // handed to a blocking thread below so it cannot occupy this one either.
+    let state = Arc::clone(app.state::<Arc<AppState>>().inner());
+
+    match off_thread(move || match handle(request, &state) {
         Ok(response) => response,
         Err(error) => AppResponse::Failure { error },
+    })
+    .await
+    {
+        Ok(response) => Ok(response),
+        Err(_) => Ok(AppResponse::Failure {
+            error: Error::new(
+                ErrorKind::TransportClosed,
+                "The background read ended unexpectedly.",
+            ),
+        }),
     }
+}
+
+/// Runs blocking work on a blocking thread, leaving the caller's thread free.
+fn off_thread(
+    work: impl FnOnce() -> AppResponse + Send + 'static,
+) -> tauri::async_runtime::JoinHandle<AppResponse> {
+    tauri::async_runtime::spawn_blocking(work)
 }
 
 fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
@@ -370,6 +399,42 @@ const MAX_MODEL_ID_CHARS: usize = 64;
 mod tests {
     use super::*;
     use crate::shared::error::ErrorKind;
+
+    #[test]
+    fn a_read_runs_off_the_calling_thread_and_still_returns_its_answer() {
+        // The behaviour the tab switch depends on. A provider read spawns a
+        // subprocess and waits on the network; run inline it occupies the
+        // thread WKWebView paints on, so the window cannot repaint a skeleton
+        // and the switch freezes instead of loading. `off_thread` must hand
+        // the work to another thread — the heartbeat thread still running
+        // while the answer is awaited is exactly that proof — and must still
+        // come back with the handler's own answer, never a fabricated one.
+        let heartbeat = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&heartbeat);
+        let ticker = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let answer = tauri::async_runtime::block_on(off_thread(|| {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            AppResponse::Protocol {
+                version: PROTOCOL_VERSION,
+            }
+        }));
+
+        ticker.join().expect("heartbeat finishes");
+
+        assert!(
+            heartbeat.load(std::sync::atomic::Ordering::SeqCst),
+            "the awaiting thread was blocked instead of yielding to the runtime"
+        );
+
+        match answer.expect("the join resolves") {
+            AppResponse::Protocol { version } => assert_eq!(version, PROTOCOL_VERSION),
+            other => panic!("expected the handler's own response, got {other:?}"),
+        }
+    }
 
     #[test]
     fn an_over_long_prompt_is_rejected_at_the_boundary() {

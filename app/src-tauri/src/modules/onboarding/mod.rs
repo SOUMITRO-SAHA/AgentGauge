@@ -119,6 +119,7 @@ pub struct OnboardingProgress {
 }
 
 /// Reads and writes the onboarding state.
+#[derive(Clone)]
 pub struct OnboardingStore {
     path: PathBuf,
 }
