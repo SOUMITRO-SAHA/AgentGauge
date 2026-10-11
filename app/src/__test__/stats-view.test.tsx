@@ -11,10 +11,11 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import * as Atom from "effect/unstable/reactivity/Atom";
 import { createElement } from "react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { statsTabAtom } from "~/atoms";
-import { StatsView, tokenTooltipFormatter } from "~/components/views/stats-view";
+import { ModelMixBlock, StatsView, tokenTooltipFormatter } from "~/components/views/stats-view";
+import type { PriceList } from "~/lib/pricing";
 
 type Request = { readonly type: string; readonly provider?: string };
 
@@ -145,7 +146,7 @@ function subscriptionsReply() {
   };
 }
 
-function installDispatch(): void {
+function installDispatch(overrides?: { readonly zaiUsage?: unknown }): void {
   (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
     dispatch: ({ request }: { request: Request }) => {
       switch (request.type) {
@@ -155,7 +156,9 @@ function installDispatch(): void {
           return {
             type: "accountUsage",
             usage:
-              request.provider === "zai" ? zaiAccountUsage() : codexAccountUsage(),
+              request.provider === "zai"
+                ? (overrides?.zaiUsage ?? zaiAccountUsage())
+                : codexAccountUsage(),
           };
         case "readUsageFor":
           return {
@@ -192,8 +195,53 @@ afterEach(() => {
   Atom.set(statsTabAtom, "codex");
   for (const release of deferredReleases.splice(0)) release();
   delete (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__;
+  vi.unstubAllGlobals();
   cleanup();
 });
+
+/**
+ * The bundled price list, served through the same fetch the app uses. Only
+ * the Z.AI slice matters to these tests; the estimator's own suite covers
+ * the rest of the catalog.
+ */
+const PRICE_LIST: PriceList = {
+  meta: { currency: "USD", updated: "2026-10-11" },
+  providers: {
+    "zai-coding-plan": {
+      subscription: { plans: [{ name: "Pro", priceUsdPerMonth: 80 }] },
+      models: {
+        "glm-5.3": { apiCostPerMillion: { input: 1.4, output: 4.4 } },
+        "glm-5.3-flash": { apiCostPerMillion: { input: 0.15, output: 0.5 } },
+      },
+    },
+  },
+} as unknown as PriceList;
+
+function stubPriceList(list: PriceList = PRICE_LIST): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, json: async () => list })),
+  );
+}
+
+/**
+ * The price list must be stubbed for the whole file, not per test: the atom
+ * that loads it is session-retained, so whichever test mounts the model mix
+ * first decides the result every later test sees (the same rule the usage
+ * atoms follow).
+ */
+beforeEach(() => {
+  stubPriceList();
+});
+
+/** Opens the Z.AI tab and waits for its analytics to land. */
+async function openZaiAnalytics(): Promise<void> {
+  const tab = await screen.findByTestId("stats-tab-zai");
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+  await screen.findByTestId("stats-plan-analytics");
+  await screen.findByTestId("stats-model-mix");
+}
 
 /**
  * Answers the subscription read at once but holds both usage reads until the
@@ -447,3 +495,97 @@ async function readAnalyticsCards() {
     totalRequests: (requests.textContent ?? "").replace(/\D/g, ""),
   };
 }
+
+it("shows the model mix with token shares and API-equivalent estimates", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+  await openZaiAnalytics();
+
+  // The vendor's ranking leads: GLM-5.3 is sortOrder 1 even though Flash
+  // carried more tokens.
+  const glm = screen.getByTestId("stats-model-row-glm-5.3");
+  expect(within(glm).getByText("GLM-5.3")).toBeTruthy();
+  expect(within(glm).getByText("39% of tokens")).toBeTruthy();
+  expect(within(glm).getByText("85% of est. cost")).toBeTruthy();
+
+  const flash = screen.getByTestId("stats-model-row-glm-5.3-flash");
+  expect(within(flash).getByText("61% of tokens")).toBeTruthy();
+  expect(within(flash).getByText("15% of est. cost")).toBeTruthy();
+
+  // 8.47B at $2.00/M + 13.23B at $0.22/M ≈ $19,855, ≈ 248× the $80 Pro plan.
+  const cost = screen.getByTestId("stats-est-cost");
+  expect(cost.textContent ?? "").toMatch(/19[.,]855/);
+  const ratio = screen.getByTestId("stats-value-ratio");
+  expect(ratio.textContent ?? "").toContain("248");
+
+  const source = screen.getByTestId("stats-model-mix-source");
+  expect(source.textContent ?? "").toContain("price list 2026-10-11");
+  expect(source.textContent ?? "").toContain("80% input");
+  expect(screen.queryByTestId("stats-unpriced-tokens")).toBeNull();
+});
+
+it("counts models without a reference price as tokens, never as $0", () => {
+  render(
+    createElement(ModelMixBlock, {
+      kind: "zai",
+      models: [
+        { id: "glm-5.3", displayName: "GLM-5.3", tokens: 1_000_000, requests: null },
+        { id: "glm-next", displayName: "GLM Next", tokens: 9_000_000, requests: null },
+      ],
+      windowDays: 30,
+      plan: "pro",
+      pricingState: "ready",
+      priceList: PRICE_LIST,
+    }),
+  );
+
+  const unpriced = screen.getByTestId("stats-model-row-glm-next");
+  expect(within(unpriced).getByText("No reference price")).toBeTruthy();
+  expect(
+    within(screen.getByTestId("stats-model-row-glm-5.3")).queryByText(
+      "No reference price",
+    ),
+  ).toBeNull();
+
+  const note = screen.getByTestId("stats-unpriced-tokens");
+  expect((note.textContent ?? "").replace(/\D/g, "")).toBe("9000000");
+});
+
+it("keeps the model mix honest when the price list cannot be read", () => {
+  render(
+    createElement(ModelMixBlock, {
+      kind: "zai",
+      models: [
+        { id: "glm-5.3", displayName: "GLM-5.3", tokens: 1_000, requests: null },
+      ],
+      windowDays: 30,
+      plan: "pro",
+      pricingState: "failed",
+      priceList: null,
+    }),
+  );
+
+  expect(screen.getByTestId("stats-model-row-glm-5.3")).toBeTruthy();
+  expect(
+    within(screen.getByTestId("stats-model-row-glm-5.3")).getByText(
+      "No reference price",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByTestId("stats-pricing-unavailable")).toBeTruthy();
+  expect(screen.queryByTestId("stats-est-cost")).toBeNull();
+  expect(screen.queryByTestId("stats-value-ratio")).toBeNull();
+});
+
+it("leaves the model mix off a tab whose provider reports no models", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const codexTab = await screen.findByTestId("stats-tab-codex");
+  fireEvent.mouseDown(codexTab);
+  fireEvent.click(codexTab);
+
+  expect(await screen.findByTestId("stats-account-analytics")).toBeTruthy();
+  expect(screen.queryByTestId("stats-model-mix")).toBeNull();
+});

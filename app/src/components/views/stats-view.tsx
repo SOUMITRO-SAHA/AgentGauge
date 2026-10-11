@@ -29,6 +29,7 @@ import { Fire, Lightning } from "@phosphor-icons/react";
 
 import {
   accountUsageForAtom,
+  priceListAtom,
   statsTabAtom,
   subscriptionsAtom,
   usageForAtom,
@@ -45,6 +46,15 @@ import { Skeleton } from "~/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { ViewHeader } from "~/components/views/view-header";
 import * as Ipc from "~/lib/ipc";
+import {
+  estimateModelCosts,
+  formatUsd,
+  planPriceUsd,
+  PRICING_PROVIDER_IDS,
+  valueRatio,
+  type ModelCostRow,
+  type PriceList,
+} from "~/lib/pricing";
 import {
   effectiveFreshness,
   formatCountdown,
@@ -223,6 +233,8 @@ function PlanAnalytics({
 }) {
   const usage = useAtomValue(accountUsageForAtom(kind));
   const refresh = useAtomRefresh(accountUsageForAtom(kind));
+  const priceList = useAtomValue(priceListAtom);
+  const readings = useAtomValue(usageForAtom(kind));
 
   return (
     <section
@@ -241,7 +253,33 @@ function PlanAnalytics({
       {AsyncResult.match(usage, {
         onInitial: () => <AnalyticsLoadingSkeleton />,
         onSuccess: (result) => (
-          <AnalyticsContent usage={result.value} refreshing={result.waiting} />
+          <>
+            <AnalyticsContent usage={result.value} refreshing={result.waiting} />
+            {result.value.models.length > 0 ? (
+              <ModelMixBlock
+                kind={kind}
+                models={result.value.models}
+                windowDays={result.value.windowDays}
+                plan={AsyncResult.match(readings, {
+                  onInitial: () => null,
+                  onSuccess: (reading) =>
+                    reading.value.find((item) => item.provider === kind)
+                      ?.plan ?? null,
+                  onFailure: () => null,
+                })}
+                pricingState={AsyncResult.match(priceList, {
+                  onInitial: () => "loading" as const,
+                  onSuccess: () => "ready" as const,
+                  onFailure: () => "failed" as const,
+                })}
+                priceList={AsyncResult.match(priceList, {
+                  onInitial: () => null,
+                  onSuccess: (result2) => result2.value,
+                  onFailure: () => null,
+                })}
+              />
+            ) : null}
+          </>
         ),
         onFailure: () => (
           <p
@@ -545,6 +583,231 @@ function AnalyticsContent({
           </span>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The model mix: which models carried the tokens, and what that mix would
+ * have cost at API prices.
+ *
+ * The two lenses are the point — a cheap model can carry most of the volume
+ * for a sliver of the dollars, and only seeing both shares says so. Estimates
+ * are Tier B (the provider reports totals per model, no input/output split),
+ * so the input-share assumption and the price list's date ship with every
+ * dollar figure, and a model the list does not carry is unpriced tokens —
+ * never $0.
+ */
+export function ModelMixBlock({
+  kind,
+  models,
+  windowDays,
+  plan,
+  pricingState,
+  priceList,
+}: {
+  readonly kind: Ipc.ProviderKind;
+  readonly models: readonly Ipc.ModelUsage[];
+  readonly windowDays: number | null;
+  readonly plan: Ipc.PlanKind | null;
+  readonly pricingState: "loading" | "ready" | "failed";
+  readonly priceList: PriceList | null;
+}) {
+  if (pricingState === "loading") {
+    return <ModelMixSkeleton />;
+  }
+
+  const providerId = PRICING_PROVIDER_IDS[kind];
+  const estimate =
+    pricingState === "ready" && priceList !== null
+      ? estimateModelCosts(models, priceList, providerId)
+      : null;
+  const planPrice =
+    estimate !== null && plan !== null
+      ? planPriceUsd(priceList as PriceList, providerId, plan)
+      : null;
+  const ratio =
+    estimate !== null ? valueRatio(estimate.estimatedTotalUsd, planPrice) : null;
+  const pricedTotal = estimate?.estimatedTotalUsd ?? 0;
+
+  return (
+    <div
+      className="flex flex-col gap-4 border-t border-border/70 pt-4"
+      data-testid="stats-model-mix"
+    >
+      <div className="flex flex-col gap-1">
+        <h3 className="font-display text-sm font-medium text-foreground">
+          Model mix
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          Tokens and estimated API-equivalent cost per model, in the reported
+          window.
+        </p>
+      </div>
+      {pricingState === "failed" ? (
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid="stats-pricing-unavailable"
+        >
+          The price list could not be read, so token shares are shown without
+          cost estimates.
+        </p>
+      ) : null}
+      {ratio !== null && estimate !== null ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div
+            className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
+            data-testid="stats-est-cost"
+          >
+            <span className="text-xs text-muted-foreground">
+              If you had paid per token
+            </span>
+            <span className="text-xl font-semibold tabular text-foreground">
+              ≈ {formatUsd(estimate.estimatedTotalUsd)}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              API-equivalent in {windowDays ?? "the reported"} days
+            </span>
+          </div>
+          <div
+            className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
+            data-testid="stats-value-ratio"
+          >
+            <span className="text-xs text-muted-foreground">Plan value</span>
+            <span className="text-xl font-semibold tabular text-foreground">
+              ≈ {Math.round(ratio)}× the {formatPlan(plan)} price
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {formatUsd(planPrice ?? 0)}/month plan, estimates only — not a bill
+            </span>
+          </div>
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-3">
+        {models.map((model) => (
+          <ModelMixRow
+            key={model.id}
+            model={model}
+            row={
+              estimate?.rows.find((candidate) => candidate.id === model.id) ??
+              null
+            }
+            pricedTotal={pricedTotal}
+          />
+        ))}
+      </div>
+      {estimate !== null && estimate.unpricedTokens > 0 ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="stats-unpriced-tokens"
+        >
+          {formatCount(estimate.unpricedTokens)} tokens ran on models the price
+          list does not carry; they are counted, not priced.
+        </p>
+      ) : null}
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="stats-model-mix-source"
+      >
+        {estimate !== null
+          ? `Estimates: reported tokens × price list ${priceList?.meta.updated} · assumes ${Math.round(estimate.inputShare * 100)}% input · not a bill.`
+          : "Token shares as reported; no estimates without the price list."}
+      </p>
+    </div>
+  );
+}
+
+/** One model's row: name, both shares, and its estimate (or why there is none). */
+function ModelMixRow({
+  model,
+  row,
+  pricedTotal,
+}: {
+  readonly model: Ipc.ModelUsage;
+  readonly row: ModelCostRow | null;
+  readonly pricedTotal: number;
+}) {
+  const tokenSharePct = Math.round((row?.shareOfTokens ?? 0) * 100);
+  const costSharePct =
+    row?.costUsd !== null && row?.costUsd !== undefined && pricedTotal > 0
+      ? Math.round((row.costUsd / pricedTotal) * 100)
+      : null;
+
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
+      data-testid={`stats-model-row-${model.id}`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-sm font-medium text-foreground">
+          {model.displayName}
+        </span>
+        <span className="text-sm font-semibold tabular text-foreground">
+          {row?.costUsd != null ? `≈ ${formatUsd(row.costUsd)}` : "No reference price"}
+        </span>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <ShareBar
+          label="Tokens"
+          widthPercent={tokenSharePct}
+          caption={`${tokenSharePct}% of tokens`}
+          barClassName="bg-chart-1"
+        />
+        {costSharePct !== null ? (
+          <ShareBar
+            label="Est. cost"
+            widthPercent={costSharePct}
+            caption={`${costSharePct}% of est. cost`}
+            barClassName="bg-chart-2"
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** A labelled share bar: the model mix's two lenses read as lengths. */
+function ShareBar({
+  label,
+  widthPercent,
+  caption,
+  barClassName,
+}: {
+  readonly label: string;
+  readonly widthPercent: number;
+  readonly caption: string;
+  readonly barClassName: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <span className="w-16 shrink-0">{label}</span>
+      <div
+        className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-accent-glass"
+        role="presentation"
+      >
+        <div
+          className={`h-full rounded-full ${barClassName}`}
+          style={{ width: `${Math.min(100, Math.max(0, widthPercent))}%` }}
+        />
+      </div>
+      <span className="w-24 shrink-0 text-right tabular">{caption}</span>
+    </div>
+  );
+}
+
+/** The mix's shape while the price list loads. */
+function ModelMixSkeleton() {
+  return (
+    <div
+      className="flex flex-col gap-4 border-t border-border/70 pt-4"
+      data-testid="stats-model-mix-skeleton"
+    >
+      <Skeleton className="h-4 w-20" />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Skeleton className="h-24 rounded-lg" />
+        <Skeleton className="h-24 rounded-lg" />
+      </div>
+      <Skeleton className="h-16 rounded-lg" />
     </div>
   );
 }

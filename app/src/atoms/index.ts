@@ -11,9 +11,11 @@
  */
 
 import * as Atom from "effect/unstable/reactivity/Atom";
+import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as Ipc from "~/lib/ipc";
+import { loadPriceList } from "~/lib/pricing";
 import { DEFAULT_ROUTE, type Route } from "~/lib/navigation";
 
 /**
@@ -118,6 +120,30 @@ export function kickoffViewOf(
 ): Ipc.KickoffView | null {
   return overview.subscriptions.find((view) => view.kind === kind) ?? null;
 }
+
+/**
+ * The bundled price list, retained for the session.
+ *
+ * It is a static asset, so one read serves the whole session. A failed load
+ * is a real state the model mix renders honestly (token shares without
+ * estimates), never a retry loop or an invented price. The loader returns a
+ * plain promise, so the atom wraps it in an Effect — the runtime resolves
+ * Effects into the AsyncResult the hooks observe, and a bare promise would
+ * reach the component unresolved.
+ */
+export const priceListAtom = Atom.setIdleTTL(Infinity)(
+  runtime.atom(() =>
+    Effect.tryPromise({
+      try: () => loadPriceList(),
+      catch: (cause) =>
+        new Error(
+          cause instanceof Error
+            ? cause.message
+            : "The price list could not be read.",
+        ),
+    }),
+  ),
+);
 
 /** Which connected plan's stats the Stats view is showing. */
 export const statsTabAtom = Atom.make("codex");
