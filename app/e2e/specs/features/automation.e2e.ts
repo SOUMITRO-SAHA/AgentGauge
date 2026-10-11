@@ -50,10 +50,10 @@ describe("automation", () => {
     await bootAutomation();
 
     await expect($('[data-testid="automation-panel-codex"] h2')).toHaveText(
-      "Codex · Rollover monitor",
+      "Codex · Automation",
     );
     await expect($('[data-testid="automation-panel-zai"] h2')).toHaveText(
-      "Z.AI · Rollover monitor",
+      "Z.AI · Automation",
     );
     await expect($('[data-testid="automation-panel-kimi"]')).not.toExist();
   });

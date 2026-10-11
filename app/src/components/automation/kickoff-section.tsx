@@ -1,12 +1,9 @@
 /**
- * The scheduled kickoff controls for one subscription.
+ * One connection's scheduled-kickoff controls.
  *
- * Opt-in by construction: the switch starts off, and nothing — not the app,
- * not the background worker — ever sends a prompt for this subscription until
- * the user turns it on. Copy states the two honest facts up front: it spends
- * a small amount of quota, and it runs in the background even when the app is
- * closed. A prompt opens the *next* window after the provider's own reset; it
- * never restarts or extends a window, and the copy must not imply otherwise.
+ * The model can be chosen independently, but the switch starts off and no
+ * prompt is scheduled until the user opts in. The copy distinguishes the
+ * reported-reset schedule from a verified rollover and states the quota cost.
  *
  * Writes go through the command and then refresh the atom the section reads,
  * so the toggle, the picker, and the schedule on disk cannot disagree.
@@ -40,7 +37,9 @@ export function KickoffSection({
   const refreshOverview = useAtomRefresh(kickoffAtom);
   const [error, setError] = useState<string | null>(null);
 
-  const apply = (write: () => Effect.Effect<Ipc.KickoffOverview, Ipc.AppError>) => {
+  const apply = (
+    write: () => Effect.Effect<Ipc.KickoffOverview, Ipc.AppError>,
+  ) => {
     void Effect.runPromise(write())
       .then(() => {
         setError(null);
@@ -57,7 +56,7 @@ export function KickoffSection({
     onFailure: () => (
       <p
         className="text-xs text-muted-foreground"
-        data-testid="kickoff-unavailable"
+        data-testid={`kickoff-unavailable-${kind}`}
       >
         The kickoff schedule could not be read.
       </p>
@@ -95,9 +94,12 @@ function KickoffControls({
   readonly onModel: (modelId: string) => void;
 }): ReactElement {
   return (
-    <div className="flex flex-col gap-2" data-testid="kickoff-section">
+    <div
+      className="flex flex-col gap-3"
+      data-testid={`kickoff-section-${view.kind}`}
+    >
       <span className="text-xs font-medium text-muted-foreground">
-        Kickoff
+        Scheduled kickoff
       </span>
 
       <div className="flex items-start justify-between gap-3">
@@ -106,91 +108,112 @@ function KickoffControls({
             htmlFor={`kickoff-toggle-${view.kind}`}
             className="text-sm font-medium"
           >
-            Auto “Hi” after each reset
+            Enable scheduled “Hi”
           </label>
-          <p className="max-w-prose text-xs text-muted-foreground">
-            Sends one trivial “Hi” as{" "}
-            <span className="tabular">{view.effectiveModel}</span> about a
-            minute after each 5-hour reset, so the next window starts on a
-            predictable schedule. Uses a small amount of quota, and runs in the
-            background even when AgentGauge is closed.
+          <p
+            className="max-w-prose text-xs leading-relaxed text-muted-foreground"
+            data-testid={`kickoff-copy-${view.kind}`}
+          >
+            Uses the latest reported reset time for this connection. When that
+            time is in the future, one “Hi” is scheduled about a minute later;
+            without a future reset, the first attempt may be immediate. This
+            build does not verify a rollover before sending. A “Hi” uses quota
+            and does not create, reset, or extend a usage window.
           </p>
         </div>
         <Switch
           id={`kickoff-toggle-${view.kind}`}
           checked={view.enabled}
           onCheckedChange={onToggle}
-          data-testid="kickoff-toggle"
-          aria-label="Scheduled kickoff"
+          data-testid={`kickoff-toggle-${view.kind}`}
+          aria-label={`Enable scheduled Hi for ${view.kind}`}
         />
       </div>
 
-      {view.enabled && (
-        <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-muted-foreground">Model</span>
-            <Select value={view.effectiveModel} onValueChange={onModel}>
-              <SelectTrigger
-                className="w-56"
-                data-testid="kickoff-model"
-                aria-label="Kickoff model"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              {/* `popper`, not the vendored `item-aligned` default: on this
-                  WKWebView build the item-aligned listbox stays
-                  `visibility: hidden` after opening — focusable but never
-                  seen. Found by the native e2e, not by inspection. */}
-              <SelectContent position="popper">
-                {view.models.map((model) => (
-                  <SelectItem
-                    key={model.id}
-                    value={model.id}
-                    data-testid={`kickoff-model-option-${model.id}`}
-                  >
-                    {model.label}
-                    {model.cheapest ? " · cheapest" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-muted-foreground">
-              Next auto “Hi”
-            </span>
-            <span className="text-sm tabular" data-testid="kickoff-next">
-              {formatNextKick(view.nextKickAt, nowMs)}
-            </span>
-          </div>
-
-          {view.lastAccepted !== null && (
-            <p
-              className={view.lastAccepted ? "text-xs text-ok" : "text-xs text-critical"}
-              data-testid="kickoff-last"
+      <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-sm text-muted-foreground">Model for “Hi”</span>
+          <Select value={view.effectiveModel} onValueChange={onModel}>
+            <SelectTrigger
+              className="w-56"
+              data-testid={`kickoff-model-${view.kind}`}
+              aria-label={`Kickoff model for ${view.kind}`}
             >
-              Last attempt {view.lastAccepted ? "succeeded" : "failed"}
-              {view.lastDetail ? `: ${view.lastDetail}` : ""}
-            </p>
-          )}
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper">
+              {view.models.map((model) => (
+                <SelectItem
+                  key={model.id}
+                  value={model.id}
+                  data-testid={`kickoff-model-option-${view.kind}-${model.id}`}
+                >
+                  {model.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      )}
+        <p
+          className="text-xs leading-relaxed text-muted-foreground"
+          data-testid={`kickoff-model-note-${view.kind}`}
+        >
+          This catalog is not live-verified by the connection; model availability
+          and quota impact are unknown.
+        </p>
+
+        {view.enabled && (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-muted-foreground">
+                Next scheduled “Hi”
+              </span>
+              <span
+                className="text-sm tabular"
+                data-testid={`kickoff-next-${view.kind}`}
+              >
+                {formatNextKick(view.nextKickAt, nowMs)}
+              </span>
+            </div>
+
+            {view.lastAccepted !== null && (
+              <p
+                className={
+                  view.lastAccepted ? "text-xs text-ok" : "text-xs text-critical"
+                }
+                data-testid={`kickoff-last-${view.kind}`}
+              >
+                Last attempt {view.lastAccepted ? "succeeded" : "failed"}
+                {view.lastDetail ? `: ${view.lastDetail}` : ""}
+              </p>
+            )}
+          </>
+        )}
+      </div>
 
       {view.enabled && !scheduler.supported && (
-        <p className="text-xs text-warn" data-testid="kickoff-unsupported">
+        <p
+          className="text-xs text-warn"
+          data-testid={`kickoff-unsupported-${view.kind}`}
+        >
           Background scheduling is not supported on this platform yet.
         </p>
       )}
       {view.enabled && scheduler.supported && !scheduler.installed && (
-        <p className="text-xs text-warn" data-testid="kickoff-scheduler-warn">
+        <p
+          className="text-xs text-warn"
+          data-testid={`kickoff-scheduler-warn-${view.kind}`}
+        >
           The background scheduler is not installed, so the kickoff only runs
           while AgentGauge is open.
         </p>
       )}
 
       {error !== null && (
-        <p className="text-xs text-destructive" data-testid="kickoff-error">
+        <p
+          className="text-xs text-destructive"
+          data-testid={`kickoff-error-${view.kind}`}
+        >
           {error}
         </p>
       )}

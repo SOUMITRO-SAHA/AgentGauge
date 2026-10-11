@@ -83,35 +83,50 @@ async function renderSection(
   response: Record<string, unknown>,
 ): Promise<void> {
   installDispatch(response);
-  const { KickoffSection } = await import("~/components/usage/kickoff-section");
+  const { KickoffSection } = await import("~/components/automation/kickoff-section");
   render(createElement(KickoffSection as ComponentType<{ kind: string; nowMs: number }>, {
     kind: "zai",
     nowMs: Date.now(),
   }));
 }
 
-it("renders opted out: a toggle that is off and no schedule block", async () => {
+it("renders opted out with a model picker but no scheduled attempt", async () => {
   await renderSection(kickoffState({ enabled: false }));
 
-  const toggle = await screen.findByTestId("kickoff-toggle");
+  const toggle = await screen.findByTestId("kickoff-toggle-zai");
   expect(toggle.getAttribute("aria-checked")).toBe("false");
-  expect(screen.queryByTestId("kickoff-next")).toBeNull();
-});
-
-it("renders the schedule, the cheapest model, and the countdown once enabled", async () => {
-  await renderSection(kickoffState({ enabled: true }));
-
-  const toggle = await screen.findByTestId("kickoff-toggle");
-  expect(toggle.getAttribute("aria-checked")).toBe("true");
-
-  const next = await screen.findByTestId("kickoff-next");
-  expect(next.textContent).toContain("1h");
-
-  // The picker's trigger names the effective model with the cheapest marker;
-  // the open-picker interaction is covered in the native e2e.
-  expect(screen.getByTestId("kickoff-model").textContent).toContain(
+  expect(screen.getByTestId("kickoff-model-zai").textContent).toContain(
     "GLM-5.3 Flash",
   );
+  expect(screen.queryByTestId("kickoff-next-zai")).toBeNull();
+});
+
+it("renders the schedule, selected model, and countdown once enabled", async () => {
+  await renderSection(kickoffState({ enabled: true }));
+
+  const toggle = await screen.findByTestId("kickoff-toggle-zai");
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
+
+  const next = await screen.findByTestId("kickoff-next-zai");
+  expect(next.textContent).toContain("1h");
+
+  expect(screen.getByTestId("kickoff-model-zai").textContent).toContain(
+    "GLM-5.3 Flash",
+  );
+  expect(screen.getByTestId("kickoff-section-zai").textContent).not.toContain(
+    "cheapest",
+  );
+});
+
+it("explains reported-reset timing, quota use, and unknown model availability", async () => {
+  await renderSection(kickoffState({ enabled: false }));
+
+  const section = await screen.findByTestId("kickoff-section-zai");
+  expect(section.textContent).toContain("latest reported reset time");
+  expect(section.textContent).toContain("does not verify a rollover");
+  expect(section.textContent).toContain("uses quota");
+  expect(section.textContent).toContain("does not create, reset, or extend");
+  expect(section.textContent).toContain("availability and quota impact are unknown");
 });
 
 it("says due now rather than counting a passed schedule negatively", async () => {
@@ -119,7 +134,7 @@ it("says due now rather than counting a passed schedule negatively", async () =>
     kickoffState({ enabled: true, nextKickAtMs: Date.now() - 5_000 }),
   );
 
-  expect((await screen.findByTestId("kickoff-next")).textContent).toBe(
+  expect((await screen.findByTestId("kickoff-next-zai")).textContent).toBe(
     "due now",
   );
 });
@@ -132,12 +147,12 @@ it("says an unsupported platform cannot schedule in the background", async () =>
     }),
   );
 
-  expect(await screen.findByTestId("kickoff-unsupported")).toBeTruthy();
+  expect(await screen.findByTestId("kickoff-unsupported-zai")).toBeTruthy();
 });
 
 it("shows the last attempt's outcome once there was one", async () => {
   await renderSection(kickoffState({ enabled: true, lastAccepted: false }));
 
-  const last = await screen.findByTestId("kickoff-last");
+  const last = await screen.findByTestId("kickoff-last-zai");
   expect(last.textContent).toContain("failed");
 });

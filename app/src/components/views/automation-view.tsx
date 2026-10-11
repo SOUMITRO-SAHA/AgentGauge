@@ -21,17 +21,21 @@ import { useEffect, type ReactElement } from "react";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { Play, Stop } from "@phosphor-icons/react";
 
-import { automationAtom, subscriptionsAtom } from "~/atoms";
+import { automationAtom, kickoffAtom, subscriptionsAtom } from "~/atoms";
 import { Button } from "~/components/ui/button";
+import { KickoffSection } from "~/components/automation/kickoff-section";
 import { ViewHeader } from "~/components/views/view-header";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
+import { useClock } from "~/hooks/use-clock";
 import * as Ipc from "~/lib/ipc";
 import { tabsFrom, type UsageTab } from "~/lib/usage";
 
 export function AutomationView({ visible }: { readonly visible: boolean }) {
   const automation = useAtomValue(automationAtom);
   const refreshAutomation = useAtomRefresh(automationAtom);
+  const refreshKickoff = useAtomRefresh(kickoffAtom);
   const subscriptions = useAtomValue(subscriptionsAtom);
+  const nowMs = useClock();
 
   // Opening the screen re-reads: the retained answer paints instantly, and
   // the current monitor states land underneath — monitor state is exactly the
@@ -39,8 +43,9 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
   useEffect(() => {
     if (visible) {
       refreshAutomation();
+      refreshKickoff();
     }
-  }, [visible, refreshAutomation]);
+  }, [visible, refreshAutomation, refreshKickoff]);
 
   // The same tab set the Usage panel renders: Codex always, every connected
   // plan beside it. A connected plan this build cannot read has no reader to
@@ -62,7 +67,7 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
     >
       <ViewHeader
         title="Automation"
-        subtitle="Every connected sub gets its own rollover monitor."
+        subtitle="Monitor reported resets and configure optional kickoff actions per connection."
       />
 
       {AsyncResult.match(automation, {
@@ -88,15 +93,15 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
                 null
               }
               onChanged={refreshAutomation}
+              nowMs={nowMs}
             />
           )),
       })}
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        The monitors only read. A 5-hour window cannot be restarted by a prompt
-        — sending one consumes the current window, so nothing is ever sent: a
-        rollover is detected, never caused. Starting a monitor is remembered,
-        so it runs again the next time AgentGauge opens.
+        Rollover monitors only read. Scheduled kickoff is a separate, opt-in
+        action that uses quota; a prompt cannot create, reset, or extend a usage
+        window. Monitor choices are remembered and resume when AgentGauge opens.
       </p>
     </div>
   );
@@ -106,10 +111,12 @@ function MonitorCard({
   tab,
   monitor,
   onChanged,
+  nowMs,
 }: {
   readonly tab: UsageTab & { kind: NonNullable<UsageTab["kind"]> };
   readonly monitor: Ipc.AutomationState | null;
   readonly onChanged: () => void;
+  readonly nowMs: number;
 }): ReactElement {
   const kind = tab.kind;
   const running = monitor?.running ?? false;
@@ -117,17 +124,18 @@ function MonitorCard({
   return (
     <section className={PANEL} data-testid={`automation-panel-${kind}`}>
       <PanelHeader
-        title={`${tab.label} · Rollover monitor`}
+        title={`${tab.label} · Automation`}
         testId={`refresh-automation-${kind}`}
         onRefresh={onChanged}
       />
 
       {monitor === null ? (
         <p className="text-sm text-muted-foreground">
-          Checking the monitor…
+          Checking rollover monitor…
         </p>
       ) : (
         <div className="flex flex-col gap-4">
+          <DetailGroupLabel>Rollover monitor</DetailGroupLabel>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span
               className="text-sm text-foreground"
@@ -155,6 +163,10 @@ function MonitorCard({
           <WatchSchedule kind={kind} monitor={monitor} />
         </div>
       )}
+
+      <div className="border-t border-border/60 pt-4">
+        <KickoffSection kind={kind} nowMs={nowMs} />
+      </div>
     </section>
   );
 }

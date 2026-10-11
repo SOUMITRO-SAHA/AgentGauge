@@ -32,25 +32,51 @@ async function bootOnHome(): Promise<void> {
   await clickDisplayed('[data-testid="refresh-usage"]');
 }
 
+async function bootOnAutomation(): Promise<void> {
+  await dashboardWithPlans();
+  await gotoView("automation");
+}
+
 describe("scheduled kickoff", () => {
-  it("starts opted out for every sub: a toggle that is off and no schedule", async () => {
+  it("keeps kickoff controls off Home and groups them by sub in Automation", async () => {
     await bootOnHome();
 
-    const toggle = await $('[data-testid="kickoff-toggle"]');
-    expect(await toggle.getAttribute("aria-checked")).toBe("false");
-    expect(await $('[data-testid="kickoff-next"]')).not.toExist();
+    expect(
+      await $$('#view-home [data-testid^="kickoff-section-"]'),
+    ).toHaveLength(0);
+
+    await gotoView("automation");
+    await expectDisplayed('[data-testid="kickoff-section-codex"]');
+    await expectDisplayed('[data-testid="kickoff-section-zai"]');
+    await expect($('[data-testid="automation-panel-codex"] h2')).toHaveText(
+      "Codex · Automation",
+    );
+    await expect($('[data-testid="automation-panel-zai"] h2')).toHaveText(
+      "Z.AI · Automation",
+    );
+    await expectDisplayed('[data-testid="kickoff-model-codex"]');
+    await expectDisplayed('[data-testid="kickoff-model-zai"]');
+    await expect($('[data-testid="kickoff-toggle-codex"]')).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    await expect($('[data-testid="kickoff-toggle-zai"]')).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(await $('[data-testid="kickoff-next-codex"]')).not.toExist();
   });
 
-  it("opting in reveals the model picker, the countdown, and records the choice", async () => {
-    await bootOnHome();
+  it("opting in schedules a kickoff and records the choice", async () => {
+    await bootOnAutomation();
 
-    await clickDisplayed('[data-testid="kickoff-toggle"]');
+    await clickDisplayed('[data-testid="kickoff-toggle-codex"]');
 
-    await expectDisplayed('[data-testid="kickoff-next"]');
-    await expect($('[data-testid="kickoff-next"]')).toHaveText(
+    await expectDisplayed('[data-testid="kickoff-next-codex"]');
+    await expect($('[data-testid="kickoff-next-codex"]')).toHaveText(
       expect.stringContaining("in 1h"),
     );
-    await expect($('[data-testid="kickoff-model"]')).toHaveText(
+    await expect($('[data-testid="kickoff-model-codex"]')).toHaveText(
       expect.stringContaining("GPT-6 Luna"),
     );
 
@@ -64,12 +90,10 @@ describe("scheduled kickoff", () => {
     expect(enables.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("offers the model catalog with the cheapest tier marked and records the pick", async () => {
-    await bootOnHome();
-    await clickDisplayed('[data-testid="kickoff-toggle"]');
-    await expectDisplayed('[data-testid="kickoff-next"]');
+  it("selects a model for one sub without asserting access or cost", async () => {
+    await bootOnAutomation();
 
-    await clickDisplayed('[data-testid="kickoff-model"]');
+    await clickDisplayed('[data-testid="kickoff-model-zai"]');
     await browser.pause(500);
 
     // The open listbox is visible to the page (probed: visibility visible,
@@ -81,21 +105,21 @@ describe("scheduled kickoff", () => {
     const catalog = await browser.execute(() => {
       const options = Array.from(
         document.querySelectorAll<HTMLElement>(
-          "[data-testid^='kickoff-model-option']",
+          "[data-testid^='kickoff-model-option-zai-']",
         ),
       );
       return {
         count: options.length,
         ids: options.map((option) => option.getAttribute("data-testid")),
-        cheapestLabel:
-          options
-            .find((option) => option.getAttribute("data-testid") === "kickoff-model-option-gpt-6-luna")
-            ?.textContent ?? null,
+        labels: options.map((option) => option.textContent ?? ""),
       };
     });
     expect(catalog.count).toBeGreaterThanOrEqual(2);
-    expect(catalog.ids).toContain("kickoff-model-option-gpt-6.1-sol");
-    expect(catalog.cheapestLabel).toContain("cheapest");
+    expect(catalog.ids).toContain("kickoff-model-option-zai-glm-5.3");
+    expect(catalog.labels.join(" ")).not.toContain("cheapest");
+    await expect($('[data-testid="kickoff-model-note-zai"]')).toHaveText(
+      expect.stringContaining("availability and quota impact are unknown"),
+    );
 
     // Enter on the already-selected entry would be a no-op (Radix only fires
     // on a value change), so move the highlight up to a different model and
@@ -107,21 +131,35 @@ describe("scheduled kickoff", () => {
     const picks = calls.filter(
       (request) =>
         request.type === "setKickoffModel" &&
-        request.kind === "codex" &&
-        request.modelId === "gpt-6.1-sol",
+        request.kind === "zai" &&
+        request.modelId === "glm-5.3",
     );
     expect(picks.length).toBeGreaterThanOrEqual(1);
+    await expect($('[data-testid="kickoff-model-zai"]')).toHaveText(
+      expect.stringContaining("GLM-5.3"),
+    );
+    await expect($('[data-testid="kickoff-model-codex"]')).toHaveText(
+      expect.stringContaining("GPT-6 Luna"),
+    );
+  });
+
+  it("explains reported-reset timing and quota use without promising rollover verification", async () => {
+    await bootOnAutomation();
+
+    const copy = await $('[data-testid="kickoff-copy-codex"]');
+    await expect(copy).toHaveText(expect.stringContaining("reported reset time"));
+    await expect(copy).toHaveText(expect.stringContaining("does not verify a rollover"));
+    await expect(copy).toHaveText(expect.stringContaining("uses quota"));
+    await expect(copy).toHaveText(expect.stringContaining("does not create, reset, or extend"));
   });
 
   it("warns honestly when the background scheduler is not installed", async () => {
-    await dashboardWithPlans();
-    await gotoView("home");
-    await clickDisplayed('[data-testid="refresh-usage"]');
+    await bootOnAutomation();
 
-    await clickDisplayed('[data-testid="kickoff-toggle"]');
+    await clickDisplayed('[data-testid="kickoff-toggle-codex"]');
 
-    await expectDisplayed('[data-testid="kickoff-scheduler-warn"]');
-    const warning = await $('[data-testid="kickoff-scheduler-warn"]');
+    await expectDisplayed('[data-testid="kickoff-scheduler-warn-codex"]');
+    const warning = await $('[data-testid="kickoff-scheduler-warn-codex"]');
     expect(await warning.getText()).toContain("not installed");
   });
 });

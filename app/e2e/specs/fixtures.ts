@@ -453,6 +453,7 @@ export interface DispatchFixtures {
     readonly supported?: boolean;
     readonly installed?: boolean;
     readonly enabledByKind?: Record<string, boolean>;
+    readonly modelByKind?: Record<string, string>;
     readonly nextKickInMs?: number;
     readonly lastAccepted?: boolean;
   };
@@ -528,6 +529,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       __ismOnboarding__?: { step: string; dismissed: boolean };
       __ismAnalyticsEnabled__?: boolean;
       __ismKickoffEnabled__?: Record<string, boolean>;
+      __ismKickoffModels__?: Record<string, string>;
       __ismAutomationRunning__?: Record<string, boolean>;
       __wdio_mocks__: Record<
         string,
@@ -560,6 +562,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
     };
     w.__ismAnalyticsEnabled__ = f().analyticsEnabled !== false;
     w.__ismKickoffEnabled__ = { ...(f().kickoff?.enabledByKind ?? {}) };
+    w.__ismKickoffModels__ = { ...(f().kickoff?.modelByKind ?? {}) };
     w.__ismAutomationRunning__ = {
       codex: f().automationRunning === true,
       ...(f().automationRunningByKind ?? {}),
@@ -724,7 +727,15 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
           ) {
             w.__ismKickoffEnabled__[request.kind] = request.enabled === true;
           }
+          if (
+            request.type === "setKickoffModel" &&
+            typeof request.kind === "string" &&
+            typeof request.modelId === "string"
+          ) {
+            w.__ismKickoffModels__[request.kind] = request.modelId;
+          }
           const enabled = w.__ismKickoffEnabled__;
+          const selectedModels = w.__ismKickoffModels__;
           const kickoff = data.kickoff ?? {};
           const kinds = ["codex", "zai", "minimax", "kimi"];
           const models: Record<
@@ -755,8 +766,8 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                 return {
                   kind,
                   enabled: isEnabled,
-                  modelId: null,
-                  effectiveModel: cheapest,
+                  modelId: selectedModels[kind] ?? null,
+                  effectiveModel: selectedModels[kind] ?? cheapest,
                   models: kindModels,
                   nextKickAt: isEnabled
                     ? Date.now() + (kickoff.nextKickInMs ?? 3_600_000)

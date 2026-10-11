@@ -86,7 +86,7 @@ const STEPS: ReadonlyArray<{
     id: "automation",
     title: "Watch without spending quota",
     blurb:
-      "The monitor checks Codex without sending prompts or using quota. An optional kickoff can send one trivial 'Hi' with a model you choose about a minute after each 5-hour reset; it uses a little quota and runs only if you opt in.",
+      "Automation settings live on the Automation screen. The rollover monitor checks Codex without sending prompts or using quota. The optional schedule uses the latest reported reset without verifying a rollover. A scheduled 'Hi' spends quota, cannot create, reset, or extend a usage window, and runs only when enabled there. Model availability and quota impact are unknown.",
     Art: AutomationArt,
     demo: "demo-automation",
   },

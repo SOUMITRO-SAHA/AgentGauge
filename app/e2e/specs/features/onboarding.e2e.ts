@@ -287,13 +287,19 @@ describe("onboarding flow", () => {
     }
     await expectDisplayed('[data-testid="demo-automation"]');
     await expect($('[data-testid="onboarding"]')).toHaveText(
-      expect.stringContaining("An optional kickoff can send one trivial 'Hi' with a model you choose about a minute after each 5-hour reset"),
+      expect.stringContaining("Automation settings live on the Automation screen"),
     );
     await expect($('[data-testid="onboarding"]')).toHaveText(
       expect.stringContaining("without sending prompts or using quota"),
     );
     await expect($('[data-testid="onboarding"]')).toHaveText(
-      expect.stringContaining("runs only if you opt in"),
+      expect.stringContaining("latest reported reset without verifying a rollover"),
+    );
+    await expect($('[data-testid="onboarding"]')).toHaveText(
+      expect.stringContaining("A scheduled 'Hi' spends quota"),
+    );
+    await expect($('[data-testid="onboarding"]')).toHaveText(
+      expect.stringContaining("Model availability and quota impact are unknown"),
     );
     await expectDisplayed('[data-testid="demo-automation"] svg[data-art-icon="watch"]');
     await expectDisplayed('[data-testid="demo-automation"] svg[data-art-icon="no-send"]');

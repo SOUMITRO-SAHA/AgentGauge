@@ -20,7 +20,6 @@ import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 
 import { selectedTabAtom, subscriptionsAtom, usageForAtom } from "~/atoms";
 import { PanelHeader } from "~/components/dashboard/panel";
-import { KickoffSection } from "~/components/usage/kickoff-section";
 import { FreshnessPill } from "~/components/usage/provider-status-card";
 import {
   UsageWindowList,
@@ -238,9 +237,8 @@ function ProviderUsage({
         );
       }
       return (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4">
           <SnapshotBody snapshot={snapshot} nowMs={nowMs} />
-          <KickoffSection kind={kind} nowMs={nowMs} />
         </div>
       );
     },

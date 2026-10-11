@@ -13,7 +13,12 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { createElement, type ComponentType } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-type Request = { readonly type: string; readonly kind?: string };
+type Request = {
+  readonly type: string;
+  readonly kind?: string;
+  readonly enabled?: boolean;
+  readonly modelId?: string;
+};
 
 let calls: Array<Record<string, unknown>>;
 
@@ -38,6 +43,44 @@ function installDispatch(options: {
   rolledOver?: string;
 }): void {
   calls = [];
+  const kickoffEnabled: Record<string, boolean> = {};
+  const kickoffModels: Record<string, string> = {};
+  const kickoffResponse = () => ({
+    type: "kickoff",
+    state: {
+      subscriptions: [
+        {
+          kind: "codex",
+          enabled: kickoffEnabled.codex === true,
+          modelId: kickoffModels.codex ?? null,
+          effectiveModel: kickoffModels.codex ?? "gpt-6-luna",
+          models: [
+            { id: "gpt-6-luna", label: "GPT-6 Luna", cheapest: true },
+            { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", cheapest: false },
+          ],
+          nextKickAt: kickoffEnabled.codex ? Date.now() + 3_600_000 : null,
+          lastKickAt: null,
+          lastAccepted: null,
+          lastDetail: null,
+        },
+        {
+          kind: "zai",
+          enabled: kickoffEnabled.zai === true,
+          modelId: kickoffModels.zai ?? null,
+          effectiveModel: kickoffModels.zai ?? "glm-5.3-flash",
+          models: [
+            { id: "glm-5.3", label: "GLM-5.3", cheapest: false },
+            { id: "glm-5.3-flash", label: "GLM-5.3 Flash", cheapest: true },
+          ],
+          nextKickAt: kickoffEnabled.zai ? Date.now() + 3_600_000 : null,
+          lastKickAt: null,
+          lastAccepted: null,
+          lastDetail: null,
+        },
+      ],
+      scheduler: { supported: true, installed: false },
+    },
+  });
   (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
     dispatch: ({ request }: { request: Request }) => {
       calls.push(request as Record<string, unknown>);
@@ -70,6 +113,14 @@ function installDispatch(options: {
               monitor("kimi"),
             ],
           };
+        case "kickoffState":
+          return kickoffResponse();
+        case "setKickoffEnabled":
+          kickoffEnabled[request.kind as string] = request.enabled === true;
+          return kickoffResponse();
+        case "setKickoffModel":
+          kickoffModels[request.kind as string] = request.modelId as string;
+          return kickoffResponse();
         case "startAutomation":
         case "stopAutomation": {
           options.running[request.kind as string] = request.type === "startAutomation";
@@ -131,6 +182,12 @@ it("gives every connected sub its own monitor card with its own status", async (
 
   expect(screen.getByTestId("automation-panel-codex")).toBeTruthy();
   expect(screen.getByTestId("automation-panel-zai")).toBeTruthy();
+  expect(screen.getByTestId("automation-panel-codex").contains(
+    screen.getByTestId("kickoff-model-codex"),
+  )).toBe(true);
+  expect(screen.getByTestId("automation-panel-zai").contains(
+    screen.getByTestId("kickoff-model-zai"),
+  )).toBe(true);
 
   // The persisted choice: codex was enabled before this render, so its card
   // says Running with no click — the Start button must not reappear for a
