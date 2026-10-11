@@ -8,10 +8,12 @@
  * its own tab.
  */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import * as Atom from "effect/unstable/reactivity/Atom";
 import { createElement } from "react";
 import { afterEach, expect, it } from "vitest";
 
+import { statsTabAtom } from "~/atoms";
 import { StatsView, tokenTooltipFormatter } from "~/components/views/stats-view";
 
 type Request = { readonly type: string; readonly provider?: string };
@@ -104,32 +106,36 @@ function zaiAccountUsage() {
   };
 }
 
+function subscriptionsReply() {
+  return {
+    type: "openCodeSubscriptions",
+    subscriptions: [
+      {
+        providerId: "zai-coding-plan",
+        name: "Z.AI Coding Plan",
+        label: "Z.AI",
+        integration: "zai",
+        credential: "stored",
+        apiBase: "https://api.z.ai/api/coding/paas/v4",
+      },
+      {
+        providerId: "alibaba-coding-plan",
+        name: "Alibaba Coding Plan",
+        label: "Alibaba Coding Plan",
+        integration: null,
+        credential: "stored",
+        apiBase: null,
+      },
+    ],
+  };
+}
+
 function installDispatch(): void {
   (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
     dispatch: ({ request }: { request: Request }) => {
       switch (request.type) {
         case "openCodeSubscriptions":
-          return {
-            type: "openCodeSubscriptions",
-            subscriptions: [
-              {
-                providerId: "zai-coding-plan",
-                name: "Z.AI Coding Plan",
-                label: "Z.AI",
-                integration: "zai",
-                credential: "stored",
-                apiBase: "https://api.z.ai/api/coding/paas/v4",
-              },
-              {
-                providerId: "alibaba-coding-plan",
-                name: "Alibaba Coding Plan",
-                label: "Alibaba Coding Plan",
-                integration: null,
-                credential: "stored",
-                apiBase: null,
-              },
-            ],
-          };
+          return subscriptionsReply();
         case "readAccountUsage":
           return {
             type: "accountUsage",
@@ -159,9 +165,140 @@ function installDispatch(): void {
   };
 }
 
+/**
+ * Every deferred dispatcher registers its releases here, and `afterEach`
+ * flushes them: a test that fails mid-assertion must not leave a held read
+ * behind, because the retained atoms would hand that pending state to every
+ * later test in this file.
+ */
+const deferredReleases: Array<() => void> = [];
+
 afterEach(() => {
+  Atom.set(statsTabAtom, "codex");
+  for (const release of deferredReleases.splice(0)) release();
   delete (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__;
   cleanup();
+});
+
+/**
+ * Answers the subscription read at once but holds both usage reads until the
+ * test releases them, so a skeleton's brief moment can be asserted. Every
+ * release must happen before the test ends: the atoms are session-retained,
+ * and a read left pending here would poison every later test in this file.
+ */
+function installDeferredDispatch(): {
+  releaseAccountUsage: (provider: string) => void;
+  releaseUsageFor: (provider: string) => void;
+  releaseAll: () => void;
+} {
+  const pending = new Map<string, () => void>();
+  const hold = (key: string, payload: unknown) =>
+    new Promise((resolve) => pending.set(key, () => resolve(payload)));
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: ({ request }: { request: Request }) => {
+      if (request.type === "readAccountUsage") {
+        return hold(`account:${request.provider ?? ""}`, {
+          type: "accountUsage",
+          usage:
+            request.provider === "zai" ? zaiAccountUsage() : codexAccountUsage(),
+        });
+      }
+      if (request.type === "readUsageFor") {
+        return hold(`usage:${request.provider ?? ""}`, {
+          type: "usage",
+          snapshots:
+            request.provider === "zai" ? [zaiSnapshot()] : [codexSnapshot()],
+        });
+      }
+      return subscriptionsReply();
+    },
+  };
+  return {
+    releaseAccountUsage: (provider) => pending.get(`account:${provider}`)?.(),
+    releaseUsageFor: (provider) => pending.get(`usage:${provider}`)?.(),
+    releaseAll: () => {
+      for (const release of pending.values()) release();
+      pending.clear();
+    },
+  };
+}
+
+function registerDeferredDispatch() {
+  const deferred = installDeferredDispatch();
+  deferredReleases.push(deferred.releaseAll);
+  return deferred;
+}
+
+it("stands in with a shaped skeleton while the first analytics read runs", async () => {
+  const release = registerDeferredDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  expect(await screen.findByTestId("stats-account-analytics")).toBeTruthy();
+  const skeleton = await screen.findByTestId("stats-analytics-skeleton");
+
+  // The skeleton mirrors the analytics it becomes: a metric-card row and the
+  // daily chart block, so the panel never collapses and snaps back.
+  const cards = within(skeleton).getByTestId("stats-analytics-skeleton-cards");
+  expect(cards.children.length).toBe(4);
+  expect(
+    within(skeleton).getByTestId("stats-analytics-skeleton-chart"),
+  ).toBeTruthy();
+
+  // The old loading line is gone; a placeholder paragraph reserved nothing.
+  expect(screen.queryByText("Reading Codex activity…")).toBeNull();
+
+  release.releaseAccountUsage("codex");
+  expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
+  expect(screen.queryByTestId("stats-analytics-skeleton")).toBeNull();
+  release.releaseAll();
+});
+
+it("holds both of a plan's panels on shaped skeletons during its first read", async () => {
+  const release = registerDeferredDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  fireEvent.mouseDown(await screen.findByTestId("stats-tab-zai"));
+  fireEvent.click(screen.getByTestId("stats-tab-zai"));
+
+  const analytics = await screen.findByTestId("stats-plan-analytics");
+  expect(
+    within(analytics).getByTestId("stats-analytics-skeleton"),
+  ).toBeTruthy();
+
+  // The reading skeleton mirrors the reading: freshness pill, the plan's
+  // metric cards (plan plus its two windows), and the source line.
+  const reading = await screen.findByTestId("stats-reading-skeleton");
+  within(reading).getByTestId("stats-reading-skeleton-pill");
+  const cards = within(reading).getByTestId("stats-reading-skeleton-cards");
+  expect(cards.children.length).toBe(3);
+  within(reading).getByTestId("stats-reading-skeleton-source");
+
+  release.releaseAccountUsage("zai");
+  release.releaseUsageFor("zai");
+  expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
+  expect(screen.queryByTestId("stats-analytics-skeleton")).toBeNull();
+  expect(screen.queryByTestId("stats-reading-skeleton")).toBeNull();
+  release.releaseAll();
+});
+
+it("shows a revisited tab from its retained reading, without a skeleton", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
+
+  fireEvent.mouseDown(screen.getByTestId("stats-tab-zai"));
+  fireEvent.click(screen.getByTestId("stats-tab-zai"));
+  expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
+
+  fireEvent.mouseDown(screen.getByTestId("stats-tab-codex"));
+  fireEvent.click(screen.getByTestId("stats-tab-codex"));
+  expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
+  expect(screen.queryByTestId("stats-analytics-skeleton")).toBeNull();
+  expect(screen.queryByTestId("stats-reading-skeleton")).toBeNull();
 });
 
 it("renders analytics immediately, with no consent gate", async () => {

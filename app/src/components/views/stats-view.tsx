@@ -275,14 +275,7 @@ function CodexActivity({ onDisable }: { readonly onDisable: () => void }) {
         quota-window history.
       </p>
       {AsyncResult.match(usage, {
-        onInitial: () => (
-          <p
-            className="text-sm text-muted-foreground"
-            data-testid="stats-analytics-loading"
-          >
-            Reading Codex activity…
-          </p>
-        ),
+        onInitial: () => <AnalyticsLoadingSkeleton />,
         onSuccess: (result) => (
           <AnalyticsContent usage={result.value} refreshing={result.waiting} />
         ),
@@ -361,14 +354,7 @@ function PlanAnalytics({
         window, not plan credits or quota-window history.
       </p>
       {AsyncResult.match(usage, {
-        onInitial: () => (
-          <p
-            className="text-sm text-muted-foreground"
-            data-testid="stats-plan-analytics-loading"
-          >
-            Reading {label} activity…
-          </p>
-        ),
+        onInitial: () => <AnalyticsLoadingSkeleton />,
         onSuccess: (result) => (
           <AnalyticsContent usage={result.value} refreshing={result.waiting} />
         ),
@@ -435,15 +421,7 @@ function PlanReading({
           : "This plan does not report token history; these are its latest window readings."}
       </p>
       {AsyncResult.match(usage, {
-        onInitial: () => (
-          <div
-            className="flex flex-col gap-3"
-            data-testid="stats-reading-skeleton"
-          >
-            <Skeleton className="h-8 w-40" />
-            <Skeleton className="h-20 w-full rounded-lg" />
-          </div>
-        ),
+        onInitial: () => <ReadingLoadingSkeleton />,
         onSuccess: (result) => {
           const snapshot = result.value.find(
             (item) => item.provider === kind,
@@ -721,6 +699,91 @@ function MetricCard({
       {detail ? (
         <span className="text-xs text-muted-foreground">{detail}</span>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * One metric card's shape while its reading is on the way.
+ *
+ * Both stat bodies lay their numbers out in the same four-across card grid,
+ * so one placeholder card serves either.
+ */
+function MetricCardSkeleton() {
+  return (
+    <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3">
+      <Skeleton className="h-3 w-16" />
+      <Skeleton className="h-7 w-24" />
+    </div>
+  );
+}
+
+function MetricCardsSkeleton({
+  count,
+  testId,
+}: {
+  readonly count: number;
+  readonly testId: string;
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid={testId}>
+      {Array.from({ length: count }, (_, index) => (
+        <MetricCardSkeleton key={index} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The analytics body's shape while its first read runs.
+ *
+ * A text line reserved almost no height, so the panel collapsed and snapped
+ * back when the reading landed — the same disruption as blocking the tab
+ * switch. The skeleton stands in for everything the reading becomes: the
+ * metric-card row, the "Daily tokens" heading, and the chart block at its
+ * full height.
+ */
+function AnalyticsLoadingSkeleton() {
+  return (
+    <div className="flex flex-col gap-4" data-testid="stats-analytics-skeleton">
+      <MetricCardsSkeleton
+        count={4}
+        testId="stats-analytics-skeleton-cards"
+      />
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-3 w-48" />
+      </div>
+      <Skeleton
+        className="h-56 w-full rounded-lg"
+        data-testid="stats-analytics-skeleton-chart"
+      />
+    </div>
+  );
+}
+
+/**
+ * The reading body's shape while its first read runs.
+ *
+ * Mirrors what `ReadingBody` becomes: the freshness pill, the metric cards
+ * (a plan's name plus its two reported windows, the count a coding plan
+ * reports), and the source line.
+ */
+function ReadingLoadingSkeleton() {
+  return (
+    <div className="flex flex-col gap-4" data-testid="stats-reading-skeleton">
+      <Skeleton
+        className="h-5 w-24 rounded-full"
+        data-testid="stats-reading-skeleton-pill"
+      />
+      <MetricCardsSkeleton
+        count={3}
+        testId="stats-reading-skeleton-cards"
+      />
+      <Skeleton
+        className="h-3 w-44"
+        data-testid="stats-reading-skeleton-source"
+      />
     </div>
   );
 }

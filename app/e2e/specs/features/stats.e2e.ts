@@ -3,6 +3,7 @@ import { expect, browser, $, $$ } from "@wdio/globals";
 import {
   dashboardLive,
   dashboardWithPlans,
+  dashboardWithSlowStats,
   dashboardWithZaiAnalytics,
   dispatchCalls,
   clickDisplayed,
@@ -225,6 +226,59 @@ describe("stats", () => {
     await expectDisplayed('[data-testid="stats-plan-analytics-source"]');
 
     await clickDisplayed('[data-testid="stats-tab-codex"]');
+  });
+
+  it("stands in with shaped skeletons while a plan's first stats load", async () => {
+    await dashboardWithSlowStats();
+    await gotoView("stats");
+
+    await clickDisplayed('[data-testid="stats-tab-zai"]');
+
+    // The analytics skeleton reserves everything the reading becomes: the
+    // metric-card row and the chart at its full height, so the panel never
+    // collapses and snaps back when the reading lands.
+    await expectDisplayed(
+      '[data-testid="stats-plan-analytics"] [data-testid="stats-analytics-skeleton"]',
+    );
+    await expectDisplayed(
+      '[data-testid="stats-plan-analytics"] [data-testid="stats-analytics-skeleton-cards"]',
+    );
+    await expectDisplayed(
+      '[data-testid="stats-plan-analytics"] [data-testid="stats-analytics-skeleton-chart"]',
+    );
+
+    // The reading below reserves its own shape: pill, cards, source line.
+    await expectDisplayed('[data-testid="stats-reading-skeleton"]');
+    await expectDisplayed('[data-testid="stats-reading-skeleton-pill"]');
+    await expectDisplayed('[data-testid="stats-reading-skeleton-cards"]');
+    await expectDisplayed('[data-testid="stats-reading-skeleton-source"]');
+
+    await expect($('[data-testid="stats-total-tokens"]')).toHaveText(
+      /21[.,]7B/,
+    );
+    await expectDisplayed('[data-testid="stats-plan-window-used-5h"]');
+    expect(await $$('[data-testid="stats-analytics-skeleton"]')).toHaveLength(0);
+    expect(await $$('[data-testid="stats-reading-skeleton"]')).toHaveLength(0);
+  });
+
+  it("shows a revisited plan from its retained reading, skeleton-free", async () => {
+    await dashboardWithZaiAnalytics();
+    await gotoView("stats");
+
+    await clickDisplayed('[data-testid="stats-tab-zai"]');
+    await expect($('[data-testid="stats-total-tokens"]')).toHaveText(
+      /21[.,]7B/,
+    );
+
+    await clickDisplayed('[data-testid="stats-tab-codex"]');
+    await expectDisplayed('[data-testid="stats-total-tokens"]');
+
+    await clickDisplayed('[data-testid="stats-tab-zai"]');
+    await expect($('[data-testid="stats-total-tokens"]')).toHaveText(
+      /21[.,]7B/,
+    );
+    expect(await $$('[data-testid="stats-analytics-skeleton"]')).toHaveLength(0);
+    expect(await $$('[data-testid="stats-reading-skeleton"]')).toHaveLength(0);
   });
 
   it("turns local analytics off and back on as a preference, with no gate", async () => {
