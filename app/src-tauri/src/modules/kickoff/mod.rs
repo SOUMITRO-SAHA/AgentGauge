@@ -19,7 +19,10 @@ pub(crate) mod agent;
 pub(crate) mod worker;
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+#[cfg(test)]
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,13 +46,13 @@ pub const KICK_DELAY_MS: i64 = 60_000;
 /// How long to wait after a failed attempt before trying again.
 pub const RETRY_MS: i64 = 5 * 60 * 1000;
 
-/// Where the shared schedule lives, relative to `$HOME`.
+/// The shared schedule's file name inside the legacy shared directory.
 ///
-/// The same directory the widget snapshot uses, for the same reason: the
-/// desktop app and a second process (the worker) must agree on a path without
-/// either depending on the other.
-pub const SCHEDULE_RELATIVE_PATH: &str =
-    "Library/Application Support/AI Sub Stats/kickoff-schedule.json";
+/// The same legacy directory the widget snapshot uses, for the same reason:
+/// the desktop app and a second process (the worker) must agree on a path
+/// without either depending on the other, and the directory itself is the
+/// shared contract in `shared::legacy_shared`.
+pub const SCHEDULE_FILE_NAME: &str = "kickoff-schedule.json";
 
 /// Bumped when the schedule shape changes. An unrecognised version is treated
 /// as no schedule rather than as a schedule that may not mean what it says.
@@ -241,7 +244,7 @@ impl KickoffStore {
     pub fn from_env() -> Option<Self> {
         let home = std::env::var_os("HOME")?;
         Some(Self {
-            path: Path::new(&home).join(SCHEDULE_RELATIVE_PATH),
+            path: crate::shared::legacy_shared::legacy_dir(&home).join(SCHEDULE_FILE_NAME),
         })
     }
 

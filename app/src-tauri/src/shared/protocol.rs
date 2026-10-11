@@ -17,6 +17,7 @@ use crate::modules::automation::AutomationState;
 use crate::modules::cli_detection::CliToolStatus;
 use crate::modules::kickoff::KickoffOverview;
 use crate::modules::onboarding::{OnboardingProgress, OnboardingStep};
+use crate::modules::process_insights::ProcessInsights as ProcessInsightsReport;
 use crate::modules::widget::SystemWidgetStatus;
 use crate::shared::domain::{
     AccountUsage, CodingSubscription, PlanKind, ProviderKind, UsageSnapshot,
@@ -41,6 +42,13 @@ pub enum AppRequest {
     ProviderStatus,
     /// Detects supported coding-agent CLIs without starting sessions.
     CliDetection,
+    /// Reads the read-only process and storage insights for the app and the
+    /// tracked CLIs.
+    ///
+    /// Deliberately a bare read with no counterpart write: there is no
+    /// capability to stop, signal, or delete anything, so read-onlyness is a
+    /// property of the protocol rather than a promise of one screen.
+    ProcessInsights,
     /// Lists the coding subscriptions the user connected through OpenCode.
     ///
     /// Read-only: asks OpenCode itself what is connected, and never touches a
@@ -120,6 +128,7 @@ impl AppRequest {
             Self::Hello => "hello",
             Self::ProviderStatus => "providerStatus",
             Self::CliDetection => "cliDetection",
+            Self::ProcessInsights => "processInsights",
             Self::OpenCodeSubscriptions => "openCodeSubscriptions",
             Self::ReadUsage => "readUsage",
             Self::ReadUsageFor { .. } => "readUsageFor",
@@ -159,6 +168,9 @@ pub enum AppResponse {
     },
     CliDetections {
         tools: Vec<CliToolStatus>,
+    },
+    ProcessInsights {
+        insights: ProcessInsightsReport,
     },
     OpenCodeSubscriptions {
         subscriptions: Vec<CodingSubscription>,
@@ -230,6 +242,27 @@ mod tests {
             serde_json::from_str(r#"{"type":"cliDetection"}"#).expect("deserializes");
         assert_eq!(request, AppRequest::CliDetection);
         assert_eq!(request.name(), "cliDetection");
+    }
+
+    #[test]
+    fn process_insights_is_a_bare_read_only_request() {
+        let request: AppRequest =
+            serde_json::from_str(r#"{"type":"processInsights"}"#).expect("deserializes");
+        assert_eq!(request, AppRequest::ProcessInsights);
+        assert_eq!(request.name(), "processInsights");
+    }
+
+    #[test]
+    fn a_process_insights_reply_carries_the_report_under_its_own_tag() {
+        let response = AppResponse::ProcessInsights {
+            insights: ProcessInsightsReport {
+                fetched_at: 1,
+                groups: Vec::new(),
+            },
+        };
+        let json = serde_json::to_value(&response).expect("serializes");
+        assert_eq!(json["type"], "processInsights");
+        assert_eq!(json["insights"]["fetchedAt"], 1);
     }
 
     #[test]
@@ -326,6 +359,7 @@ mod tests {
             },
             AppRequest::OnboardingProgress,
             AppRequest::OpenCodeSubscriptions,
+            AppRequest::ProcessInsights,
             AppRequest::KickoffState,
             AppRequest::SetKickoffEnabled {
                 kind: ProviderKind::Codex,
@@ -413,6 +447,7 @@ mod tests {
             },
             AppRequest::OnboardingProgress,
             AppRequest::OpenCodeSubscriptions,
+            AppRequest::ProcessInsights,
             AppRequest::KickoffState,
             AppRequest::SetKickoffEnabled {
                 kind: ProviderKind::Codex,

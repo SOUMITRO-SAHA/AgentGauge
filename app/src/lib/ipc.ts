@@ -144,6 +144,72 @@ export const CliToolStatus = Schema.Struct({
 });
 export type CliToolStatus = typeof CliToolStatus.Type;
 
+/**
+ * One running process in the read-only process insights.
+ *
+ * `startedAt` is Unix **seconds**; uptime is derived against the clock so it
+ * ticks without another read. `memoryBytes` is the resident set size.
+ */
+export const ProcessSummary = Schema.Struct({
+  pid: Schema.Number,
+  name: Schema.String,
+  command: Schema.NullOr(Schema.String),
+  startedAt: Schema.NullOr(Schema.Number),
+  memoryBytes: Schema.NullOr(Schema.Number),
+});
+export type ProcessSummary = typeof ProcessSummary.Type;
+
+/** One labelled piece of a storage footprint. */
+export const StorageRow = Schema.Struct({
+  label: Schema.String,
+  path: Schema.String,
+  bytes: Schema.Number,
+  fileCount: Schema.Number,
+});
+export type StorageRow = typeof StorageRow.Type;
+
+/**
+ * A group's storage footprint, or the honest reason there is none.
+ *
+ * `absent` is a real answer — a tool that never created its data directory —
+ * and must never render as `0 B`, which would read as measured emptiness.
+ */
+export const StorageReport = Schema.Union([
+  Schema.Struct({
+    state: Schema.Literal("measured"),
+    totalBytes: Schema.Number,
+    totalFiles: Schema.Number,
+    rows: Schema.Array(StorageRow),
+  }),
+  Schema.Struct({
+    state: Schema.Literal("absent"),
+    reason: Schema.String,
+  }),
+]);
+export type StorageReport = typeof StorageReport.Type;
+
+/**
+ * Everything the Processes screen shows about one group. The groups arrive in
+ * display order from Rust; adding a future CLI is a backend addition the
+ * renderer renders without a change.
+ */
+export const ProcessGroup = Schema.Struct({
+  id: Schema.String,
+  displayName: Schema.String,
+  processes: Schema.Array(ProcessSummary),
+  totalMemoryBytes: Schema.Number,
+  storage: StorageReport,
+});
+export type ProcessGroup = typeof ProcessGroup.Type;
+
+/** The whole process-insights read, stamped at its fetch time. */
+export const ProcessInsights = Schema.Struct({
+  /** Epoch milliseconds. */
+  fetchedAt: Schema.Number,
+  groups: Schema.Array(ProcessGroup),
+});
+export type ProcessInsights = typeof ProcessInsights.Type;
+
 export const Freshness = Schema.Literals(["live", "cached", "stale", "unavailable"]);
 export type Freshness = typeof Freshness.Type;
 
@@ -347,11 +413,19 @@ export const PingOutcome = Schema.Struct({
 });
 export type PingOutcome = typeof PingOutcome.Type;
 
-/** One model the scheduled kickoff may use; `cheapest` is the default. */
+/** One supported effort that the model accepts. */
+export const KickoffEffort = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+});
+export type KickoffEffort = typeof KickoffEffort.Type;
+
+/** One model the scheduled kickoff may use; `cheapest` marks the price-ranked default. */
 export const KickoffModel = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
   cheapest: Schema.Boolean,
+  efforts: Schema.optional(Schema.Array(KickoffEffort)),
 });
 export type KickoffModel = typeof KickoffModel.Type;
 
@@ -363,6 +437,8 @@ export const KickoffView = Schema.Struct({
   modelId: Schema.NullOr(Schema.String),
   /** The model the next kickoff would actually use. */
   effectiveModel: Schema.String,
+  effortId: Schema.optional(Schema.String),
+  modelError: Schema.optional(Schema.NullOr(Schema.String)),
   models: Schema.Array(KickoffModel),
   /** Epoch ms of the next scheduled attempt, if one is armed. */
   nextKickAt: Schema.NullOr(Schema.Number),
@@ -406,6 +482,7 @@ export const AppRequest = Schema.Union([
   Schema.Struct({ type: Schema.Literal("hello") }),
   Schema.Struct({ type: Schema.Literal("providerStatus") }),
   Schema.Struct({ type: Schema.Literal("cliDetection") }),
+  Schema.Struct({ type: Schema.Literal("processInsights") }),
   Schema.Struct({ type: Schema.Literal("openCodeSubscriptions") }),
   Schema.Struct({ type: Schema.Literal("readUsage") }),
   Schema.Struct({ type: Schema.Literal("readUsageFor"), provider: ProviderKind }),
@@ -439,6 +516,11 @@ export const AppRequest = Schema.Union([
     kind: ProviderKind,
     modelId: Schema.String,
   }),
+  Schema.Struct({
+    type: Schema.Literal("setKickoffEffort"),
+    kind: ProviderKind,
+    effortId: Schema.String,
+  }),
   Schema.Struct({ type: Schema.Literal("onboardingProgress") }),
   Schema.Struct({
     type: Schema.Literal("setOnboardingStep"),
@@ -469,6 +551,10 @@ export const AppResponse = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("cliDetections"),
     tools: Schema.Array(CliToolStatus),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("processInsights"),
+    insights: ProcessInsights,
   }),
   Schema.Struct({
     type: Schema.Literal("openCodeSubscriptions"),
@@ -591,6 +677,18 @@ export const getCliDetection = () =>
   );
 
 /**
+ * Reads the read-only process and storage insights for the app and the
+ * tracked CLIs.
+ *
+ * There is no counterpart write anywhere in the protocol: the screen cannot
+ * stop, signal, or delete anything, by construction.
+ */
+export const getProcessInsights = () =>
+  request({ type: "processInsights" }).pipe(
+    Effect.map((response) => expectType(response, "processInsights").insights),
+  );
+
+/**
  * Lists the coding subscriptions the user connected through OpenCode.
  *
  * An empty list is a real answer — OpenCode absent, or nothing connected —
@@ -693,6 +791,12 @@ export const setKickoffEnabled = (kind: ProviderKind, enabled: boolean) =>
 /** Selects the model the scheduled kickoff sends for one subscription. */
 export const setKickoffModel = (kind: ProviderKind, modelId: string) =>
   request({ type: "setKickoffModel", kind, modelId }).pipe(
+    Effect.map((response) => expectType(response, "kickoff").state),
+  );
+
+/** Selects the effort the scheduled kickoff uses for one subscription. */
+export const setKickoffEffort = (kind: ProviderKind, effortId: string) =>
+  request({ type: "setKickoffEffort", kind, effortId }).pipe(
     Effect.map((response) => expectType(response, "kickoff").state),
   );
 

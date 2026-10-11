@@ -211,7 +211,7 @@ fn run_command(program: &str, args: &[&str]) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::kickoff::{KickoffSubscription, SCHEDULE_RELATIVE_PATH};
+    use crate::modules::kickoff::{KickoffSubscription, SCHEDULE_FILE_NAME};
     use crate::shared::domain::ProviderKind;
 
     #[test]
@@ -310,8 +310,13 @@ mod tests {
 
     #[test]
     fn the_shared_schedule_path_matches_the_widget_directory() {
-        // Both files live beside each other by contract.
-        assert!(SCHEDULE_RELATIVE_PATH.starts_with("Library/Application Support/AI Sub Stats/"));
+        // Both files live beside each other by contract, composed from the one
+        // shared directory constant rather than restating it.
+        let home = std::ffi::OsString::from("/Users/dev");
+        let schedule = crate::shared::legacy_shared::legacy_dir(&home).join(SCHEDULE_FILE_NAME);
+        let snapshot = crate::shared::legacy_shared::legacy_dir(&home)
+            .join(crate::modules::widget::SNAPSHOT_FILE_NAME);
+        assert_eq!(schedule.parent(), snapshot.parent());
     }
 
     #[test]

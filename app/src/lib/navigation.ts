@@ -17,6 +17,7 @@
 import type { Icon } from "@phosphor-icons/react";
 import {
   ChartBar,
+  Cpu,
   Flask,
   Gear,
   House,
@@ -67,7 +68,13 @@ export function layoutForWidth(width: number): NavLayout {
 }
 
 /** A destination. */
-export type Route = "home" | "automation" | "stats" | "settings" | "test";
+export type Route =
+  | "home"
+  | "automation"
+  | "stats"
+  | "processes"
+  | "settings"
+  | "test";
 
 /** The destination shown on first paint. */
 export const DEFAULT_ROUTE: Route = "home";
@@ -90,6 +97,12 @@ export const ROUTES: ReadonlyArray<RouteDefinition> = [
     label: "Stats",
     description: "Every window, with what remains in each.",
     icon: ChartBar,
+  },
+  {
+    id: "processes",
+    label: "Processes",
+    description: "What the agents are using on this machine.",
+    icon: Cpu,
   },
   {
     id: "settings",
@@ -168,8 +181,8 @@ export interface ShortcutKeyEvent {
 /**
  * The destination a keyboard shortcut selects, or none.
  *
- * ⌘1…⌘4 map to production destinations. Dev builds may append the Test screen
- * as ⌘5; the caller explicitly opts into that route set, so it cannot leak into
+ * ⌘1…⌘5 map to production destinations. Dev builds may append the Test screen
+ * as ⌘6; the caller explicitly opts into that route set, so it cannot leak into
  * production shortcuts.
  *
  * Chords with extra modifiers answer `null`: ⌘⇧1 and ⌘⌥1 conventionally mean

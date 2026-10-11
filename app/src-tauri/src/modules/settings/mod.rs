@@ -22,7 +22,7 @@ use crate::shared::error::Error;
 /// Every field is optional: a missing file, a missing field, and "the user
 /// never chose" are the same state. Adding a field later defaults old files
 /// rather than invalidating them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiState {
     /// The destination the renderer should reopen on, or none.
@@ -32,12 +32,6 @@ pub struct UiState {
     /// that can drift — the exact failure mode `OnboardingStep` already had
     /// when its two lists disagreed.
     pub last_route: Option<String>,
-}
-
-impl Default for UiState {
-    fn default() -> Self {
-        Self { last_route: None }
-    }
 }
 
 /// Largest accepted [`UiState::last_route`].

@@ -94,7 +94,7 @@ describe("developer test screen", () => {
       expect.stringContaining("never send a prompt or consume usage"),
     );
 
-    for (const screen of ["home", "automation", "stats", "settings"]) {
+    for (const screen of ["home", "automation", "stats", "processes", "settings"]) {
       await clickDisplayed(`[data-testid="test-screen-${screen}"]`);
       await expectDisplayed(`[data-testid="view-${screen}"]`);
       await clickDisplayed('[data-testid="nav-test"]');

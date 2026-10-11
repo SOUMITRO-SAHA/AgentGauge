@@ -19,6 +19,7 @@ use crate::modules::onboarding::{
     OnboardingProgress, OnboardingState, OnboardingStep, OnboardingStore,
 };
 use crate::modules::opencode::OpenCodeCatalog;
+use crate::modules::process_insights;
 use crate::modules::providers::{ProviderRegistry, PING_PROMPT};
 use crate::modules::settings::SettingsStore;
 use crate::modules::widget::{now_secs, SnapshotStore, SystemWidgetStatus, WidgetSnapshot};
@@ -42,6 +43,10 @@ pub struct AppState {
     /// directory, in which case every kickoff capability reports unsupported.
     /// Shared because the automation reading hook also folds into it.
     pub kickoff: Option<Arc<KickoffStore>>,
+    /// The app's own data directory, resolved once by the composition root,
+    /// so the process-insights read can measure the app's on-disk footprint
+    /// without reaching for a global.
+    pub app_data: Option<std::path::PathBuf>,
 }
 
 /// The single entry point for every renderer capability.
@@ -113,6 +118,10 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
 
         AppRequest::CliDetection => Ok(AppResponse::CliDetections {
             tools: cli_detection::detect(),
+        }),
+
+        AppRequest::ProcessInsights => Ok(AppResponse::ProcessInsights {
+            insights: process_insights::read_insights(state.app_data.clone()),
         }),
 
         AppRequest::OpenCodeSubscriptions => Ok(AppResponse::OpenCodeSubscriptions {
@@ -507,6 +516,7 @@ mod tests {
                 enabled: true,
             },
             AppRequest::OnboardingProgress,
+            AppRequest::ProcessInsights,
             AppRequest::SystemWidgetStatus,
         ];
         for request in all {

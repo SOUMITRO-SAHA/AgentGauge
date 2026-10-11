@@ -9,7 +9,7 @@ import {
 } from "../fixtures.js";
 
 /**
- * Navigation: the brand mark, the four destinations, the responsive
+ * Navigation: the brand mark, the five destinations, the responsive
  * sidebar/tab-bar swap, and the persistence of the last one.
  *
  * Runs in the single ordered group configured in `wdio.conf.ts`; the harness
@@ -86,8 +86,8 @@ describe("navigation", () => {
     }
   });
 
-  it("starts on Home with exactly the four destinations", async () => {
-    for (const id of ["home", "automation", "stats", "settings"]) {
+  it("starts on Home with exactly the five destinations", async () => {
+    for (const id of ["home", "automation", "stats", "processes", "settings"]) {
       await expectDisplayed(`[data-testid="nav-${id}"]`);
     }
     await expect(

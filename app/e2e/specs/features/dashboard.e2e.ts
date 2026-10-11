@@ -34,7 +34,7 @@ describe("dashboard", () => {
   });
 
   it("keeps the Home header and panels separated by the container gap", async () => {
-    for (const view of ["home", "stats", "automation", "settings"] as const) {
+    for (const view of ["home", "stats", "automation", "processes", "settings"] as const) {
       await gotoView(view);
       const rowGap = await browser.execute((route) => {
         const container = document.querySelector(`[data-testid="view-${route}"]`);

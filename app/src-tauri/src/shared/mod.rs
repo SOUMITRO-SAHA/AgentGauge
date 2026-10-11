@@ -8,5 +8,6 @@ pub mod bundle;
 pub mod clock;
 pub mod domain;
 pub mod error;
+pub mod legacy_shared;
 pub mod protocol;
 pub mod provider;

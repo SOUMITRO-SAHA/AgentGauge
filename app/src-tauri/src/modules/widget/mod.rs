@@ -31,7 +31,10 @@
 //! user's desktop.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+#[cfg(test)]
+use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -56,12 +59,12 @@ pub const SNAPSHOT_VERSION: u32 = 1;
 pub const MINIMUM_MACOS_MAJOR: u32 = 14;
 pub const MINIMUM_MACOS_VERSION: &str = "14.0";
 
-/// The directory the snapshot is written to, relative to `$HOME`.
+/// The snapshot file's name inside the legacy shared directory.
 ///
-/// Must stay in step with `SnapshotStore.relativePath` in
+/// The directory itself is the shared contract in `shared::legacy_shared`.
+/// The joined path must stay in step with `SnapshotStore.relativePath` in
 /// `widget/Sources/SnapshotStore.swift`.
-pub const SNAPSHOT_RELATIVE_PATH: &str =
-    "Library/Application Support/AI Sub Stats/widget-snapshot.json";
+pub const SNAPSHOT_FILE_NAME: &str = "widget-snapshot.json";
 
 // ---------------------------------------------------------------------------
 // Snapshot: the wire contract with the Swift side
@@ -196,7 +199,7 @@ impl SnapshotStore {
     pub fn from_env() -> Option<Self> {
         let home = std::env::var_os("HOME")?;
         Some(Self {
-            path: Path::new(&home).join(SNAPSHOT_RELATIVE_PATH),
+            path: crate::shared::legacy_shared::legacy_dir(&home).join(SNAPSHOT_FILE_NAME),
         })
     }
 

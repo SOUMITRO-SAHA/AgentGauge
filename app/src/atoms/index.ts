@@ -122,6 +122,17 @@ export function kickoffViewOf(
 }
 
 /**
+ * The read-only process and storage insights, retained for the session.
+ *
+ * One atom for the whole report: the read is a single snapshot of every
+ * group at one instant, so per-group atoms could disagree about when "now"
+ * was and split one screen into several truths.
+ */
+export const processInsightsAtom = Atom.setIdleTTL(Infinity)(
+  runtime.atom(() => Ipc.getProcessInsights()),
+);
+
+/**
  * The bundled price list, retained for the session.
  *
  * It is a static asset, so one read serves the whole session. A failed load

@@ -11,8 +11,8 @@
  *    the stored preference once on mount and writes on every navigation. The
  *    read is guarded — a value that is not a destination is ignored, and a read
  *    that lands after the user has already navigated never overrides them.
- * 3. **⌘1…⌘4 switch production destinations.** Dev builds append the Test
- *    screen as ⌘5; `routeForShortcut` is tested in `navigation.test.ts`.
+ * 3. **⌘1…⌘5 switch production destinations.** Dev builds append the Test
+ *    screen as ⌘6; `routeForShortcut` is tested in `navigation.test.ts`.
  */
 
 import * as Effect from "effect/Effect";
@@ -22,6 +22,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { routeAtom } from "~/atoms";
 import { AutomationView } from "~/components/views/automation-view";
 import { HomeView } from "~/components/views/home-view";
+import { ProcessView } from "~/components/views/process-view";
 import { SettingsView } from "~/components/views/settings-view";
 import { StatsView } from "~/components/views/stats-view";
 import { TestView } from "~/components/views/test-view";
@@ -118,6 +119,7 @@ export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
             <HomeView visible={route === "home"} />
             <AutomationView visible={route === "automation"} />
             <StatsView visible={route === "stats"} />
+            <ProcessView visible={route === "processes"} />
             <SettingsView visible={route === "settings"} />
             {DEV_TEST_SCREEN_ENABLED && (
               <TestView

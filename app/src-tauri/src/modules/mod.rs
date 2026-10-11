@@ -12,6 +12,7 @@ pub mod commands;
 pub mod kickoff;
 pub mod onboarding;
 pub mod opencode;
+pub mod process_insights;
 pub mod providers;
 pub mod settings;
 pub mod widget;

@@ -20,11 +20,12 @@ import {
 } from "~/lib/navigation";
 
 describe("ROUTES", () => {
-  it("is exactly the four destinations, in the order they read", () => {
+  it("is exactly the five destinations, in the order they read", () => {
     expect(ROUTES.map((route) => route.id)).toEqual([
       "home",
       "automation",
       "stats",
+      "processes",
       "settings",
     ]);
   });
@@ -34,6 +35,7 @@ describe("ROUTES", () => {
       "Home",
       "Automation",
       "Stats",
+      "Processes",
       "Settings",
     ]);
   });
@@ -62,12 +64,14 @@ describe("development destinations", () => {
       "home",
       "automation",
       "stats",
+      "processes",
       "settings",
     ]);
     expect(routesNeedingNavigation(true).map((route) => route.id)).toEqual([
       "home",
       "automation",
       "stats",
+      "processes",
       "settings",
       "test",
     ]);
@@ -79,8 +83,8 @@ describe("development destinations", () => {
     expect(routeLabel("test", true)).toBe("Test");
   });
 
-  it("assigns the Test route Cmd-5 only when explicitly enabled", () => {
-    const key = { key: "5", metaKey: true };
+  it("assigns the Test route Cmd-6 only when explicitly enabled", () => {
+    const key = { key: "6", metaKey: true };
     expect(routeForShortcut(key, false)).toBeNull();
     expect(routeForShortcut(key, true)).toBe("test");
   });
@@ -169,7 +173,8 @@ describe("routeForShortcut", () => {
     expect(routeForShortcut({ key: "1", metaKey: true })).toBe("home");
     expect(routeForShortcut({ key: "2", metaKey: true })).toBe("automation");
     expect(routeForShortcut({ key: "3", metaKey: true })).toBe("stats");
-    expect(routeForShortcut({ key: "4", metaKey: true })).toBe("settings");
+    expect(routeForShortcut({ key: "4", metaKey: true })).toBe("processes");
+    expect(routeForShortcut({ key: "5", metaKey: true })).toBe("settings");
   });
 
   it("accepts ctrl instead, for non-mac keyboards", () => {
@@ -202,9 +207,9 @@ describe("routeForShortcut", () => {
   });
 
   it("answers nothing beyond the last destination", () => {
-    // ⌘5 exists only if a fifth destination exists; deriving from ROUTES keeps
+    // ⌘6 exists only if a sixth destination exists; deriving from ROUTES keeps
     // the shortcut set from claiming a destination that is not rendered.
-    expect(routeForShortcut({ key: "5", metaKey: true })).toBeNull();
+    expect(routeForShortcut({ key: "6", metaKey: true })).toBeNull();
     expect(routeForShortcut({ key: "0", metaKey: true })).toBeNull();
   });
 
