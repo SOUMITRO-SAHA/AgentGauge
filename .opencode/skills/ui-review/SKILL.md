@@ -89,7 +89,7 @@ expect(fs.statSync(file).size).toBeGreaterThan(1000); // blank captures are tiny
 ## What to review
 
 The app is a **usage and status dashboard**. A screen that renders is not
-therefore correct — most real defects here are *misleading* rather than broken.
+therefore correct — most real defects here are _misleading_ rather than broken.
 
 ### 1. Data honesty (highest priority)
 
@@ -167,11 +167,11 @@ Scope: <screens/states reviewed>
 Result: <x> passed, <y> failed, <z> warnings
 Gates: bun run e2e — <pass/fail>
 
-| Screen/State  | Check                | Result | Detail                    |
-| ------------- | -------------------- | ------ | ------------------------- |
-| usage-live    | provenance + time     | PASS   | "Codex · 2 min ago"        |
-| usage-error   | unavailable styling   | FAIL   | renders `0%`, not a state |
-| usage-narrow  | no horizontal overflow| PASS   | 320px                     |
+| Screen/State | Check                  | Result | Detail                    |
+| ------------ | ---------------------- | ------ | ------------------------- |
+| usage-live   | provenance + time      | PASS   | "Codex · 2 min ago"       |
+| usage-error  | unavailable styling    | FAIL   | renders `0%`, not a state |
+| usage-narrow | no horizontal overflow | PASS   | 320px                     |
 
 Screenshots: .temp/screenshots/<names>
 Failures: per failure — screen, expected vs observed, screenshot name

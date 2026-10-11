@@ -40,13 +40,13 @@ what it covers and the limitations it documents.
 The harness depends on all five. Removing any one produces a confusing failure
 rather than a clear error.
 
-| Surface                            | Requirement                                                                 |
-| ---------------------------------- | --------------------------------------------------------------------------- |
-| `src-tauri/Cargo.toml`             | `tauri-plugin-wdio`, `tauri-plugin-wdio-webdriver`, `custom-protocol` feature |
-| `src-tauri/src/lib.rs`             | both plugins registered under `#[cfg(debug_assertions)]`                       |
-| `src-tauri/capabilities/default.json` | `wdio:default` + `wdio-webdriver:default`                                  |
-| `src-tauri/tauri.conf.json`        | `app.withGlobalTauri: true`                                                   |
-| `src/main.tsx`                     | `import "@wdio/tauri-plugin";` as the first import                            |
+| Surface                               | Requirement                                                                   |
+| ------------------------------------- | ----------------------------------------------------------------------------- |
+| `src-tauri/Cargo.toml`                | `tauri-plugin-wdio`, `tauri-plugin-wdio-webdriver`, `custom-protocol` feature |
+| `src-tauri/src/lib.rs`                | both plugins registered under `#[cfg(debug_assertions)]`                      |
+| `src-tauri/capabilities/default.json` | `wdio:default` + `wdio-webdriver:default`                                     |
+| `src-tauri/tauri.conf.json`           | `app.withGlobalTauri: true`                                                   |
+| `src/main.tsx`                        | `import "@wdio/tauri-plugin";` as the first import                            |
 
 `driverProvider: "embedded"` in `e2e/wdio.conf.ts` is what makes macOS work: it
 runs the WebDriver server **inside** the app, so no external driver binary and
@@ -129,6 +129,7 @@ import { expect, browser, $ } from "@wdio/globals";
 
   `mock()` fully resets on every call, so set implementations in `beforeEach`,
   never `beforeAll`.
+
 - Screenshot on failure with `browser.saveScreenshot(file)`. It returns a
   Buffer, not `true`. **Element screenshots are not cropped** — they return the
   full viewport. See `references/capabilities.md`.
@@ -152,7 +153,7 @@ so rather than implying coverage.
   WebDriver only supports Microsoft Edge version X"; `autoDownloadEdgeDriver`
   defaults to true.
 - **Linux** — install `webkit2gtk-driver` (`apt-get install -y
-  webkit2gtk-driver`, or `dnf`/`pacman` equivalents) and run headless via
+webkit2gtk-driver`, or `dnf`/`pacman` equivalents) and run headless via
   `xvfb-run -a bun run e2e`. WebdriverIO 9.19.1+ auto-detects Xvfb.
   Alpine and CentOS Stream/RHEL cannot build Tauri at all.
 - **macOS** — nothing to install; `embedded` is auto-detected.

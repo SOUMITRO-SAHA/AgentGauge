@@ -34,20 +34,20 @@ there are no project-specific overrides.
 
 **Files: kebab-case, with a role suffix carrying one role per file.**
 
-| Kind                       | File name              | Example                          |
-| -------------------------- | ---------------------- | -------------------------------- |
-| App React component        | `<name>.tsx`           | `UsageCard` in `usage-card.tsx`  |
-| React hook                  | `useHookName.ts`       | `useUsage` in `useUsage.ts`      |
-| shadcn / Radix primitive   | `<name>.tsx`           | `button` in `components/ui/button.tsx` |
-| Typed IPC wrapper / module  | `<name>.ts`            | `ipc.ts`, `codex.ts`             |
-| Effect service + layer      | `<name>.service.ts`    | `usageReader.service.ts`         |
-| Atom (state)                | `<name>.atom.ts`       | `usage.atom.ts`                  |
-| Schema (IPC boundary)       | `<name>.schema.ts`     | `usage.schema.ts`                |
-| Shared types               | `<name>.types.ts`       | `usage.types.ts`                 |
-| Pure helpers               | `<name>.utils.ts`      | `formatUsage.utils.ts`           |
-| Constants / query keys     | `<name>.constants.ts`  | `refresh.constants.ts`           |
-| E2E spec                   | `<feature>.e2e.ts`     | `dashboard.e2e.ts`, `capabilities.e2e.ts` |
-| Vite / toolchain config    | framework name         | `vite.config.ts`                 |
+| Kind                       | File name             | Example                                   |
+| -------------------------- | --------------------- | ----------------------------------------- |
+| App React component        | `<name>.tsx`          | `UsageCard` in `usage-card.tsx`           |
+| React hook                 | `useHookName.ts`      | `useUsage` in `useUsage.ts`               |
+| shadcn / Radix primitive   | `<name>.tsx`          | `button` in `components/ui/button.tsx`    |
+| Typed IPC wrapper / module | `<name>.ts`           | `ipc.ts`, `codex.ts`                      |
+| Effect service + layer     | `<name>.service.ts`   | `usageReader.service.ts`                  |
+| Atom (state)               | `<name>.atom.ts`      | `usage.atom.ts`                           |
+| Schema (IPC boundary)      | `<name>.schema.ts`    | `usage.schema.ts`                         |
+| Shared types               | `<name>.types.ts`     | `usage.types.ts`                          |
+| Pure helpers               | `<name>.utils.ts`     | `formatUsage.utils.ts`                    |
+| Constants / query keys     | `<name>.constants.ts` | `refresh.constants.ts`                    |
+| E2E spec                   | `<feature>.e2e.ts`    | `dashboard.e2e.ts`, `capabilities.e2e.ts` |
+| Vite / toolchain config    | framework name        | `vite.config.ts`                          |
 
 - **React components are the kebab-case `.tsx` family** — this is what shadcn
   generates and what already exists (`components/ui/button.tsx`), so stay
@@ -69,7 +69,7 @@ there are no project-specific overrides.
   `usage-card.tsx`.
 - Effect services: `PascalCase` extending `Context.Service`, named for the
   capability it provides — `UsageReader`, `Poller`. Its layer is a `static
-  readonly layer` member; a test double is `static readonly layerTest`.
+readonly layer` member; a test double is `static readonly layerTest`.
 - Atoms: `PascalCase` suffixed `Atom` — `usageAtom`, `providerStatusAtom`.
   Services that read other atoms are `usageByProviderAtom`.
 - Interfaces: `PascalCase`, **no `I` prefix** — `UsageSnapshot`, `CardProps`.
@@ -105,17 +105,17 @@ change — a silent mismatch shows up only as `undefined` at runtime. See
 
 ## Rust/TypeScript quick reference
 
-| Kind                    | Name             | Example                          |
-| ----------------------- | ---------------- | -------------------------------- |
-| Rust module             | `snake_case.rs`  | `modules/providers/codex.rs`     |
-| Rust type / enum        | `PascalCase`     | `UsageSnapshot`                  |
-| Rust const              | `SCREAMING_SNAKE_CASE` | `MAX_PROVIDERS`             |
-| Rust crate              | `kebab-case` dir / `snake_case` ident | `crates/http-retry/` used as `http_retry` |
-| Rust fn                 | `snake_case`     | `fetch_usage`                    |
-| IPC command name        | `snake_case`     | `get_usage`                      |
-| React component         | `kebab-case.tsx` | `UsageCard` in `usage-card.tsx`  |
-| React hook              | `useHookName.ts` | `useUsage` in `useUsage.ts`      |
-| Shared types            | `<name>.types.ts`| `UsageSnapshot` in `usage.types.ts` |
-| Pure helpers            | `<name>.utils.ts`| `format.ts` in `format.utils.ts` |
-| E2E spec                | `<name>.e2e.ts`  | `app.e2e.ts`                     |
-| Doc / rule file         | `kebab-case.md`  | `code-review.md`                 |
+| Kind             | Name                                  | Example                                   |
+| ---------------- | ------------------------------------- | ----------------------------------------- |
+| Rust module      | `snake_case.rs`                       | `modules/providers/codex.rs`              |
+| Rust type / enum | `PascalCase`                          | `UsageSnapshot`                           |
+| Rust const       | `SCREAMING_SNAKE_CASE`                | `MAX_PROVIDERS`                           |
+| Rust crate       | `kebab-case` dir / `snake_case` ident | `crates/http-retry/` used as `http_retry` |
+| Rust fn          | `snake_case`                          | `fetch_usage`                             |
+| IPC command name | `snake_case`                          | `get_usage`                               |
+| React component  | `kebab-case.tsx`                      | `UsageCard` in `usage-card.tsx`           |
+| React hook       | `useHookName.ts`                      | `useUsage` in `useUsage.ts`               |
+| Shared types     | `<name>.types.ts`                     | `UsageSnapshot` in `usage.types.ts`       |
+| Pure helpers     | `<name>.utils.ts`                     | `format.ts` in `format.utils.ts`          |
+| E2E spec         | `<name>.e2e.ts`                       | `app.e2e.ts`                              |
+| Doc / rule file  | `kebab-case.md`                       | `code-review.md`                          |

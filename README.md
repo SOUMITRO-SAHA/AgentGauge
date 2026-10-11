@@ -41,17 +41,19 @@ See the [Product Requirements Document](docs/PRD.md) for the full scope, capabil
 
 - Codex usage is read through the locally installed `codex app-server`; the app does not call OpenAI's provider API or ask for API credentials.
 - The app displays the reported five-hour and weekly windows and freshness/status information.
-- The app observes changes in Codex's reported `resetsAt` value as a rollover-related signal. This is not yet the verified trigger for an automatic send.
-- A manually initiated `sendPing` capability exists and consumes quota. It is not an automatic post-rollover kickoff.
+- The app observes changes in the reported `resetsAt` value as the rollover signal.
+- Usage tabs cover every connected coding plan: Codex plus the OpenCode-connected Z.AI, MiniMax, and Kimi plans (Z.AI live-verified; MiniMax/Kimi decode from vendor-documented endpoints and degrade to explicit unavailable).
+- **Scheduled kickoff (opt-in, macOS):** per subscription, the user can turn on an automatic "Hi" — one trivial prompt to the cheapest (or user-selected) model, sent about a minute after that sub's own 5-hour reset so the next window starts on a predictable schedule. A `launchd` LaunchAgent runs the same binary headless once a minute, so the schedule holds while the app is closed. It is off by default, spends a small amount of quota, and its schedule file lives beside the widget snapshot in `~/Library/Application Support/AI Sub Stats/`.
+- A manually initiated `sendPing` capability exists and consumes quota.
 - The macOS WidgetKit extension displays usage snapshots. The user adds it from the macOS widget gallery; the app cannot install it or check whether it was placed.
 
 The widget requires **macOS 14+ and Xcode 16+**. Build the macOS app and embed the extension with `bun run build:mac` from `app/`. See [`app/src-tauri/widget/README.md`](app/src-tauri/widget/README.md) before changing the extension or its build process.
 
-OpenCode, Pi, Claude Code, Kilo Code, Kimi Code, automatic kickoff, user-selectable models, multi-account support, and local usage-history analytics are **planned or under investigation**, not shipped integrations or features.
+OpenCode, Pi, Claude Code, Kilo Code, multi-account support, and local usage-history analytics are **planned or under investigation**, not shipped integrations or features. Background scheduling on Windows and Linux is unimplemented.
 
 ## Usage-window behavior
 
-The provider controls its usage window and reported reset timestamp. A prompt cannot force, start, restart, or extend that window; a prompt consumes quota in the current window. The planned kickoff sends `Hi` only after a real rollover has been verified, so it becomes initial activity in the naturally available window. If the rollover or selected harness/model cannot be verified, the planned behavior is to skip rather than send speculatively.
+The provider controls its usage window and reported reset timestamp. A prompt cannot force, start, restart, or extend that window; a prompt consumes quota in the current window — and, when the previous window has ended, it becomes the first activity of the naturally available next one. That is exactly what the kickoff does, deliberately: it opens the next window promptly at a predictable time instead of letting the first real work request anchor it. It never claims to restart or extend a window, and it never sends without the user's explicit per-subscription opt-in.
 
 ## Development setup
 

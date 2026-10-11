@@ -11,13 +11,13 @@ automation, or widget behavior as implemented unless the code does it.
 
 ## The five files that define the app
 
-| File                                          | Owns                                                                 |
-| --------------------------------------------- | -------------------------------------------------------------------- |
-| `app/src-tauri/tauri.conf.json`               | product identity, window geometry, build wiring, CSP, bundle, icons |
-| `app/src-tauri/capabilities/default.json`      | **the entire frontend permission surface**                          |
-| `app/src-tauri/Cargo.toml`                     | workspace root: crates, `custom-protocol` feature, release profile  |
-| `app/src-tauri/src/lib.rs`                     | **composition root** — plugins, managed state, `generate_handler!`  |
-| `app/src/main.tsx`                            | `@wdio/tauri-plugin` import + React root                           |
+| File                                      | Owns                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------- |
+| `app/src-tauri/tauri.conf.json`           | product identity, window geometry, build wiring, CSP, bundle, icons |
+| `app/src-tauri/capabilities/default.json` | **the entire frontend permission surface**                          |
+| `app/src-tauri/Cargo.toml`                | workspace root: crates, `custom-protocol` feature, release profile  |
+| `app/src-tauri/src/lib.rs`                | **composition root** — plugins, managed state, `generate_handler!`  |
+| `app/src/main.tsx`                        | `@wdio/tauri-plugin` import + React root                            |
 
 Changing any of these can break the native shell, the e2e harness, or both.
 Read this file before editing them.
@@ -42,7 +42,7 @@ rules in [`rust.md`](rust.md) and never appear in the builder chain.
 - Commands are **async by default**. Keep the body thin: parse → delegate to
   the owning module → map the error. No provider HTTP calls, parsing, or
   filesystem work inline in the command body.
-- Commands live in `app/src-tauri/src/modules/**` and are only *named* in
+- Commands live in `app/src-tauri/src/modules/**` and are only _named_ in
   `lib.rs`'s `generate_handler!`; `lib.rs` itself holds no command bodies.
 - Use `tauri::State<T>` for shared, mutex-guarded state (pollers, caches,
   provider clients). Never hold a `Mutex` guard across an `.await` — it

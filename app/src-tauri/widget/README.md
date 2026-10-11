@@ -72,7 +72,7 @@ macOS therefore offers only `systemSmall`, `systemMedium`, `systemLarge`,
 `systemExtraLarge`, and `systemExtraLargePortrait`. The widget uses small, medium
 and large; every one of them shows both the 5-hour window and the weekly limit.
 
-A menu bar *Control* (`ControlWidgetButton`, macOS 26+) is the way to sit in the
+A menu bar _Control_ (`ControlWidgetButton`, macOS 26+) is the way to sit in the
 menu bar, but a Control is an action surface rather than a passive readout, so it
 is deliberately not used. The setup guide mentions the menu bar as an option
 because on macOS 26+ it exists.
@@ -142,11 +142,11 @@ If it is missing, check `codesign -dvvv --entitlements -` on the embedded
 
 ## Files
 
-| Path | What it is |
-| --- | --- |
-| `AIStatsWidget.xcodeproj` | The app-extension target. Hand-written; no project generator is available or wanted. |
-| `Sources/Snapshot.swift` | The wire contract. Mirrors `WidgetSnapshot` in `modules/widget/mod.rs`. |
-| `Sources/SnapshotStore.swift` | Reads the shared file. |
-| `Sources/UsageTimelineProvider.swift` | Refreshes at the soonest window reset. |
-| `Sources/UsageWidget.swift` | The three families, and all the formatting. |
-| `build-widget.sh` | Build, embed, re-sign, and the two build-time guards. |
+| Path                                  | What it is                                                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------------ |
+| `AIStatsWidget.xcodeproj`             | The app-extension target. Hand-written; no project generator is available or wanted. |
+| `Sources/Snapshot.swift`              | The wire contract. Mirrors `WidgetSnapshot` in `modules/widget/mod.rs`.              |
+| `Sources/SnapshotStore.swift`         | Reads the shared file.                                                               |
+| `Sources/UsageTimelineProvider.swift` | Refreshes at the soonest window reset.                                               |
+| `Sources/UsageWidget.swift`           | The three families, and all the formatting.                                          |
+| `build-widget.sh`                     | Build, embed, re-sign, and the two build-time guards.                                |

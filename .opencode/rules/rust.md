@@ -52,12 +52,12 @@ app/src-tauri/
 
 ### Tiers and dependency direction
 
-| Tier         | Path             | Owns                                                                 | May depend on        |
-| ------------ | ---------------- | -------------------------------------------------------------------- | -------------------- |
-| Composition  | `src/lib.rs`, `src/main.rs` | plugin registration, `tauri::State` construction, `generate_handler!` | `modules`   |
-| Modules      | `src/modules/**` | one bounded business capability: `providers`, `poller`, `settings`, `widget` | `shared`, `crates` |
-| Shared       | `src/shared/**`  | app-wide primitives: domain types, error taxonomy, clock, telemetry, config | `crates` |
-| Crates       | `crates/**`      | reusable, self-contained logic — heavy deps, platform-specific builds, logic testable without a Tauri runtime | other `crates` |
+| Tier        | Path                        | Owns                                                                                                          | May depend on      |
+| ----------- | --------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------ |
+| Composition | `src/lib.rs`, `src/main.rs` | plugin registration, `tauri::State` construction, `generate_handler!`                                         | `modules`          |
+| Modules     | `src/modules/**`            | one bounded business capability: `providers`, `poller`, `settings`, `widget`                                  | `shared`, `crates` |
+| Shared      | `src/shared/**`             | app-wide primitives: domain types, error taxonomy, clock, telemetry, config                                   | `crates`           |
+| Crates      | `crates/**`                 | reusable, self-contained logic — heavy deps, platform-specific builds, logic testable without a Tauri runtime | other `crates`     |
 
 - **Dependencies point downward only**: Composition → Modules → Shared →
   Crates. Never upward, never sideways between sibling modules.
@@ -151,12 +151,12 @@ Placing code is a promotion decision. Start at the lowest tier that works and
 move up only on evidence — never pre-build a layer for code that does not exist
 yet.
 
-| Code that…                                        | Lives in                              |
-| ------------------------------------------------- | ------------------------------------- |
-| has one caller                                    | private in the calling module (`fn`)  |
-| is a domain type / trait / error 2+ modules need  | `src/shared/<area>/`                  |
-| is one bounded capability                         | `src/modules/<name>/`                 |
-| needs a heavy dep, platform gating, or tests with no Tauri runtime | `crates/<name>/` |
+| Code that…                                                         | Lives in                             |
+| ------------------------------------------------------------------ | ------------------------------------ |
+| has one caller                                                     | private in the calling module (`fn`) |
+| is a domain type / trait / error 2+ modules need                   | `src/shared/<area>/`                 |
+| is one bounded capability                                          | `src/modules/<name>/`                |
+| needs a heavy dep, platform gating, or tests with no Tauri runtime | `crates/<name>/`                     |
 
 Move a step up when the trigger fires, in the same change that fires it — do not
 leave code parked in the wrong tier "for later". Moving down is always allowed

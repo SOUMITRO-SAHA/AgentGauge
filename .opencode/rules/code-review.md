@@ -68,13 +68,13 @@ Check these first — they are the highest-risk surfaces here:
 
 ## Severity
 
-| Level    | Meaning                                                                    | Triage                   |
-| -------- | -------------------------------------------------------------------------- | ------------------------ |
-| Critical | Exploitable security flaw, credential/secret exposure, data loss            | Fix before next release  |
-| High     | Correctness bug users will hit; broken e2e/CI gate; data shown wrongly      | Fix before merge         |
-| Medium   | Rule violation without immediate breakage; perf waste on a hot path         | Fix next task            |
-| Low      | Style/consistency drift, missing docs, dead code                           | Batch fix                |
-| Nit      | Optional polish                                                            | Fix if touching the file |
+| Level    | Meaning                                                                | Triage                   |
+| -------- | ---------------------------------------------------------------------- | ------------------------ |
+| Critical | Exploitable security flaw, credential/secret exposure, data loss       | Fix before next release  |
+| High     | Correctness bug users will hit; broken e2e/CI gate; data shown wrongly | Fix before merge         |
+| Medium   | Rule violation without immediate breakage; perf waste on a hot path    | Fix next task            |
+| Low      | Style/consistency drift, missing docs, dead code                       | Batch fix                |
+| Nit      | Optional polish                                                        | Fix if touching the file |
 
 False-positive guard: a finding stands only after re-reading the surrounding
 code and its tests. Documented invariants are accepted — flag them only if the
