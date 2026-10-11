@@ -331,7 +331,7 @@ it("shows Codex's window reading below its analytics, like Z.AI's tab", async ()
   expect(weekly.textContent).toContain("11% used");
 });
 
-it("reads token counts compact, previews exact on hover, pins on click", async () => {
+it("reads token counts compact, keeps them compact on hover, toggles on press", async () => {
   installDispatch();
 
   render(createElement(StatsView, { visible: true }));
@@ -344,21 +344,21 @@ it("reads token counts compact, previews exact on hover, pins on click", async (
   expect(total.textContent).toMatch(/1[.,]23M/);
   expect(digits(peak.textContent)).toBe("45678");
 
-  // Hover previews the exact number on this card only.
+  // Hovering only tints the card; the number never switches under the pointer.
   fireEvent.mouseEnter(total);
-  expect(digits(total.textContent)).toBe("1234567");
-  expect(digits(peak.textContent)).toBe("45678");
-  fireEvent.mouseLeave(total);
   expect(total.textContent).toMatch(/1[.,]23M/);
-
-  // A click pins this card to the exact form — and only this card.
-  fireEvent.click(total);
-  fireEvent.mouseEnter(total);
+  expect(digits(peak.textContent)).toBe("45678");
   fireEvent.mouseLeave(total);
+
+  // The hover affordance is the chart's primary colour.
+  expect(total.className).toContain("hover:text-chart-1");
+
+  // A press pins this card to the exact form — and only this card.
+  fireEvent.click(total);
   expect(digits(total.textContent)).toBe("1234567");
   expect(digits(peak.textContent)).toBe("45678");
 
-  // A second click returns it to compact.
+  // A second press returns it to compact.
   fireEvent.click(total);
   expect(total.textContent).toMatch(/1[.,]23M/);
 });

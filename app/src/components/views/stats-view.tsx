@@ -791,9 +791,11 @@ function ReadingLoadingSkeleton() {
 /**
  * A token count that opens compact — millions and billions, not a digit wall.
  *
- * Hovering previews the exact number, and clicking pins this one card to the
- * exact form (a second click returns to compact). Each card holds its own
- * state on purpose: the user toggles one number, never the whole view.
+ * Hovering never switches the number; it only tints the card the chart's
+ * primary colour, with the exact number in the native tooltip. Pressing pins
+ * this one card to the exact form (a second press returns to compact). Each
+ * card holds its own state on purpose: the user toggles one number, never the
+ * whole view.
  */
 function TokenCount({
   value,
@@ -803,7 +805,6 @@ function TokenCount({
   readonly testId: string;
 }) {
   const [pinned, setPinned] = useState(false);
-  const [hovering, setHovering] = useState(false);
 
   return (
     <button
@@ -811,12 +812,10 @@ function TokenCount({
       data-testid={testId}
       aria-pressed={pinned}
       title={formatCount(value)}
-      className="cursor-pointer rounded-sm text-left text-xl font-semibold tabular text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
+      className="cursor-pointer rounded-sm text-left text-xl font-semibold tabular text-foreground transition-colors hover:text-chart-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={() => setPinned((current) => !current)}
     >
-      {pinned || hovering ? formatCount(value) : formatCompactCount(value)}
+      {pinned ? formatCount(value) : formatCompactCount(value)}
     </button>
   );
 }

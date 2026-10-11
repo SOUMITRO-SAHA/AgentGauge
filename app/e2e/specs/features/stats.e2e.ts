@@ -53,7 +53,11 @@ describe("stats", () => {
         ).length ?? 0,
     }));
     expect(values.historyReads).toBeGreaterThan(0);
-    // The token count opens compact; clicking pins the exact number.
+    // The token count opens compact; pressing — not hovering — pins the
+    // exact number. Hover itself (a chart-primary tint, never a number
+    // switch) is pinned by the unit test: WebKit applies :hover only from
+    // real mouse-moves, which this driver's synthetic pointer cannot
+    // produce, so the tint is verified manually in the running app.
     expect(/1[.,]23M/.test(values.total ?? "")).toBe(true);
     await clickDisplayed('[data-testid="stats-total-tokens"]');
     const exact = await browser.execute(
