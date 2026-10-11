@@ -20,7 +20,11 @@
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 import * as Effect from "effect/Effect";
-import { useState, type ReactNode } from "react";
+import {
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
 import { ChartBar, Fire, Lightning } from "@phosphor-icons/react";
 
@@ -652,6 +656,7 @@ function AnalyticsContent({
               content={
                 <ChartTooltipContent
                   labelFormatter={(value) => formatDate(value)}
+                  formatter={tokenTooltipFormatter}
                 />
               }
             />
@@ -772,6 +777,31 @@ function compactNumber(value: number): string {
   return new Intl.NumberFormat(undefined, {
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+/**
+ * One row of the daily-tokens chart tooltip: the indicator, the series label,
+ * the day's exact token count, and the compact form in brackets beside it —
+ * "3,82,89,865 (38.29M)". The exact number stays first (the tooltip is the
+ * hover detail); the compact is there so a big day reads at a glance.
+ */
+export function tokenTooltipFormatter(value: unknown): ReactElement {
+  const tokens = Number(value);
+
+  return (
+    <div className="flex w-full flex-wrap items-center gap-2">
+      <div className="h-2.5 w-2.5 shrink-0 rounded-[2px] bg-(--color-tokens)" />
+      <span className="text-sm text-muted-foreground">
+        {activityChartConfig.tokens.label ?? "Tokens"}
+      </span>
+      <span className="font-mono text-sm font-medium tabular text-foreground">
+        {formatCount(tokens)}
+        <span className="ml-2 text-muted-foreground">
+          ({formatCompactCount(tokens)})
+        </span>
+      </span>
+    </div>
+  );
 }
 
 function formatAbsolute(ms: number): string {

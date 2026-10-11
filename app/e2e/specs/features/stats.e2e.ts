@@ -121,6 +121,80 @@ describe("stats", () => {
     await expectDisplayed('[data-testid="stats-plan-analytics"]');
     await expectDisplayed('[data-testid="stats-daily-chart"]');
 
+    // Hovering a bar raises the tooltip: exact number first, the compact form
+    // in brackets beside it, on a properly spaced row.
+    let tooltip: { text: string; gap: string } | null = null;
+    const readTooltip = () =>
+      browser.execute(() => {
+        const row = document.querySelector(
+          ".recharts-tooltip-wrapper .gap-2",
+        );
+        if (!row) return null;
+        return {
+          text: row.textContent ?? "",
+          gap: getComputedStyle(row).columnGap,
+        };
+      });
+    for (const fraction of [0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85]) {
+      await browser.execute((fx) => {
+        const chart = document.querySelector<HTMLElement>(
+          '[data-testid="stats-daily-chart"]',
+        );
+        if (!chart) return;
+        // Recharts binds its mousemove handler on the wrapper *inside* this
+        // container, so the event must be dispatched on a descendant — the
+        // chart surface — and bubble up through it.
+        const surface = chart.querySelector("svg") ?? chart;
+        const rect = surface.getBoundingClientRect();
+        surface.dispatchEvent(
+          new MouseEvent("mousemove", {
+            bubbles: true,
+            clientX: rect.x + rect.width * (fx as number),
+            clientY: rect.y + rect.height * 0.85,
+          }),
+        );
+      }, fraction);
+      await browser.pause(200);
+      tooltip = await readTooltip();
+      if (tooltip) break;
+    }
+    if (!tooltip) {
+      const rect = await browser.execute(() => {
+        const box = document
+          .querySelector('[data-testid="stats-daily-chart"]')
+          ?.getBoundingClientRect();
+        return box
+          ? { x: box.x, y: box.y, width: box.width, height: box.height }
+          : null;
+      });
+      if (rect) {
+        for (const fraction of [0.3, 0.45, 0.6, 0.75]) {
+          await browser.performActions([
+            {
+              type: "pointer",
+              id: "stats-tooltip-pointer",
+              parameters: { pointerType: "mouse" },
+              actions: [
+                {
+                  type: "pointerMove",
+                  duration: 0,
+                  x: Math.round(rect.x + rect.width * fraction),
+                  y: Math.round(rect.y + rect.height * 0.85),
+                },
+              ],
+            },
+          ]);
+          await browser.pause(250);
+          tooltip = await readTooltip();
+          if (tooltip) break;
+        }
+        await browser.releaseActions();
+      }
+    }
+    expect(tooltip).not.toBeNull();
+    expect(/\(\d+[.,]\d+[MB]\)/.test(tooltip?.text ?? "")).toBe(true);
+    expect(Number.parseFloat(tooltip?.gap ?? "0")).toBeGreaterThan(4);
+
     const analytics = await browser.execute(() => ({
       tokens: document.querySelector('[data-testid="stats-total-tokens"]')
         ?.textContent,

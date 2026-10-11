@@ -12,7 +12,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, expect, it } from "vitest";
 
-import { StatsView } from "~/components/views/stats-view";
+import { StatsView, tokenTooltipFormatter } from "~/components/views/stats-view";
 
 type Request = { readonly type: string; readonly provider?: string };
 
@@ -224,6 +224,21 @@ it("reads token counts compact, previews exact on hover, pins on click", async (
   // A second click returns it to compact.
   fireEvent.click(total);
   expect(total.textContent).toMatch(/1[.,]23M/);
+});
+
+it("reads the day's tokens in the chart tooltip exactly, with the compact beside", () => {
+  const row = tokenTooltipFormatter(38_289_865);
+  const { container } = render(createElement("div", null, row));
+  const text = container.textContent ?? "";
+  const digits = (value: string) => value.replace(/\D/g, "");
+
+  // The exact grouped number first, the compact form in brackets beside it.
+  expect(text).toContain("Tokens");
+  expect(text).toContain("(38.29M)");
+  expect(digits(text)).toBe("382898653829");
+
+  // The label and value sit in a spaced row — "Tokens3,82" was the bug.
+  expect(container.querySelector("div.gap-2")).toBeTruthy();
 });
 
 it("gives every connected plan a tab and shows its stats there", async () => {
