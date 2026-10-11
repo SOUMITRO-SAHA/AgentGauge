@@ -4,7 +4,7 @@
 
 # AgentGauge
 
-**AgentGauge is a local-first desktop companion for AI coding harnesses.** It brings together the usage and reset information those harnesses actually expose, with planned, opt-in kickoff automation after a verified usage-window rollover.
+**AgentGauge is a local-first desktop companion for AI coding harnesses.** It brings together usage and reset information exposed by local harness interfaces, with opt-in kickoff automation scheduled from the latest reported reset—not a verified rollover.
 
 The desktop app is displayed as **AgentGauge**. Its Rust process is named
 `agentgauge`; the background poller currently runs inside the app process and
@@ -12,24 +12,24 @@ is not a separately installed system daemon. The app identifier is
 `com.soumitrasaha.agentgauge`, and the widget snapshot directory remains
 stable for saved-state compatibility.
 
-The app integrates with **coding harnesses, not model-provider platforms directly**. It uses harness-supported local interfaces such as app-server, ACP, CLI, SDK, or RPC. The harness remains responsible for sign-in, provider configuration, subscriptions, and credentials.
+AgentGauge uses local harness interfaces such as app-server, CLI, ACP, SDK, or RPC for status and connected-plan discovery. For OpenCode-connected coding plans, it also calls documented provider coding-plan endpoints using credentials retrieved from OpenCode's local store. It does not perform sign-in or manage provider credentials.
 
 > [!IMPORTANT]
-> **Current implementation: Codex only.** The app reads Codex five-hour and weekly usage windows, observes changes to the reported reset timestamp, and includes a manually initiated ping capability. **Automatic kickoff, model selection, OpenCode, Pi, later harnesses, local activity analytics, and multi-account support are not implemented today.** macOS is the only platform exercised so far.
+> **Current implementation:** Codex usage is read through `codex app-server`; the app discovers OpenCode-connected coding plans and models through OpenCode's local CLI, then reads supported plan data from provider coding-plan endpoints. OpenCode supplies stored credentials but its own usage history is not read. Opt-in kickoff is available per connection for Codex and supported connected plans. Model choices are limited to harness-exposed models present in the bundled price list; that list only orders choices and does not verify subscription access or predict quota impact. The schedule follows reported reset times without verifying rollover. Pi, Claude Code, Kilo Code, and multi-account support are not implemented. macOS is the only platform exercised so far.
 
 ## Product direction
 
 The product has two pillars:
 
 - **Subscription observability:** Show supported harnesses, reported usage windows and reset times, status, data freshness, and capability gaps without inventing missing information.
-- **User-controlled kickoff automation:** Planned behavior is to send one minimal `Hi` prompt through a selected harness and user-selected available model, one minute after a verified usage-window rollover. It is off by default, consumes quota, and does not cause, reset, or extend the provider's window.
+- **User-controlled kickoff automation:** An explicit per-connection opt-in sends one small `Hi` prompt using the selected model and effort. A future reported reset schedules it about a minute later; without one, the first attempt may be immediate. It consumes quota, does not verify rollover, and cannot cause, reset, or extend the provider's window.
 
 ### Integration priority
 
-The planned order is fixed:
+The implementation roadmap is:
 
-1. **Codex** — current and first integration.
-2. **OpenCode** — second.
+1. **Codex** — current usage source and kickoff interface.
+2. **OpenCode** — currently supplies connected plan/model discovery and stored credentials for supported coding plans; usage comes from the coding-plan providers, not OpenCode's own usage history.
 3. **Pi** — third.
 4. **Claude Code, Kilo Code, Kimi Code, and other compatible coding harnesses** — evaluated individually afterward.
 
@@ -43,18 +43,18 @@ See the [Product Requirements Document](docs/PRD.md) for the full scope, capabil
 - The app displays the reported five-hour and weekly windows and freshness/status information.
 - The app observes changes in the reported `resetsAt` value as the rollover signal.
 - Usage tabs cover every connected coding plan: Codex plus the OpenCode-connected Z.AI, MiniMax, and Kimi plans (Z.AI live-verified; MiniMax/Kimi decode from vendor-documented endpoints and degrade to explicit unavailable).
-- **Scheduled kickoff (opt-in, macOS):** per subscription, the user can turn on an automatic "Hi" — one trivial prompt to the cheapest (or user-selected) model, sent about a minute after that sub's own 5-hour reset so the next window starts on a predictable schedule. A `launchd` LaunchAgent runs the same binary headless once a minute, so the schedule holds while the app is closed. It is off by default, spends a small amount of quota, and its schedule file lives beside the widget snapshot in `~/Library/Application Support/AI Sub Stats/`.
+- **Scheduled kickoff (opt-in, macOS):** per connection, the user can choose a harness-exposed model that also appears in the bundled price list, then choose an effort while stopped. The initial model is the lowest-ranked listed price; enabling resets effort to that model's lowest supported level and locks configuration until stopped. Price ranking is not a subscription-quota estimate and does not guarantee plan access. A scheduled "Hi" follows the latest reported reset without verifying rollover; it spends quota and cannot start or reset a window. A `launchd` LaunchAgent runs the same binary headless once a minute while the app is closed; the schedule file lives beside the widget snapshot in `~/Library/Application Support/AI Sub Stats/`.
 - A manually initiated `sendPing` capability exists and consumes quota.
 - A read-only **Processes** screen shows the running processes and memory of AgentGauge itself (including its webview helpers), Codex, and OpenCode, plus each one's on-disk data footprint with a breakdown; groups with nothing running and unreadable or not-yet-created data directories say so instead of showing a zero. The screen cannot stop, signal, or delete anything — the capability has no write.
 - The macOS WidgetKit extension displays usage snapshots. The user adds it from the macOS widget gallery; the app cannot install it or check whether it was placed.
 
 The widget requires **macOS 14+ and Xcode 16+**. Build the macOS app and embed the extension with `bun run build:mac` from `app/`. See [`app/src-tauri/widget/README.md`](app/src-tauri/widget/README.md) before changing the extension or its build process.
 
-OpenCode, Pi, Claude Code, Kilo Code, multi-account support, and local usage-history analytics are **planned or under investigation**, not shipped integrations or features. Background scheduling on Windows and Linux is unimplemented.
+Pi, Claude Code, Kilo Code, multi-account support, and additional local usage-history analytics are **planned or under investigation**, not shipped integrations or features. Background scheduling on Windows and Linux is unimplemented.
 
 ## Usage-window behavior
 
-The provider controls its usage window and reported reset timestamp. A prompt cannot force, start, restart, or extend that window; a prompt consumes quota in the current window — and, when the previous window has ended, it becomes the first activity of the naturally available next one. That is exactly what the kickoff does, deliberately: it opens the next window promptly at a predictable time instead of letting the first real work request anchor it. It never claims to restart or extend a window, and it never sends without the user's explicit per-subscription opt-in.
+The provider controls its usage window and reported reset timestamp. A prompt cannot force, start, restart, or extend that window; it consumes quota in whichever window is active when the provider handles it. Kickoff schedules a prompt from the latest reported reset time, does not verify that rollover occurred, and does not guarantee that a new window has opened. It never sends without the user's explicit per-connection opt-in.
 
 ## Development setup
 

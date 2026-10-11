@@ -20,7 +20,9 @@
 
 use serde::Deserialize;
 
-use crate::shared::domain::{Freshness, ProviderKind, UsagePermission, UsageSnapshot, UsageWindow};
+use crate::shared::domain::{
+    Freshness, KickoffEffortInfo, ProviderKind, UsagePermission, UsageSnapshot, UsageWindow,
+};
 use crate::shared::error::{Error, ErrorKind};
 
 /// The vendor's usage path on the token-plan hosts.
@@ -228,14 +230,51 @@ pub const KICKOFF_MAX_TOKENS: i64 = 32;
 /// MiniMax has deprecated `max_tokens` in favour of `max_completion_tokens`,
 /// and buries business errors inside HTTP 200 under `base_resp` — both are
 /// this vendor's documented chat shape, so both are handled here.
-pub fn kickoff_body(model: &str, prompt: &str) -> String {
-    serde_json::json!({
+pub fn kickoff_efforts(model: &str) -> Vec<KickoffEffortInfo> {
+    match model {
+        "MiniMax-M3" => vec![
+            KickoffEffortInfo::new("disabled", "Disabled"),
+            KickoffEffortInfo::new("adaptive", "Adaptive"),
+        ],
+        "MiniMax-M3.1-Flash-Preview" => ["low", "medium", "high", "xhigh", "max"]
+            .into_iter()
+            .map(|effort| {
+                KickoffEffortInfo::new(
+                    effort,
+                    match effort {
+                        "low" => "Low",
+                        "medium" => "Medium",
+                        "high" => "High",
+                        "xhigh" => "Extra high",
+                        _ => "Max",
+                    },
+                )
+            })
+            .collect(),
+        _ => vec![KickoffEffortInfo::new(
+            "provider-default",
+            "Provider default",
+        )],
+    }
+}
+
+pub fn kickoff_body(model: &str, prompt: &str, effort: &str) -> String {
+    let mut body = serde_json::json!({
         "model": model,
         "messages": [{ "role": "user", "content": prompt }],
         "max_completion_tokens": KICKOFF_MAX_TOKENS,
         "stream": false,
-    })
-    .to_string()
+    });
+    match effort {
+        "disabled" => body["thinking"] = serde_json::json!({ "type": "disabled" }),
+        "adaptive" => body["thinking"] = serde_json::json!({ "type": "adaptive" }),
+        "low" | "medium" | "high" | "xhigh" | "max" => {
+            body["thinking"] = serde_json::json!({ "type": "adaptive" });
+            body["reasoning_effort"] = serde_json::Value::String(effort.to_string());
+        }
+        _ => {}
+    }
+    body.to_string()
 }
 
 /// Extracts the agent reply text from a chat-completions response.
@@ -274,11 +313,33 @@ mod tests {
     #[test]
     fn the_kickoff_body_uses_completion_tokens_not_max_tokens() {
         // MiniMax deprecates `max_tokens`; the wrong field would be ignored.
-        let body = kickoff_body("MiniMax-M2", "hi");
+        let body = kickoff_body("MiniMax-M2", "hi", "provider-default");
         let value: serde_json::Value = serde_json::from_str(&body).expect("json");
         assert_eq!(value["model"], "MiniMax-M2");
         assert_eq!(value["max_completion_tokens"], KICKOFF_MAX_TOKENS);
         assert!(value.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn minimax_m3_disabled_effort_disables_thinking() {
+        let body = kickoff_body("MiniMax-M3", "hi", "disabled");
+        let value: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(value["thinking"]["type"], "disabled");
+    }
+
+    #[test]
+    fn minimax_flash_uses_the_documented_effort_and_adaptive_mode() {
+        let body = kickoff_body("MiniMax-M3.1-Flash-Preview", "hi", "low");
+        let value: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(value["thinking"]["type"], "adaptive");
+        assert_eq!(value["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn effort_choices_are_specific_to_the_model_and_lowest_first() {
+        assert_eq!(kickoff_efforts("MiniMax-M3")[0].id, "disabled");
+        assert_eq!(kickoff_efforts("MiniMax-M3.1-Flash-Preview")[0].id, "low");
+        assert_eq!(kickoff_efforts("MiniMax-M2").len(), 1);
     }
 
     #[test]

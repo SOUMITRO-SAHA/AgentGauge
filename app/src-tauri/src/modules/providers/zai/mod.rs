@@ -11,7 +11,9 @@ use crate::modules::providers::zai::protocol::{
     decode_auth_failure, decode_model_usage, decode_quota, is_auth_refusal, model_usage_query,
     QUOTA_PATH,
 };
-use crate::shared::domain::{AccountUsage, PlanKind, ProviderKind, UsageSnapshot};
+use crate::shared::domain::{
+    AccountUsage, KickoffModelInfo, PlanKind, ProviderKind, UsageSnapshot,
+};
 use crate::shared::error::Error;
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
 
@@ -76,11 +78,16 @@ impl Provider for ZaiProvider {
         Err(coding_plan::unsupported(ProviderKind::Zai, "a ping"))
     }
 
-    fn send_kickoff(&self, prompt: &str, model: Option<&str>) -> Result<PingOutcome, Error> {
+    fn kickoff_models(&self) -> Result<Vec<KickoffModelInfo>, Error> {
+        coding_plan::kickoff_models(&Self::spec(), protocol::kickoff_efforts)
+    }
+
+    fn send_kickoff(&self, prompt: &str, model: &str, effort: &str) -> Result<PingOutcome, Error> {
         coding_plan::send_kickoff(
             &Self::spec(),
             prompt,
             model,
+            effort,
             protocol::kickoff_body,
             protocol::decode_kickoff_reply,
         )

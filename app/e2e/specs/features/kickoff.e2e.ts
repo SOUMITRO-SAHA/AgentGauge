@@ -11,7 +11,7 @@ import {
 
 /**
  * The scheduled kickoff: an explicit opt-in per connected sub, a model picker
- * that names the cheapest tier, a countdown to the next auto "Hi", and the
+ * with a price-ranked default, a countdown to the next auto "Hi", and the
  * honest note that the background scheduler is not running when it is not.
  *
  * The fixture boots with the scheduler supported but not installed and every
@@ -57,18 +57,23 @@ describe("scheduled kickoff", () => {
     await expectDisplayed('[data-testid="kickoff-model-codex"]');
     await expectDisplayed('[data-testid="kickoff-model-zai"]');
     await expect($('[data-testid="kickoff-toggle-codex"]')).toHaveAttribute(
-      "aria-checked",
+      "aria-pressed",
       "false",
     );
     await expect($('[data-testid="kickoff-toggle-zai"]')).toHaveAttribute(
-      "aria-checked",
+      "aria-pressed",
       "false",
     );
     expect(await $('[data-testid="kickoff-next-codex"]')).not.toExist();
+    await expectDisplayed('[data-testid="kickoff-effort-codex"]');
   });
 
-  it("opting in schedules a kickoff and records the choice", async () => {
+  it("enabling resets effort to minimum and locks configuration", async () => {
     await bootOnAutomation();
+
+    await clickDisplayed('[data-testid="kickoff-effort-codex"]');
+    await browser.keys("ArrowDown");
+    await browser.keys("Enter");
 
     await clickDisplayed('[data-testid="kickoff-toggle-codex"]');
 
@@ -79,6 +84,27 @@ describe("scheduled kickoff", () => {
     await expect($('[data-testid="kickoff-model-codex"]')).toHaveText(
       expect.stringContaining("GPT-6 Luna"),
     );
+    await expect($('[data-testid="kickoff-effort-codex"]')).toHaveText(
+      expect.stringContaining("Minimal"),
+    );
+    await expect($('[data-testid="kickoff-toggle-codex"]')).toHaveText("Stop");
+    await expect($('[data-testid="kickoff-toggle-codex"]')).toHaveAttribute(
+      "data-variant",
+      "destructive",
+    );
+    await expect($('[data-testid="kickoff-model-codex"]')).toBeDisabled();
+    await expect($('[data-testid="kickoff-effort-codex"]')).toBeDisabled();
+    const lockExplanations = await browser.execute(() =>
+      ["model", "effort"].map((control) =>
+        document
+          .querySelector<HTMLElement>(`[data-testid="kickoff-${control}-codex"]`)
+          ?.parentElement?.getAttribute("title"),
+      ),
+    );
+    expect(lockExplanations).toEqual([
+      expect.stringContaining("Stop this kickoff before changing"),
+      expect.stringContaining("Stop this kickoff before changing"),
+    ]);
 
     const calls = await dispatchCalls();
     const enables = calls.filter(
@@ -88,6 +114,14 @@ describe("scheduled kickoff", () => {
         request.enabled === true,
     );
     expect(enables.length).toBeGreaterThanOrEqual(1);
+    expect(
+      calls.some(
+        (request) =>
+          request.type === "setKickoffEffort" &&
+          request.kind === "codex" &&
+          request.effortId === "low",
+      ),
+    ).toBe(true);
   });
 
   it("selects a model for one sub without asserting access or cost", async () => {
@@ -118,7 +152,10 @@ describe("scheduled kickoff", () => {
     expect(catalog.ids).toContain("kickoff-model-option-zai-glm-5.3");
     expect(catalog.labels.join(" ")).not.toContain("cheapest");
     await expect($('[data-testid="kickoff-model-note-zai"]')).toHaveText(
-      expect.stringContaining("availability and quota impact are unknown"),
+      expect.stringContaining("exposed by this harness"),
+    );
+    await expect($('[data-testid="kickoff-model-note-zai"]')).toHaveText(
+      expect.stringContaining("does not guarantee plan access"),
     );
 
     // Enter on the already-selected entry would be a no-op (Radix only fires

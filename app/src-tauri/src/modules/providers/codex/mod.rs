@@ -13,7 +13,9 @@ pub(crate) mod transport;
 
 use std::sync::Mutex;
 
-use crate::shared::domain::{PlanKind, ProviderKind, UsageSnapshot};
+use crate::shared::domain::{
+    rank_kickoff_models, KickoffModelInfo, PlanKind, ProviderKind, UsageSnapshot,
+};
 use crate::shared::error::{Error, ErrorKind};
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
 
@@ -37,15 +39,14 @@ fn fresh_now_ms() -> i64 {
     crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock)
 }
 
-/// Reasoning effort used for a ping. `minimal` is the cheapest tier the
-/// protocol accepts.
-const PING_EFFORT: &str = "minimal";
-
 /// Responses are truncated before crossing IPC.
 const MAX_REPLY_CHARS: usize = 280;
 
 /// Upper bound on how long a single ping may take before it is abandoned.
 const TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+const MODEL_LIST_PAGE_SIZE: u32 = 100;
+const MAX_MODEL_LIST_PAGES: usize = 100;
 
 /// Scratch directory the ping thread runs in, so a reply can never touch the
 /// user's files even if the sandbox policy is ignored upstream.
@@ -177,10 +178,47 @@ impl Provider for CodexProvider {
     }
 
     fn send_ping(&self, prompt: &str) -> Result<PingOutcome, Error> {
-        self.send_kickoff(prompt, None)
+        let model = rank_kickoff_models(self.kind(), self.kickoff_models()?)
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::provider_error("Codex has no price-listed models available."))?;
+        let effort = model
+            .lowest_effort()
+            .ok_or_else(|| Error::provider_error("Codex reported no supported model effort."))?;
+        self.send_kickoff(prompt, &model.id, effort)
     }
 
-    fn send_kickoff(&self, prompt: &str, model: Option<&str>) -> Result<PingOutcome, Error> {
+    fn kickoff_models(&self) -> Result<Vec<KickoffModelInfo>, Error> {
+        self.with_server(|server| {
+            let mut models = Vec::new();
+            let mut cursor: Option<String> = None;
+
+            for _ in 0..MAX_MODEL_LIST_PAGES {
+                let mut params = serde_json::json!({ "limit": MODEL_LIST_PAGE_SIZE });
+                if let Some(cursor) = cursor.as_ref() {
+                    params["cursor"] = serde_json::Value::String(cursor.clone());
+                }
+                let payload = server.request("model/list", Some(params))?;
+                let page = protocol::decode_model_list_page(&payload)?;
+                models.extend(page.models);
+                match page.next_cursor {
+                    Some(next) if cursor.as_ref() != Some(&next) => cursor = Some(next),
+                    Some(_) => {
+                        return Err(Error::invalid_payload(
+                            "Codex repeated a model-list cursor.",
+                        ));
+                    }
+                    None => return Ok(models),
+                }
+            }
+
+            Err(Error::invalid_payload(
+                "Codex returned too many model-list pages.",
+            ))
+        })
+    }
+
+    fn send_kickoff(&self, prompt: &str, model: &str, effort: &str) -> Result<PingOutcome, Error> {
         let trimmed: String = prompt.chars().take(MAX_REPLY_CHARS).collect();
 
         let outcome = self.with_server(|server| {
@@ -192,11 +230,7 @@ impl Provider for CodexProvider {
                 "sandbox": "read-only",
                 "ephemeral": true,
             });
-            // The protocol names the model at thread start (`ThreadStartParams.model`);
-            // the effort stays at its cheapest tier regardless of model.
-            if let Some(model) = model {
-                thread_params["model"] = serde_json::Value::String(model.to_string());
-            }
+            thread_params["model"] = serde_json::Value::String(model.to_string());
             let started = server.request("thread/start", Some(thread_params))?;
 
             let thread_id = parse_nested_id(&started, "thread").ok_or_else(|| {
@@ -208,7 +242,7 @@ impl Provider for CodexProvider {
                 Some(serde_json::json!({
                     "threadId": thread_id,
                     "input": [{ "type": "text", "text": trimmed }],
-                    "effort": PING_EFFORT,
+                    "effort": effort,
                 })),
             )?;
 

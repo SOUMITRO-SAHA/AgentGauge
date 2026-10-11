@@ -385,120 +385,173 @@ pub fn freshness_for(now_ms: i64, fetched_at_ms: Option<i64>) -> Freshness {
 }
 
 // ---------------------------------------------------------------------------
-// Kickoff model catalogs
+// Kickoff model and effort metadata
 // ---------------------------------------------------------------------------
 
-/// One model a subscription's scheduled kickoff may use.
-///
-/// Lives in `shared/` because two modules need it: the kickoff surface shapes
-/// it for the renderer's picker, and the provider pipeline resolves a `None`
-/// selection to the cheapest entry. Serialized but not deserialized: the
-/// catalog is authored in this file, never read back.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct KickoffModelInfo {
-    pub id: &'static str,
-    pub label: &'static str,
-    /// The cheapest tier for plan quota — the default selection.
-    pub cheapest: bool,
+/// One reasoning-effort setting reported by a provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KickoffEffortInfo {
+    pub id: String,
+    pub label: String,
 }
 
-/// The model catalog for one provider, cheapest flagged.
-///
-/// Drawn from the vendors' own plan documentation (see
-/// `.agents/tasks/research/kickoff-mechanisms.md`). Slugs are version-gated on
-/// the vendor side, so a rejected model surfaces the provider's own error in
-/// the attempt's detail rather than being filtered here.
-pub fn models_for(kind: ProviderKind) -> &'static [KickoffModelInfo] {
-    const CODEX: &[KickoffModelInfo] = &[
-        KickoffModelInfo {
-            id: "gpt-6.1-sol",
-            label: "GPT-6.1 Sol",
-            cheapest: false,
-        },
-        KickoffModelInfo {
-            id: "gpt-6-luna",
-            label: "GPT-6 Luna",
-            cheapest: true,
-        },
-        KickoffModelInfo {
-            id: "gpt-5.6-luna",
-            label: "GPT-5.6 Luna",
-            cheapest: false,
-        },
-    ];
-    const ZAI: &[KickoffModelInfo] = &[
-        KickoffModelInfo {
-            id: "glm-5.3",
-            label: "GLM-5.3",
-            cheapest: false,
-        },
-        KickoffModelInfo {
-            id: "glm-5.3-flash",
-            label: "GLM-5.3 Flash",
-            cheapest: true,
-        },
-    ];
-    const MINIMAX: &[KickoffModelInfo] = &[
-        KickoffModelInfo {
-            id: "MiniMax-M3",
-            label: "MiniMax M3",
-            cheapest: false,
-        },
-        KickoffModelInfo {
-            id: "MiniMax-M2",
-            label: "MiniMax M2",
-            cheapest: true,
-        },
-        KickoffModelInfo {
-            id: "MiniMax-M2.5",
-            label: "MiniMax M2.5",
-            cheapest: false,
-        },
-    ];
-    const KIMI: &[KickoffModelInfo] = &[
-        KickoffModelInfo {
-            id: "k3-256k",
-            label: "K3 256K",
-            cheapest: true,
-        },
-        KickoffModelInfo {
-            id: "kimi-for-coding",
-            label: "Kimi for Coding",
-            cheapest: false,
-        },
-        KickoffModelInfo {
-            id: "k3",
-            label: "K3 (1M)",
-            cheapest: false,
-        },
-        KickoffModelInfo {
-            id: "kimi-for-coding-highspeed",
-            label: "HighSpeed (3× quota)",
-            cheapest: false,
-        },
-    ];
-
-    match kind {
-        ProviderKind::Codex => CODEX,
-        ProviderKind::Zai => ZAI,
-        ProviderKind::Minimax => MINIMAX,
-        ProviderKind::Kimi => KIMI,
+impl KickoffEffortInfo {
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+        }
     }
 }
 
-/// The cheapest model for a provider — the default kickoff selection.
-pub fn cheapest_model(kind: ProviderKind) -> &'static str {
-    models_for(kind)
-        .iter()
-        .find(|model| model.cheapest)
-        .map(|model| model.id)
-        .unwrap_or_default()
+/// A model currently exposed by its connected harness and present in the
+/// bundled price list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KickoffModelInfo {
+    pub provider_id: String,
+    pub id: String,
+    pub label: String,
+    pub efforts: Vec<KickoffEffortInfo>,
+    pub cheapest: bool,
 }
 
-/// Whether `model_id` names a model this build offers for `kind`.
-pub fn is_known_model(kind: ProviderKind, model_id: &str) -> bool {
-    models_for(kind).iter().any(|model| model.id == model_id)
+impl KickoffModelInfo {
+    pub fn new(
+        provider_id: impl Into<String>,
+        id: impl Into<String>,
+        label: impl Into<String>,
+        efforts: Vec<KickoffEffortInfo>,
+    ) -> Self {
+        Self {
+            provider_id: provider_id.into(),
+            id: id.into(),
+            label: label.into(),
+            efforts,
+            cheapest: false,
+        }
+    }
+
+    pub fn lowest_effort(&self) -> Option<&str> {
+        self.efforts.first().map(|effort| effort.id.as_str())
+    }
+}
+
+/// Ranks harness models by listed input plus output price and marks the first
+/// entry as the default. The ordering is not a subscription-quota estimate.
+pub fn rank_kickoff_models(
+    kind: ProviderKind,
+    models: Vec<KickoffModelInfo>,
+) -> Vec<KickoffModelInfo> {
+    rank_kickoff_models_with_catalog(
+        kind,
+        models,
+        include_str!("../../../public/price_list.json"),
+    )
+}
+
+pub fn kickoff_model_label(provider_id: &str, model_id: &str) -> String {
+    let Ok(catalog) =
+        serde_json::from_str::<serde_json::Value>(include_str!("../../../public/price_list.json"))
+    else {
+        return model_id.to_string();
+    };
+    listed_model_entry(&catalog, provider_id, model_id)
+        .and_then(|entry| entry.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(model_id)
+        .to_string()
+}
+
+fn rank_kickoff_models_with_catalog(
+    kind: ProviderKind,
+    models: Vec<KickoffModelInfo>,
+    catalog: &str,
+) -> Vec<KickoffModelInfo> {
+    let Ok(catalog) = serde_json::from_str::<serde_json::Value>(catalog) else {
+        return Vec::new();
+    };
+
+    let mut ranked = models
+        .into_iter()
+        .filter_map(|mut model| {
+            if !model_belongs_to_kind(kind, &model.provider_id) {
+                return None;
+            }
+            let price = listed_model_price(&catalog, &model.provider_id, &model.id)?;
+            model.cheapest = false;
+            Some((price, model))
+        })
+        .collect::<Vec<_>>();
+
+    ranked.sort_by(|(left_price, left), (right_price, right)| {
+        left_price
+            .total_cmp(right_price)
+            .then_with(|| left.id.cmp(&right.id))
+            .then_with(|| left.provider_id.cmp(&right.provider_id))
+    });
+
+    let mut models = ranked
+        .into_iter()
+        .map(|(_, model)| model)
+        .collect::<Vec<_>>();
+    if let Some(first) = models.first_mut() {
+        first.cheapest = true;
+    }
+    models
+}
+
+fn model_belongs_to_kind(kind: ProviderKind, provider_id: &str) -> bool {
+    match kind {
+        ProviderKind::Codex => provider_id == "openai",
+        ProviderKind::Zai => matches!(provider_id, "zai-coding-plan" | "zhipuai-coding-plan"),
+        ProviderKind::Minimax => {
+            matches!(
+                provider_id,
+                "minimax-coding-plan" | "minimax-cn-coding-plan"
+            )
+        }
+        ProviderKind::Kimi => matches!(
+            provider_id,
+            "kimi-for-coding" | "kimi-code-plan-cn" | "kimi-code-plan-global"
+        ),
+    }
+}
+
+fn listed_model_price(
+    catalog: &serde_json::Value,
+    provider_id: &str,
+    model_id: &str,
+) -> Option<f64> {
+    let model = listed_model_entry(catalog, provider_id, model_id)?;
+    [
+        model.get("cost_per_million"),
+        model.get("api_cost_per_million"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|cost| {
+        let input = cost.get("input")?.as_f64()?;
+        let output = cost.get("output")?.as_f64()?;
+        let total = input + output;
+        (input >= 0.0 && output >= 0.0 && total.is_finite()).then_some(total)
+    })
+}
+
+fn listed_model_entry<'a>(
+    catalog: &'a serde_json::Value,
+    provider_id: &str,
+    model_id: &str,
+) -> Option<&'a serde_json::Value> {
+    let price_provider = if provider_id == "kimi-for-coding" {
+        "kimi-code-plan-global"
+    } else {
+        provider_id
+    };
+    catalog
+        .get("providers")?
+        .get(price_provider)?
+        .get("models")?
+        .get(model_id)
 }
 
 #[cfg(test)]
@@ -701,30 +754,69 @@ mod tests {
     }
 
     #[test]
-    fn every_provider_has_exactly_one_cheapest_model() {
-        for kind in [
-            ProviderKind::Codex,
-            ProviderKind::Zai,
-            ProviderKind::Minimax,
-            ProviderKind::Kimi,
-        ] {
-            let cheapest = models_for(kind).iter().filter(|m| m.cheapest).count();
-            assert_eq!(cheapest, 1, "{} must have one cheapest", kind.as_str());
-            assert!(!cheapest_model(kind).is_empty());
-        }
+    fn ranks_only_available_models_with_listed_prices() {
+        let models = vec![
+            KickoffModelInfo::new("openai", "expensive", "Expensive", vec![]),
+            KickoffModelInfo::new("openai", "cheap", "Cheap", vec![]),
+            KickoffModelInfo::new("openai", "unpriced", "Unpriced", vec![]),
+        ];
+        let prices = r#"{"providers":{"openai":{"models":{
+            "expensive":{"cost_per_million":{"input":2,"output":2}},
+            "cheap":{"cost_per_million":{"input":0.1,"output":0.2}},
+            "unpriced":{"subscription_included":true}
+        }}}}"#;
+
+        let ranked = rank_kickoff_models_with_catalog(ProviderKind::Codex, models, prices);
+
+        assert_eq!(
+            ranked
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["cheap", "expensive"]
+        );
+        assert!(ranked[0].cheapest);
+        assert!(!ranked[1].cheapest);
     }
 
     #[test]
-    fn known_models_validate_and_others_do_not() {
-        assert!(is_known_model(ProviderKind::Kimi, "k3-256k"));
-        assert!(!is_known_model(ProviderKind::Kimi, "kimi-k2-turbo-preview"));
+    fn subscription_reference_prices_rank_without_becoming_zero_cost() {
+        let models = vec![
+            KickoffModelInfo::new("zai-coding-plan", "glm-5.3", "GLM-5.3", vec![]),
+            KickoffModelInfo::new("zai-coding-plan", "glm-5.3-flash", "GLM-5.3 Flash", vec![]),
+            KickoffModelInfo::new("zai-coding-plan", "no-price", "No price", vec![]),
+        ];
+        let prices = r#"{"providers":{"zai-coding-plan":{"models":{
+            "glm-5.3":{"subscription_included":true,"api_cost_per_million":{"input":1.4,"output":4.4}},
+            "glm-5.3-flash":{"subscription_included":true,"api_cost_per_million":{"input":0.15,"output":0.5}},
+            "no-price":{"subscription_included":true}
+        }}}}"#;
+
+        let ranked = rank_kickoff_models_with_catalog(ProviderKind::Zai, models, prices);
+
+        assert_eq!(
+            ranked
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["glm-5.3-flash", "glm-5.3"]
+        );
     }
 
     #[test]
-    fn the_model_catalog_serializes_camel_cased_for_the_picker() {
-        let json =
-            serde_json::to_value(models_for(ProviderKind::Zai)[0].clone()).expect("serializes");
-        assert_eq!(json["id"], "glm-5.3");
-        assert_eq!(json["cheapest"], false);
+    fn actual_prices_take_precedence_over_api_reference_prices() {
+        let models = vec![
+            KickoffModelInfo::new("minimax-coding-plan", "actual", "Actual", vec![]),
+            KickoffModelInfo::new("minimax-coding-plan", "reference", "Reference", vec![]),
+        ];
+        let prices = r#"{"providers":{"minimax-coding-plan":{"models":{
+            "actual":{"cost_per_million":{"input":1,"output":1},"api_cost_per_million":{"input":0.01,"output":0.01}},
+            "reference":{"api_cost_per_million":{"input":0.5,"output":0.5}}
+        }}}}"#;
+
+        let ranked = rank_kickoff_models_with_catalog(ProviderKind::Minimax, models, prices);
+
+        assert_eq!(ranked[0].id, "reference");
+        assert_eq!(ranked[1].id, "actual");
     }
 }

@@ -10,7 +10,9 @@ use crate::modules::providers::coding_plan::{self, PlanSpec};
 use crate::modules::providers::kimi::protocol::{
     decode_auth_failure, decode_usages, is_auth_refusal, USAGES_PATH,
 };
-use crate::shared::domain::{AccountUsage, PlanKind, ProviderKind, UsageSnapshot};
+use crate::shared::domain::{
+    AccountUsage, KickoffModelInfo, PlanKind, ProviderKind, UsageSnapshot,
+};
 use crate::shared::error::Error;
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
 
@@ -73,11 +75,16 @@ impl Provider for KimiProvider {
         Err(coding_plan::unsupported(ProviderKind::Kimi, "a ping"))
     }
 
-    fn send_kickoff(&self, prompt: &str, model: Option<&str>) -> Result<PingOutcome, Error> {
+    fn kickoff_models(&self) -> Result<Vec<KickoffModelInfo>, Error> {
+        coding_plan::kickoff_models(&Self::spec(), protocol::kickoff_efforts)
+    }
+
+    fn send_kickoff(&self, prompt: &str, model: &str, effort: &str) -> Result<PingOutcome, Error> {
         coding_plan::send_kickoff(
             &Self::spec(),
             prompt,
             model,
+            effort,
             protocol::kickoff_body,
             protocol::decode_kickoff_reply,
         )

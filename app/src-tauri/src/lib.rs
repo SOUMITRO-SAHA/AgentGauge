@@ -149,8 +149,9 @@ pub fn run() {
                     .spawn(move || {
                         let kick = |kind: crate::shared::domain::ProviderKind,
                                     prompt: &str,
-                                    model: Option<&str>| {
-                            registry.kickoff(kind, prompt, model)
+                                    model: Option<&str>,
+                                    effort: Option<&str>| {
+                            registry.kickoff(kind, prompt, model, effort)
                         };
                         loop {
                             std::thread::sleep(std::time::Duration::from_secs(30));
@@ -209,9 +210,11 @@ fn run_kickoff_worker() -> i32 {
 
     let registry = ProviderRegistry::new();
     let now = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
-    let kick = |kind: crate::shared::domain::ProviderKind, prompt: &str, model: Option<&str>| {
-        registry.kickoff(kind, prompt, model)
-    };
+    let kick =
+        |kind: crate::shared::domain::ProviderKind,
+         prompt: &str,
+         model: Option<&str>,
+         effort: Option<&str>| { registry.kickoff(kind, prompt, model, effort) };
 
     match modules::kickoff::worker::tick(&store, now, &kick) {
         Ok(fired) => {

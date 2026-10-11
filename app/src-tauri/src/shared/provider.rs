@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::shared::domain::{AccountUsage, ProviderKind, UsageSnapshot};
+use crate::shared::domain::{AccountUsage, KickoffModelInfo, ProviderKind, UsageSnapshot};
 use crate::shared::error::Error;
 
 /// What a provider can tell us about itself, checked before anything else.
@@ -58,11 +58,12 @@ pub trait Provider: Send + Sync {
 
     /// Sends the scheduled kickoff prompt with an explicit model.
     ///
-    /// `None` selects the provider's cheapest default. Like
-    /// [`Provider::send_ping`] this spends quota: only the kickoff scheduler —
-    /// behind the user's explicit per-subscription opt-in — may call it on a
-    /// timer.
-    fn send_kickoff(&self, prompt: &str, model: Option<&str>) -> Result<PingOutcome, Error>;
+    /// Like [`Provider::send_ping`] this spends quota: only the kickoff
+    /// scheduler — behind the user's explicit per-subscription opt-in — may
+    /// call it on a timer.
+    fn kickoff_models(&self) -> Result<Vec<KickoffModelInfo>, Error>;
+
+    fn send_kickoff(&self, prompt: &str, model: &str, effort: &str) -> Result<PingOutcome, Error>;
 }
 
 /// The result of a ping, including the fresh reading that followed it.

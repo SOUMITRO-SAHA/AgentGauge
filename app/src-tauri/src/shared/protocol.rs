@@ -87,6 +87,11 @@ pub enum AppRequest {
         kind: ProviderKind,
         model_id: String,
     },
+    /// Selects the effort the scheduled kickoff uses for one subscription.
+    SetKickoffEffort {
+        kind: ProviderKind,
+        effort_id: String,
+    },
     /// Onboarding progress, shaped for a progress indicator.
     OnboardingProgress,
     /// Persists onboarding progress.
@@ -142,6 +147,7 @@ impl AppRequest {
             Self::KickoffState => "kickoffState",
             Self::SetKickoffEnabled { .. } => "setKickoffEnabled",
             Self::SetKickoffModel { .. } => "setKickoffModel",
+            Self::SetKickoffEffort { .. } => "setKickoffEffort",
             Self::OnboardingProgress => "onboardingProgress",
             Self::SetOnboardingStep { .. } => "setOnboardingStep",
             Self::SystemWidgetStatus => "systemWidgetStatus",
@@ -369,6 +375,10 @@ mod tests {
                 kind: ProviderKind::Codex,
                 model_id: "gpt-6-luna".into(),
             },
+            AppRequest::SetKickoffEffort {
+                kind: ProviderKind::Codex,
+                effort_id: "minimal".into(),
+            },
             AppRequest::SetOnboardingStep {
                 step: OnboardingStep::Done,
                 dismissed: false,
@@ -456,6 +466,10 @@ mod tests {
             AppRequest::SetKickoffModel {
                 kind: ProviderKind::Codex,
                 model_id: "gpt-6-luna".into(),
+            },
+            AppRequest::SetKickoffEffort {
+                kind: ProviderKind::Codex,
+                effort_id: "minimal".into(),
             },
             AppRequest::SetOnboardingStep {
                 step: OnboardingStep::Done,

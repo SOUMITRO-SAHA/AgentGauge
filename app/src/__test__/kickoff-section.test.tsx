@@ -38,9 +38,27 @@ function kickoffState(overrides: Record<string, unknown> = {}): Record<string, u
           enabled,
           modelId: null,
           effectiveModel: "glm-5.3-flash",
+          effortId: "low",
+          modelError: null,
           models: [
-            { id: "glm-5.3", label: "GLM-5.3", cheapest: false },
-            { id: "glm-5.3-flash", label: "GLM-5.3 Flash", cheapest: true },
+            {
+              id: "glm-5.3",
+              label: "GLM-5.3",
+              cheapest: false,
+              efforts: [
+                { id: "low", label: "Low" },
+                { id: "high", label: "High" },
+              ],
+            },
+            {
+              id: "glm-5.3-flash",
+              label: "GLM-5.3 Flash",
+              cheapest: true,
+              efforts: [
+                { id: "low", label: "Low" },
+                { id: "high", label: "High" },
+              ],
+            },
           ],
           nextKickAt: enabled
             ? ((overrides.nextKickAtMs as number | undefined) ?? Date.now() + 2 * 3_600_000)
@@ -94,18 +112,32 @@ it("renders opted out with a model picker but no scheduled attempt", async () =>
   await renderSection(kickoffState({ enabled: false }));
 
   const toggle = await screen.findByTestId("kickoff-toggle-zai");
-  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
   expect(screen.getByTestId("kickoff-model-zai").textContent).toContain(
     "GLM-5.3 Flash",
   );
   expect(screen.queryByTestId("kickoff-next-zai")).toBeNull();
+  expect(screen.getByTestId("kickoff-effort-zai").textContent).toContain("Low");
+  expect(screen.getByTestId("kickoff-model-zai").hasAttribute("disabled")).toBe(
+    false,
+  );
+  expect(screen.getByTestId("kickoff-effort-zai").hasAttribute("disabled")).toBe(
+    false,
+  );
 });
 
 it("renders the schedule, selected model, and countdown once enabled", async () => {
   await renderSection(kickoffState({ enabled: true }));
 
   const toggle = await screen.findByTestId("kickoff-toggle-zai");
-  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  expect(toggle.getAttribute("data-variant")).toBe("destructive");
+  expect(screen.getByTestId("kickoff-model-zai").hasAttribute("disabled")).toBe(
+    true,
+  );
+  expect(screen.getByTestId("kickoff-effort-zai").hasAttribute("disabled")).toBe(
+    true,
+  );
 
   const next = await screen.findByTestId("kickoff-next-zai");
   expect(next.textContent).toContain("1h");
@@ -118,7 +150,7 @@ it("renders the schedule, selected model, and countdown once enabled", async () 
   );
 });
 
-it("explains reported-reset timing, quota use, and unknown model availability", async () => {
+it("explains reset timing, quota use, and model-list limitations", async () => {
   await renderSection(kickoffState({ enabled: false }));
 
   const section = await screen.findByTestId("kickoff-section-zai");
@@ -126,7 +158,22 @@ it("explains reported-reset timing, quota use, and unknown model availability", 
   expect(section.textContent).toContain("does not verify a rollover");
   expect(section.textContent).toContain("uses quota");
   expect(section.textContent).toContain("does not create, reset, or extend");
-  expect(section.textContent).toContain("availability and quota impact are unknown");
+  expect(section.textContent).toContain("exposed by this harness");
+  expect(section.textContent).toContain("does not guarantee plan access");
+  expect(section.textContent).toContain(
+    "does not estimate subscription quota impact",
+  );
+});
+
+it("explains that a running kickoff must be stopped before reconfiguration", async () => {
+  await renderSection(kickoffState({ enabled: true }));
+
+  const modelControl = await screen.findByTestId("kickoff-model-zai");
+  const wrapper = modelControl.parentElement;
+  if (wrapper === null) throw new Error("model control has no tooltip wrapper");
+  expect(wrapper.getAttribute("title")).toContain(
+    "Stop this kickoff before changing its model or effort",
+  );
 });
 
 it("says due now rather than counting a passed schedule negatively", async () => {

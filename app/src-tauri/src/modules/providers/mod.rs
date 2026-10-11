@@ -21,7 +21,9 @@ pub(crate) mod kimi;
 pub(crate) mod minimax;
 pub(crate) mod zai;
 
-use crate::shared::domain::{AccountUsage, PlanKind, ProviderKind, UsageSnapshot};
+use crate::shared::domain::{
+    rank_kickoff_models, AccountUsage, KickoffModelInfo, PlanKind, ProviderKind, UsageSnapshot,
+};
 use crate::shared::error::{Error, ErrorKind};
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
 
@@ -108,6 +110,11 @@ impl ProviderRegistry {
         self.find(kind)?.send_ping(prompt)
     }
 
+    pub fn kickoff_models(&self, kind: ProviderKind) -> Result<Vec<KickoffModelInfo>, Error> {
+        let models = self.find(kind)?.kickoff_models()?;
+        Ok(rank_kickoff_models(kind, models))
+    }
+
     /// Sends the scheduled kickoff prompt. Same rule as [`Self::ping`], one
     /// level stricter: the only legitimate caller is the kickoff scheduler,
     /// which runs only for subscriptions the user explicitly opted in.
@@ -116,8 +123,57 @@ impl ProviderRegistry {
         kind: ProviderKind,
         prompt: &str,
         model: Option<&str>,
+        effort: Option<&str>,
     ) -> Result<PingOutcome, Error> {
-        self.find(kind)?.send_kickoff(prompt, model)
+        let models = self.kickoff_models(kind)?;
+        let selected = match model {
+            Some(model_id) => models
+                .iter()
+                .find(|candidate| candidate.id == model_id)
+                .ok_or_else(|| {
+                    Error::provider_error(format!(
+                        "The selected model `{model_id}` is no longer available for {}.",
+                        kind.display_name()
+                    ))
+                })?,
+            None => models.first().ok_or_else(|| {
+                Error::provider_error(format!(
+                    "No price-listed models are currently available for {}.",
+                    kind.display_name()
+                ))
+            })?,
+        };
+        let selected_effort = match effort {
+            Some(effort_id) => selected
+                .efforts
+                .iter()
+                .find(|candidate| candidate.id == effort_id)
+                .map(|candidate| candidate.id.as_str())
+                .ok_or_else(|| {
+                    Error::invalid_request(format!(
+                        "The selected effort `{effort_id}` is not available for `{}`.",
+                        selected.id
+                    ))
+                })?,
+            None => selected.lowest_effort().ok_or_else(|| {
+                Error::provider_error(format!(
+                    "The selected model `{}` has no supported kickoff effort.",
+                    selected.id
+                ))
+            })?,
+        };
+        if !selected
+            .efforts
+            .iter()
+            .any(|candidate| candidate.id == selected_effort)
+        {
+            return Err(Error::invalid_request(format!(
+                "The selected effort `{selected_effort}` is not available for `{}`.",
+                selected.id
+            )));
+        }
+        self.find(kind)?
+            .send_kickoff(prompt, &selected.id, selected_effort)
     }
 }
 

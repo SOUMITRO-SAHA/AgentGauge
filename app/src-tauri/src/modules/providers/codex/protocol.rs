@@ -14,8 +14,9 @@
 use serde::Deserialize;
 
 use crate::shared::domain::{
-    freshness_for, window_label, AccountUsage, AccountUsageSummary, DailyUsageBucket, PlanKind,
-    ProviderKind, UsagePermission, UsageSnapshot, UsageWindow, SOURCE_APP_SERVER,
+    freshness_for, window_label, AccountUsage, AccountUsageSummary, DailyUsageBucket,
+    KickoffEffortInfo, KickoffModelInfo, PlanKind, ProviderKind, UsagePermission, UsageSnapshot,
+    UsageWindow, SOURCE_APP_SERVER,
 };
 use crate::shared::error::Error;
 
@@ -70,6 +71,117 @@ struct WireAccountUsageSummary {
 struct WireDailyUsageBucket {
     start_date: Option<String>,
     tokens: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireModelListPage {
+    #[serde(default)]
+    data: Vec<WireModel>,
+    next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireModel {
+    id: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    display_name: String,
+    #[serde(default)]
+    hidden: bool,
+    #[serde(default)]
+    supported_reasoning_efforts: Vec<WireReasoningEffort>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireReasoningEffort {
+    reasoning_effort: String,
+}
+
+/// One page returned by Codex `model/list`.
+pub struct KickoffModelPage {
+    pub models: Vec<KickoffModelInfo>,
+    pub next_cursor: Option<String>,
+}
+
+/// Decodes one page of Codex models and their supported reasoning efforts.
+pub fn decode_model_list_page(payload: &str) -> Result<KickoffModelPage, Error> {
+    let parsed: WireModelListPage =
+        serde_json::from_str(payload).map_err(|err| decode_error(err, "model/list"))?;
+
+    let models = parsed
+        .data
+        .into_iter()
+        .filter(|model| !model.hidden)
+        .filter_map(|model| {
+            let model_id = if model.model.is_empty() {
+                model.id
+            } else {
+                model.model
+            };
+            let mut efforts = model
+                .supported_reasoning_efforts
+                .into_iter()
+                .map(|effort| KickoffEffortInfo {
+                    label: effort_label(&effort.reasoning_effort),
+                    id: effort.reasoning_effort,
+                })
+                .collect::<Vec<_>>();
+            efforts.sort_by(|left, right| {
+                effort_rank(&left.id)
+                    .cmp(&effort_rank(&right.id))
+                    .then_with(|| left.id.cmp(&right.id))
+            });
+            efforts.dedup_by(|left, right| left.id == right.id);
+            if model_id.is_empty() || efforts.is_empty() {
+                return None;
+            }
+            let label = if model.display_name.is_empty() {
+                model_id.clone()
+            } else {
+                model.display_name
+            };
+            Some(KickoffModelInfo::new("openai", model_id, label, efforts))
+        })
+        .collect();
+
+    Ok(KickoffModelPage {
+        models,
+        next_cursor: parsed.next_cursor,
+    })
+}
+
+fn effort_rank(effort: &str) -> u8 {
+    match effort {
+        "none" => 0,
+        "minimal" => 1,
+        "low" => 2,
+        "medium" => 3,
+        "high" => 4,
+        "xhigh" => 5,
+        "max" => 6,
+        "ultra" => 7,
+        "persistent" => 8,
+        _ => u8::MAX,
+    }
+}
+
+fn effort_label(effort: &str) -> String {
+    match effort {
+        "none" => "None".to_string(),
+        "minimal" => "Minimal".to_string(),
+        "low" => "Low".to_string(),
+        "medium" => "Medium".to_string(),
+        "high" => "High".to_string(),
+        "xhigh" => "Extra high".to_string(),
+        "max" => "Max".to_string(),
+        "ultra" => "Ultra".to_string(),
+        "persistent" => "Persistent".to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// Turns a decoded window into the domain shape, labelling it by duration.
@@ -541,6 +653,34 @@ mod tests {
         let (plan, requires_auth) = decode_account(payload).expect("decodes");
         assert_eq!(plan, Some(PlanKind::Pro));
         assert!(!requires_auth);
+    }
+
+    #[test]
+    fn decodes_available_models_and_their_efforts() {
+        let payload = r#"{"data":[
+            {"id":"gpt-6-luna","model":"gpt-6-luna","displayName":"GPT-6 Luna","hidden":false,
+             "supportedReasoningEfforts":[
+                {"reasoningEffort":"high","description":"High"},
+                {"reasoningEffort":"minimal","description":"Minimal"}
+             ]},
+            {"id":"hidden","model":"hidden","displayName":"Hidden","hidden":true,
+             "supportedReasoningEfforts":[{"reasoningEffort":"minimal","description":"Minimal"}]}
+        ],"nextCursor":"next-page"}"#;
+
+        let page = decode_model_list_page(payload).expect("decodes");
+
+        assert_eq!(page.next_cursor.as_deref(), Some("next-page"));
+        assert_eq!(page.models.len(), 1);
+        assert_eq!(page.models[0].id, "gpt-6-luna");
+        assert_eq!(page.models[0].label, "GPT-6 Luna");
+        assert_eq!(
+            page.models[0]
+                .efforts
+                .iter()
+                .map(|effort| effort.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["minimal", "high"]
+        );
     }
 
     #[test]

@@ -1,8 +1,8 @@
 /**
  * One connection's scheduled-kickoff controls.
  *
- * The model can be chosen independently, but the switch starts off and no
- * prompt is scheduled until the user opts in. The copy distinguishes the
+ * The model can be chosen independently, but scheduling starts off and no
+ * prompt is sent until the user opts in. The copy distinguishes the
  * reported-reset schedule from a verified rollover and states the quota cost.
  *
  * Writes go through the command and then refresh the atom the section reads,
@@ -13,8 +13,10 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import * as Effect from "effect/Effect";
 import { useState, type ReactElement } from "react";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { Play, Stop } from "@phosphor-icons/react";
 
 import { kickoffAtom, kickoffViewOf } from "~/atoms";
+import { Button } from "~/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -22,7 +24,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { Switch } from "~/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from "~/components/ui/tooltip";
 import * as Ipc from "~/lib/ipc";
 import { formatCountdown } from "~/lib/usage";
 
@@ -65,14 +72,19 @@ export function KickoffSection({
       const view = kickoffViewOf(result.value, kind);
       if (view === null) return null;
       return (
-        <KickoffControls
-          view={view}
-          scheduler={result.value.scheduler}
-          nowMs={nowMs}
-          error={error}
-          onToggle={(enabled) => apply(() => Ipc.setKickoffEnabled(kind, enabled))}
-          onModel={(modelId) => apply(() => Ipc.setKickoffModel(kind, modelId))}
-        />
+        <TooltipProvider>
+          <KickoffControls
+            view={view}
+            scheduler={result.value.scheduler}
+            nowMs={nowMs}
+            error={error}
+            onToggle={(enabled) => apply(() => Ipc.setKickoffEnabled(kind, enabled))}
+            onModel={(modelId) => apply(() => Ipc.setKickoffModel(kind, modelId))}
+            onEffort={(effortId) =>
+              apply(() => Ipc.setKickoffEffort(kind, effortId))
+            }
+          />
+        </TooltipProvider>
       );
     },
   });
@@ -85,6 +97,7 @@ function KickoffControls({
   error,
   onToggle,
   onModel,
+  onEffort,
 }: {
   readonly view: Ipc.KickoffView;
   readonly scheduler: Ipc.SchedulerStatus;
@@ -92,7 +105,15 @@ function KickoffControls({
   readonly error: string | null;
   readonly onToggle: (enabled: boolean) => void;
   readonly onModel: (modelId: string) => void;
+  readonly onEffort: (effortId: string) => void;
 }): ReactElement {
+  const selectedModel = view.models.find(
+    (model) => model.id === view.effectiveModel,
+  );
+  const efforts = selectedModel?.efforts ?? [];
+  const configurationLocked =
+    "Stop this kickoff before changing its model or effort. Reconfigure it, then enable it again.";
+
   return (
     <div
       className="flex flex-col gap-3"
@@ -104,12 +125,9 @@ function KickoffControls({
 
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-0.5">
-          <label
-            htmlFor={`kickoff-toggle-${view.kind}`}
-            className="text-sm font-medium"
-          >
+          <span className="text-sm font-medium">
             Enable scheduled “Hi”
-          </label>
+          </span>
           <p
             className="max-w-prose text-xs leading-relaxed text-muted-foreground"
             data-testid={`kickoff-copy-${view.kind}`}
@@ -121,46 +139,130 @@ function KickoffControls({
             and does not create, reset, or extend a usage window.
           </p>
         </div>
-        <Switch
-          id={`kickoff-toggle-${view.kind}`}
-          checked={view.enabled}
-          onCheckedChange={onToggle}
+        <Button
+          type="button"
+          variant={view.enabled ? "destructive" : "default"}
+          size="sm"
+          disabled={!view.enabled && view.models.length === 0}
+          onClick={() => onToggle(!view.enabled)}
           data-testid={`kickoff-toggle-${view.kind}`}
-          aria-label={`Enable scheduled Hi for ${view.kind}`}
-        />
+          aria-pressed={view.enabled}
+          aria-label={`${view.enabled ? "Stop" : "Enable"} scheduled Hi for ${view.kind}`}
+        >
+          {view.enabled ? (
+            <>
+              <Stop aria-hidden="true" weight="fill" />
+              Stop
+            </>
+          ) : (
+            <>
+              <Play aria-hidden="true" weight="fill" />
+              Enable
+            </>
+          )}
+        </Button>
       </div>
 
       <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-sm text-muted-foreground">Model for “Hi”</span>
-          <Select value={view.effectiveModel} onValueChange={onModel}>
-            <SelectTrigger
-              className="w-56"
-              data-testid={`kickoff-model-${view.kind}`}
-              aria-label={`Kickoff model for ${view.kind}`}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper">
-              {view.models.map((model) => (
-                <SelectItem
-                  key={model.id}
-                  value={model.id}
-                  data-testid={`kickoff-model-option-${view.kind}-${model.id}`}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                tabIndex={view.enabled ? 0 : undefined}
+                title={view.enabled ? configurationLocked : undefined}
+              >
+                <Select
+                  value={view.effectiveModel}
+                  onValueChange={onModel}
+                  disabled={view.enabled || view.models.length === 0}
                 >
-                  {model.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                  <SelectTrigger
+                    className="w-56"
+                    data-testid={`kickoff-model-${view.kind}`}
+                    aria-label={`Kickoff model for ${view.kind}`}
+                  >
+                    <SelectValue placeholder="Unavailable" />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    {view.models.map((model) => (
+                      <SelectItem
+                        key={model.id}
+                        value={model.id}
+                        data-testid={`kickoff-model-option-${view.kind}-${model.id}`}
+                      >
+                        {model.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </span>
+            </TooltipTrigger>
+            {view.enabled && (
+              <TooltipContent data-testid={`kickoff-model-locked-tooltip-${view.kind}`}>
+                {configurationLocked}
+              </TooltipContent>
+            )}
+          </Tooltip>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-sm text-muted-foreground">Effort for “Hi”</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                tabIndex={view.enabled ? 0 : undefined}
+                title={view.enabled ? configurationLocked : undefined}
+              >
+                <Select
+                  value={view.effortId ?? efforts[0]?.id ?? ""}
+                  onValueChange={onEffort}
+                  disabled={view.enabled || efforts.length === 0}
+                >
+                  <SelectTrigger
+                    className="w-56"
+                    data-testid={`kickoff-effort-${view.kind}`}
+                    aria-label={`Kickoff effort for ${view.kind}`}
+                  >
+                    <SelectValue placeholder="Unavailable" />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    {efforts.map((effort) => (
+                      <SelectItem
+                        key={effort.id}
+                        value={effort.id}
+                        data-testid={`kickoff-effort-option-${view.kind}-${effort.id}`}
+                      >
+                        {effort.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </span>
+            </TooltipTrigger>
+            {view.enabled && (
+              <TooltipContent data-testid={`kickoff-effort-locked-tooltip-${view.kind}`}>
+                {configurationLocked}
+              </TooltipContent>
+            )}
+          </Tooltip>
         </div>
         <p
           className="text-xs leading-relaxed text-muted-foreground"
           data-testid={`kickoff-model-note-${view.kind}`}
         >
-          This catalog is not live-verified by the connection; model availability
-          and quota impact are unknown.
+          Only models exposed by this harness with a listed price appear; this
+          does not guarantee plan access. Price ordering does not estimate
+          subscription quota impact.
         </p>
+
+        {view.modelError != null && (
+          <p
+            className="text-xs text-warn"
+            data-testid={`kickoff-model-error-${view.kind}`}
+          >
+            {view.modelError}
+          </p>
+        )}
 
         {view.enabled && (
           <>

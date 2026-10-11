@@ -19,7 +19,9 @@
 
 use serde::Deserialize;
 
-use crate::shared::domain::{Freshness, ProviderKind, UsagePermission, UsageSnapshot, UsageWindow};
+use crate::shared::domain::{
+    Freshness, KickoffEffortInfo, ProviderKind, UsagePermission, UsageSnapshot, UsageWindow,
+};
 use crate::shared::error::{Error, ErrorKind};
 
 /// The vendor's usage path on both regional hosts.
@@ -225,14 +227,40 @@ pub const KICKOFF_MAX_TOKENS: i64 = 32;
 /// The coding API takes the OpenAI-compatible chat shape; the budget keeps the
 /// answer — which is context only, the request's job is to open the window —
 /// at its floor.
-pub fn kickoff_body(model: &str, prompt: &str) -> String {
-    serde_json::json!({
+pub fn kickoff_efforts(model: &str) -> Vec<KickoffEffortInfo> {
+    if matches!(model, "k3" | "k3-256k" | "kimi-for-coding") {
+        ["low", "high", "max"]
+            .into_iter()
+            .map(|effort| {
+                KickoffEffortInfo::new(
+                    effort,
+                    match effort {
+                        "low" => "Low",
+                        "high" => "High",
+                        _ => "Max",
+                    },
+                )
+            })
+            .collect()
+    } else {
+        vec![KickoffEffortInfo::new(
+            "provider-default",
+            "Provider default",
+        )]
+    }
+}
+
+pub fn kickoff_body(model: &str, prompt: &str, effort: &str) -> String {
+    let mut body = serde_json::json!({
         "model": model,
         "messages": [{ "role": "user", "content": prompt }],
         "max_tokens": KICKOFF_MAX_TOKENS,
         "stream": false,
-    })
-    .to_string()
+    });
+    if effort != "provider-default" {
+        body["reasoning_effort"] = serde_json::Value::String(effort.to_string());
+    }
+    body.to_string()
 }
 
 /// Extracts the agent reply text from a chat-completions response.
@@ -255,12 +283,30 @@ mod tests {
 
     #[test]
     fn the_kickoff_body_is_the_documented_chat_shape_at_its_smallest() {
-        let body = kickoff_body("k3-256k", "hi");
+        let body = kickoff_body("k3-256k", "hi", "provider-default");
         let value: serde_json::Value = serde_json::from_str(&body).expect("json");
         assert_eq!(value["model"], "k3-256k");
         assert_eq!(value["messages"][0]["content"], "hi");
         assert_eq!(value["max_tokens"], KICKOFF_MAX_TOKENS);
         assert_eq!(value["stream"], false);
+    }
+
+    #[test]
+    fn k3_uses_the_documented_reasoning_effort_field() {
+        let body = kickoff_body("k3", "hi", "low");
+        let value: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(value["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn supported_kimi_code_models_offer_the_documented_effort_choices() {
+        assert_eq!(kickoff_efforts("k3")[0].id, "low");
+        assert_eq!(kickoff_efforts("k3-256k")[0].id, "low");
+        assert_eq!(kickoff_efforts("kimi-for-coding")[0].id, "low");
+        assert_eq!(
+            kickoff_efforts("kimi-for-coding-highspeed")[0].id,
+            "provider-default"
+        );
     }
 
     #[test]

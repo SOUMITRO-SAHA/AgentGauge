@@ -15,8 +15,8 @@
 use serde::Deserialize;
 
 use crate::shared::domain::{
-    AccountUsage, AccountUsageSummary, DailyUsageBucket, Freshness, ModelUsage, PlanKind,
-    ProviderKind, UsagePermission, UsageSnapshot, UsageWindow,
+    AccountUsage, AccountUsageSummary, DailyUsageBucket, Freshness, KickoffEffortInfo, ModelUsage,
+    PlanKind, ProviderKind, UsagePermission, UsageSnapshot, UsageWindow,
 };
 use crate::shared::error::{Error, ErrorKind};
 
@@ -450,14 +450,52 @@ pub const KICKOFF_MAX_TOKENS: i64 = 32;
 ///
 /// The endpoint is the OpenAI-compatible one on the plan's coding base, so
 /// the shape is the vendor's documented chat shape at its smallest.
-pub fn kickoff_body(model: &str, prompt: &str) -> String {
-    serde_json::json!({
+pub fn kickoff_efforts(model: &str) -> Vec<KickoffEffortInfo> {
+    match model {
+        "glm-5.2" => ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+            .into_iter()
+            .map(|effort| KickoffEffortInfo::new(effort, effort_label(effort)))
+            .collect(),
+        "glm-5.3" | "glm-5.3-flash" => ["low", "high", "max"]
+            .into_iter()
+            .map(|effort| KickoffEffortInfo::new(effort, effort_label(effort)))
+            .collect(),
+        _ => vec![KickoffEffortInfo::new(
+            "provider-default",
+            "Provider default",
+        )],
+    }
+}
+
+fn effort_label(effort: &str) -> &'static str {
+    match effort {
+        "none" => "None",
+        "minimal" => "Minimal",
+        "low" => "Low",
+        "medium" => "Medium",
+        "high" => "High",
+        "xhigh" => "Extra high",
+        "max" => "Max",
+        _ => "Provider default",
+    }
+}
+
+pub fn kickoff_body(model: &str, prompt: &str, effort: &str) -> String {
+    let mut body = serde_json::json!({
         "model": model,
         "messages": [{ "role": "user", "content": prompt }],
         "max_tokens": KICKOFF_MAX_TOKENS,
         "stream": false,
-    })
-    .to_string()
+    });
+    match effort {
+        "none" | "minimal" => body["thinking"] = serde_json::json!({ "type": "disabled" }),
+        "low" | "medium" | "high" | "xhigh" | "max" => {
+            body["thinking"] = serde_json::json!({ "type": "enabled" });
+            body["reasoning_effort"] = serde_json::Value::String(effort.to_string());
+        }
+        _ => {}
+    }
+    body.to_string()
 }
 
 /// Extracts the agent reply text from a chat-completions response.
@@ -480,13 +518,38 @@ mod tests {
 
     #[test]
     fn the_kickoff_body_is_the_documented_chat_shape_at_its_smallest() {
-        let body = kickoff_body("glm-5.3-flash", "hi");
+        let body = kickoff_body("glm-5.3-flash", "hi", "low");
         let value: serde_json::Value = serde_json::from_str(&body).expect("json");
         assert_eq!(value["model"], "glm-5.3-flash");
         assert_eq!(value["messages"][0]["role"], "user");
         assert_eq!(value["messages"][0]["content"], "hi");
         assert_eq!(value["max_tokens"], KICKOFF_MAX_TOKENS);
         assert_eq!(value["stream"], false);
+        assert_eq!(value["thinking"]["type"], "enabled");
+        assert_eq!(value["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn models_without_documented_effort_controls_keep_the_provider_default() {
+        let body = kickoff_body("glm-4.7", "hi", "provider-default");
+        let value: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert!(value.get("reasoning_effort").is_none());
+        assert!(value.get("thinking").is_none());
+    }
+
+    #[test]
+    fn effort_choices_follow_each_glm_model_and_put_the_lowest_first() {
+        let glm_52 = kickoff_efforts("glm-5.2");
+        let glm_53 = kickoff_efforts("glm-5.3");
+        let flash = kickoff_efforts("glm-5.3-flash");
+
+        assert_eq!(
+            glm_52.first().map(|effort| effort.id.as_str()),
+            Some("none")
+        );
+        assert_eq!(glm_53.first().map(|effort| effort.id.as_str()), Some("low"));
+        assert_eq!(flash.first().map(|effort| effort.id.as_str()), Some("low"));
+        assert_eq!(kickoff_efforts("glm-4.7").len(), 1);
     }
 
     #[test]

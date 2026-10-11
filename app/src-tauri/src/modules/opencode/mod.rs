@@ -86,6 +86,13 @@ struct ListingResponse {
     data: Vec<ProviderListing>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// A model identifier reported by the OpenCode CLI.
+pub struct OpenCodeModel {
+    pub provider_id: String,
+    pub model_id: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct ExportEntry {
     #[serde(rename = "integrationID")]
@@ -242,6 +249,32 @@ fn listing_args() -> Vec<String> {
         args.push(format!("location[directory]={home}"));
     }
     args
+}
+
+/// Reads the model ids OpenCode currently exposes to configured providers.
+pub fn available_models() -> Result<Vec<OpenCodeModel>, Error> {
+    let output = run_capture(&["models"], CLI_TIMEOUT)?;
+    Ok(parse_model_listing(&output))
+}
+
+fn parse_model_listing(output: &str) -> Vec<OpenCodeModel> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let (provider_id, model_id) = line.trim().split_once('/')?;
+            if provider_id.is_empty()
+                || model_id.is_empty()
+                || provider_id.chars().any(char::is_whitespace)
+                || model_id.chars().any(char::is_whitespace)
+            {
+                return None;
+            }
+            Some(OpenCodeModel {
+                provider_id: provider_id.to_string(),
+                model_id: model_id.to_string(),
+            })
+        })
+        .collect()
 }
 
 fn run_capture(args: &[&str], timeout: Duration) -> Result<String, Error> {
@@ -573,6 +606,27 @@ mod tests {
         .expect("reads");
         assert_eq!(calls, EMPTY_LIST_RETRIES + 1);
         assert!(catalog.subscriptions().is_empty());
+    }
+
+    #[test]
+    fn parses_models_only_from_the_harness_provider_model_lines() {
+        let models = parse_model_listing(
+            "openai/gpt-6-luna\nzai-coding-plan/glm-5.3-flash\nModels available:\n",
+        );
+
+        assert_eq!(
+            models,
+            vec![
+                OpenCodeModel {
+                    provider_id: "openai".into(),
+                    model_id: "gpt-6-luna".into(),
+                },
+                OpenCodeModel {
+                    provider_id: "zai-coding-plan".into(),
+                    model_id: "glm-5.3-flash".into(),
+                },
+            ]
+        );
     }
 
     #[test]

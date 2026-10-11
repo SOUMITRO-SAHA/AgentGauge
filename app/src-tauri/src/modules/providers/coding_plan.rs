@@ -5,9 +5,12 @@
 //! key — and only then talks to the vendor's quota endpoint. The steps live
 //! here so each provider module is nothing but its spec and its decoder.
 
-use crate::modules::opencode::{quota_host, OpenCodeCatalog, OPENCODE_EXECUTABLE};
+use crate::modules::opencode::{self, quota_host, OpenCodeCatalog, OPENCODE_EXECUTABLE};
 use crate::modules::providers::http::{self, AuthHeader};
-use crate::shared::domain::{AccountUsage, ProviderKind, UsageSnapshot};
+use crate::shared::domain::{
+    kickoff_model_label, AccountUsage, KickoffEffortInfo, KickoffModelInfo, ProviderKind,
+    UsageSnapshot,
+};
 use crate::shared::error::{Error, ErrorKind};
 use crate::shared::provider::{PingOutcome, ProviderStatus};
 
@@ -281,6 +284,34 @@ pub(crate) fn kickoff_request(catalog: &OpenCodeCatalog, spec: &PlanSpec) -> Kic
     }
 }
 
+pub(crate) fn kickoff_models(
+    spec: &PlanSpec,
+    efforts_for_model: impl Fn(&str) -> Vec<KickoffEffortInfo>,
+) -> Result<Vec<KickoffModelInfo>, Error> {
+    let catalog = OpenCodeCatalog::read()?;
+    let Some(provider_id) = spec
+        .family
+        .iter()
+        .find(|id| catalog.is_connected(id))
+        .copied()
+    else {
+        return Ok(Vec::new());
+    };
+
+    Ok(opencode::available_models()?
+        .into_iter()
+        .filter(|model| model.provider_id == provider_id)
+        .map(|model| {
+            KickoffModelInfo::new(
+                model.provider_id,
+                model.model_id.clone(),
+                kickoff_model_label(provider_id, &model.model_id),
+                efforts_for_model(&model.model_id),
+            )
+        })
+        .collect())
+}
+
 /// Sends a plan's scheduled kickoff end to end.
 ///
 /// `body` builds the vendor-specific request and `decode_reply` extracts the
@@ -290,12 +321,13 @@ pub(crate) fn kickoff_request(catalog: &OpenCodeCatalog, spec: &PlanSpec) -> Kic
 pub(crate) fn send_kickoff(
     spec: &PlanSpec,
     prompt: &str,
-    model: Option<&str>,
-    body: impl Fn(&str, &str) -> String,
+    model: &str,
+    effort: &str,
+    body: impl Fn(&str, &str, &str) -> String,
     decode_reply: impl Fn(&str) -> Result<String, Error>,
 ) -> Result<PingOutcome, Error> {
     match OpenCodeCatalog::read() {
-        Ok(catalog) => send_kickoff_with(&catalog, spec, prompt, model, body, decode_reply),
+        Ok(catalog) => send_kickoff_with(&catalog, spec, prompt, model, effort, body, decode_reply),
         Err(error) => Ok(refused(format!(
             "OpenCode could not be asked what is connected: {}",
             error.message
@@ -309,8 +341,9 @@ pub(crate) fn send_kickoff_with(
     catalog: &OpenCodeCatalog,
     spec: &PlanSpec,
     prompt: &str,
-    model: Option<&str>,
-    body: impl Fn(&str, &str) -> String,
+    model: &str,
+    effort: &str,
+    body: impl Fn(&str, &str, &str) -> String,
     decode_reply: impl Fn(&str) -> Result<String, Error>,
 ) -> Result<PingOutcome, Error> {
     let (url, key) = match kickoff_request(catalog, spec) {
@@ -318,8 +351,7 @@ pub(crate) fn send_kickoff_with(
         KickoffRequest::Send { url, key } => (url, key),
     };
 
-    let model = model.unwrap_or_else(|| crate::shared::domain::cheapest_model(spec.kind));
-    let payload = http::post_json(&url, &AuthHeader::Bearer(key), &body(model, prompt))?;
+    let payload = http::post_json(&url, &AuthHeader::Bearer(key), &body(model, prompt, effort))?;
     let reply = decode_reply(&payload)?;
 
     Ok(PingOutcome {
@@ -495,7 +527,8 @@ mod tests {
                 &oauth_only,
                 &spec(),
                 "hi",
-                None,
+                "glm-5.3",
+                "low",
                 zai_protocol::kickoff_body,
                 zai_protocol::decode_kickoff_reply,
             )

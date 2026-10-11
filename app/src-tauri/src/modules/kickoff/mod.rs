@@ -26,7 +26,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::shared::domain::ProviderKind;
+#[cfg(test)]
+use crate::shared::domain::KickoffEffortInfo;
+use crate::shared::domain::{KickoffModelInfo, ProviderKind};
 use crate::shared::error::Error;
 
 /// The prompt the kickoff sends. Deliberately trivial and content-free: the
@@ -56,15 +58,11 @@ pub const SCHEDULE_FILE_NAME: &str = "kickoff-schedule.json";
 
 /// Bumped when the schedule shape changes. An unrecognised version is treated
 /// as no schedule rather than as a schedule that may not mean what it says.
-pub const SCHEDULE_VERSION: u32 = 1;
+pub const SCHEDULE_VERSION: u32 = 2;
 
 /// Longest detail kept for the UI, in characters. A provider reply or error
 /// is context, not data, and must not turn the schedule file into a log.
 const MAX_DETAIL_CHARS: usize = 200;
-
-// The model catalog lives in `shared/domain.rs` — the provider pipeline needs
-// the same cheapest-default answer the picker shapes for the renderer.
-pub use crate::shared::domain::{cheapest_model, is_known_model, models_for};
 
 /// One subscription's kickoff configuration and schedule, as shared with the
 /// worker through the schedule file.
@@ -75,8 +73,10 @@ pub struct KickoffSubscription {
     /// The explicit opt-in. `false` is the default and only the renderer's
     /// `setKickoffEnabled` writes a `true`.
     pub enabled: bool,
-    /// The user's model choice, or `None` for the cheapest default.
+    /// The user's model choice, or `None` for the current price-ranked default.
     pub model_id: Option<String>,
+    #[serde(default)]
+    pub effort_id: String,
     /// Unix **seconds** of the window reset this schedule is built from.
     pub resets_at: Option<i64>,
     /// Epoch **milliseconds** at which the next kickoff may fire.
@@ -96,30 +96,13 @@ impl KickoffSubscription {
             kind,
             enabled: false,
             model_id: None,
+            effort_id: String::new(),
             resets_at: None,
             next_kick_at: None,
             last_kick_at: None,
             last_accepted: None,
             last_detail: None,
         }
-    }
-
-    /// The model the next kickoff would actually send.
-    ///
-    /// An override this build does not recognise falls back to the cheapest:
-    /// a vendor may retire a slug, and an unknown slug must degrade to the
-    /// deliberate default rather than fail every future attempt.
-    pub fn selected_model(&self) -> &'static str {
-        let selected = self
-            .model_id
-            .as_deref()
-            .filter(|id| is_known_model(self.kind, id));
-        if let Some(id) = selected {
-            if let Some(model) = models_for(self.kind).iter().find(|m| m.id == id) {
-                return model.id;
-            }
-        }
-        cheapest_model(self.kind)
     }
 
     /// Applies the opt-in. Turning it on schedules the first attempt: from the
@@ -139,9 +122,13 @@ impl KickoffSubscription {
         }
     }
 
-    /// Selects the model. `None` returns to the cheapest default.
+    /// Selects the model. `None` returns to the current price-ranked default.
     pub fn set_model(&mut self, model_id: Option<String>) {
         self.model_id = model_id;
+    }
+
+    pub fn set_effort(&mut self, effort_id: String) {
+        self.effort_id = effort_id;
     }
 
     /// Folds a freshly observed reset time into the schedule.
@@ -268,11 +255,23 @@ impl KickoffStore {
         let Ok(raw) = fs::read_to_string(&self.path) else {
             return KickoffSchedule::default_with_all_kinds();
         };
-        let Ok(parsed) = serde_json::from_str::<KickoffSchedule>(&raw) else {
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&raw) else {
             return KickoffSchedule::default_with_all_kinds();
         };
-        if parsed.version != SCHEDULE_VERSION {
+        let Some(version) = value.get("version").and_then(serde_json::Value::as_u64) else {
             return KickoffSchedule::default_with_all_kinds();
+        };
+        if version == 1 {
+            value["version"] = serde_json::json!(SCHEDULE_VERSION);
+        } else if version != u64::from(SCHEDULE_VERSION) {
+            return KickoffSchedule::default_with_all_kinds();
+        }
+        let Ok(mut parsed) = serde_json::from_value::<KickoffSchedule>(value) else {
+            return KickoffSchedule::default_with_all_kinds();
+        };
+        if version == 1 {
+            parsed.version = SCHEDULE_VERSION;
+            let _ = self.save(&parsed);
         }
         parsed
     }
@@ -306,6 +305,14 @@ impl KickoffStore {
         kind: ProviderKind,
         change: impl FnOnce(KickoffSubscription) -> KickoffSubscription,
     ) -> Result<KickoffSubscription, Error> {
+        self.update_checked(kind, |sub| Ok(change(sub)))
+    }
+
+    fn update_checked(
+        &self,
+        kind: ProviderKind,
+        change: impl FnOnce(KickoffSubscription) -> Result<KickoffSubscription, Error>,
+    ) -> Result<KickoffSubscription, Error> {
         let mut schedule = self.load();
         let position = schedule
             .subscriptions
@@ -313,12 +320,12 @@ impl KickoffStore {
             .position(|sub| sub.kind == kind);
         let updated = match position {
             Some(index) => {
-                let updated = change(schedule.subscriptions[index].clone());
+                let updated = change(schedule.subscriptions[index].clone())?;
                 schedule.subscriptions[index] = updated.clone();
                 updated
             }
             None => {
-                let updated = change(KickoffSubscription::new(kind));
+                let updated = change(KickoffSubscription::new(kind))?;
                 schedule.subscriptions.push(updated.clone());
                 updated
             }
@@ -326,6 +333,57 @@ impl KickoffStore {
         schedule.version = SCHEDULE_VERSION;
         self.save(&schedule)?;
         Ok(updated)
+    }
+
+    pub fn configure_model(
+        &self,
+        kind: ProviderKind,
+        model_id: String,
+        lowest_effort: String,
+    ) -> Result<KickoffSubscription, Error> {
+        self.configure_selection(kind, model_id, lowest_effort)
+    }
+
+    pub fn configure_selection(
+        &self,
+        kind: ProviderKind,
+        model_id: String,
+        effort_id: String,
+    ) -> Result<KickoffSubscription, Error> {
+        self.update_checked(kind, |mut sub| {
+            if sub.enabled {
+                return Err(Error::invalid_request(
+                    "Stop the scheduled kickoff before changing its configuration.",
+                ));
+            }
+            sub.set_model(Some(model_id));
+            sub.set_effort(effort_id);
+            Ok(sub)
+        })
+    }
+
+    pub fn set_enabled(
+        &self,
+        kind: ProviderKind,
+        enabled: bool,
+        now_ms: i64,
+        model_id: Option<String>,
+        minimum_effort: Option<String>,
+    ) -> Result<KickoffSubscription, Error> {
+        self.update_checked(kind, |mut sub| {
+            if enabled {
+                let model_id = model_id.ok_or_else(|| {
+                    Error::invalid_request("No currently available kickoff model can be selected.")
+                })?;
+                let effort = minimum_effort.ok_or_else(|| {
+                    Error::invalid_request("The selected model has no supported kickoff effort.")
+                })?;
+                sub.set_model(Some(model_id));
+                sub.set_effort(effort);
+            }
+            sub.set_enabled(enabled, now_ms);
+            Ok(sub)
+        })
     }
 }
 
@@ -339,6 +397,8 @@ pub struct KickoffView {
     pub model_id: Option<String>,
     /// The model the next kickoff would actually use.
     pub effective_model: String,
+    pub effort_id: String,
+    pub model_error: Option<String>,
     /// Everything the picker may offer.
     pub models: Vec<KickoffModelDto>,
     /// Epoch ms of the next scheduled attempt, if one is armed.
@@ -356,6 +416,14 @@ pub struct KickoffModelDto {
     pub id: String,
     pub label: String,
     pub cheapest: bool,
+    pub efforts: Vec<KickoffEffortDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KickoffEffortDto {
+    pub id: String,
+    pub label: String,
 }
 
 /// Whether the system scheduler can run, and whether it is installed.
@@ -379,7 +447,10 @@ pub struct KickoffOverview {
 /// All four kinds are listed whether connected or not: the Usage tab already
 /// decides which subs exist, and a schedule row for a not-yet-connected sub
 /// is the user's saved intent, not a fabrication.
-pub fn overview(store: Option<&KickoffStore>) -> KickoffOverview {
+pub fn overview(
+    store: Option<&KickoffStore>,
+    mut models_for: impl FnMut(ProviderKind) -> Result<Vec<KickoffModelInfo>, Error>,
+) -> KickoffOverview {
     let schedule = store
         .map(|store| store.load())
         .unwrap_or_else(KickoffSchedule::default_with_all_kinds);
@@ -398,17 +469,60 @@ pub fn overview(store: Option<&KickoffStore>) -> KickoffOverview {
             .find(|sub| sub.kind == kind)
             .cloned()
             .unwrap_or_else(|| KickoffSubscription::new(kind));
+        let (models, mut model_error) = match models_for(kind) {
+            Ok(models) => (models, None),
+            Err(error) => (Vec::new(), Some(error.message)),
+        };
+        let selected_model = sub
+            .model_id
+            .as_deref()
+            .and_then(|id| models.iter().find(|model| model.id == id))
+            .or_else(|| models.first());
+        if models.is_empty() && model_error.is_none() {
+            model_error = Some(
+                "No connected, price-listed models are currently available for this subscription."
+                    .to_string(),
+            );
+        } else if sub.enabled && selected_model.is_none() && model_error.is_none() {
+            model_error = Some(
+                "No configured model is currently available. Stop the kickoff to reconfigure it."
+                    .to_string(),
+            );
+        }
+        let effective_model = selected_model
+            .map(|model| model.id.clone())
+            .unwrap_or_default();
+        let effort_id = selected_model
+            .and_then(|model| {
+                model
+                    .efforts
+                    .iter()
+                    .find(|effort| effort.id == sub.effort_id)
+                    .or_else(|| model.efforts.first())
+            })
+            .map(|effort| effort.id.clone())
+            .unwrap_or_default();
         KickoffView {
             kind,
             enabled: sub.enabled,
             model_id: sub.model_id.clone(),
-            effective_model: sub.selected_model().to_string(),
-            models: models_for(kind)
+            effective_model,
+            effort_id,
+            model_error,
+            models: models
                 .iter()
                 .map(|model| KickoffModelDto {
-                    id: model.id.to_string(),
-                    label: model.label.to_string(),
+                    id: model.id.clone(),
+                    label: model.label.clone(),
                     cheapest: model.cheapest,
+                    efforts: model
+                        .efforts
+                        .iter()
+                        .map(|effort| KickoffEffortDto {
+                            id: effort.id.clone(),
+                            label: effort.label.clone(),
+                        })
+                        .collect(),
                 })
                 .collect(),
             next_kick_at: sub.next_kick_at,
@@ -541,27 +655,6 @@ mod tests {
         assert!(detail.ends_with('…'));
     }
 
-    #[test]
-    fn the_default_selection_is_the_cheapest_model() {
-        for kind in [
-            ProviderKind::Codex,
-            ProviderKind::Zai,
-            ProviderKind::Minimax,
-            ProviderKind::Kimi,
-        ] {
-            assert_eq!(sub(kind).selected_model(), cheapest_model(kind));
-        }
-    }
-
-    #[test]
-    fn a_known_override_is_honoured_and_an_unknown_one_falls_back() {
-        let mut sub = sub(ProviderKind::Zai);
-        sub.set_model(Some("glm-5.3".into()));
-        assert_eq!(sub.selected_model(), "glm-5.3");
-        sub.set_model(Some("glm-9.9-retired".into()));
-        assert_eq!(sub.selected_model(), cheapest_model(ProviderKind::Zai));
-    }
-
     fn temp_store(name: &str) -> KickoffStore {
         let dir = std::env::temp_dir().join(format!("agentgauge-kickoff-{name}"));
         let _ = fs::remove_dir_all(&dir);
@@ -581,12 +674,20 @@ mod tests {
     fn a_choice_survives_a_round_trip_in_the_wire_shape() {
         let store = temp_store("round-trip");
         store
-            .update(ProviderKind::Zai, |mut sub| {
-                sub.set_enabled(true, 1_000);
-                sub.set_model(Some("glm-5.3-flash".into()));
-                sub
-            })
-            .expect("saves");
+            .configure_model(ProviderKind::Zai, "glm-5.3-flash".into(), "minimal".into())
+            .expect("saves model");
+        store
+            .configure_selection(ProviderKind::Zai, "glm-5.3-flash".into(), "high".into())
+            .expect("saves effort");
+        store
+            .set_enabled(
+                ProviderKind::Zai,
+                true,
+                1_000,
+                Some("glm-5.3-flash".into()),
+                Some("minimal".into()),
+            )
+            .expect("saves schedule");
 
         let raw = fs::read_to_string(store.path()).expect("reads");
         assert!(
@@ -603,7 +704,75 @@ mod tests {
             .expect("entry");
         assert!(zai.enabled);
         assert_eq!(zai.model_id.as_deref(), Some("glm-5.3-flash"));
+        assert_eq!(zai.effort_id, "minimal");
         assert!(schedule.any_enabled());
+    }
+
+    #[test]
+    fn model_and_effort_changes_are_rejected_while_enabled() {
+        let store = temp_store("locked-config");
+        store
+            .configure_model(ProviderKind::Codex, "gpt-6-luna".into(), "minimal".into())
+            .expect("saves model");
+        store
+            .set_enabled(
+                ProviderKind::Codex,
+                true,
+                1_000,
+                Some("gpt-6-luna".into()),
+                Some("minimal".into()),
+            )
+            .expect("enables");
+        let before = store.load();
+
+        assert!(store
+            .configure_model(ProviderKind::Codex, "gpt-6.1-sol".into(), "low".into())
+            .is_err());
+        assert!(store
+            .configure_selection(ProviderKind::Codex, "gpt-6-luna".into(), "high".into(),)
+            .is_err());
+        assert_eq!(store.load(), before);
+    }
+
+    #[test]
+    fn enabling_resets_a_saved_effort_to_the_model_minimum() {
+        let store = temp_store("enable-minimum-effort");
+        store
+            .configure_model(ProviderKind::Codex, "gpt-6-luna".into(), "minimal".into())
+            .expect("saves model");
+        store
+            .configure_selection(ProviderKind::Codex, "gpt-6-luna".into(), "high".into())
+            .expect("saves selected effort");
+
+        let enabled = store
+            .set_enabled(
+                ProviderKind::Codex,
+                true,
+                1_000,
+                Some("gpt-6-luna".into()),
+                Some("minimal".into()),
+            )
+            .expect("enables");
+
+        assert_eq!(enabled.effort_id, "minimal");
+        assert_eq!(store.load().subscriptions[0].effort_id, "minimal");
+    }
+
+    #[test]
+    fn version_one_schedules_migrate_with_the_minimum_effort() {
+        let store = temp_store("migrate-effort");
+        std::fs::create_dir_all(store.path().parent().unwrap()).expect("dir");
+        std::fs::write(
+            store.path(),
+            r#"{"version":1,"subscriptions":[{"kind":"codex","enabled":true,"modelId":"gpt-6-luna","resetsAt":null,"nextKickAt":1000,"lastKickAt":null,"lastAccepted":null,"lastDetail":null}]}"#,
+        )
+        .expect("seed");
+
+        let schedule = store.load();
+
+        assert_eq!(schedule.version, SCHEDULE_VERSION);
+        assert!(schedule.subscriptions[0].enabled);
+        assert_eq!(schedule.subscriptions[0].effort_id, "");
     }
 
     #[test]
@@ -663,38 +832,60 @@ mod tests {
     }
 
     #[test]
-    fn the_overview_lists_every_kind_and_the_effective_model() {
+    fn the_overview_lists_dynamic_models_and_lowest_efforts() {
         let store = temp_store("overview");
         store
             .update(ProviderKind::Kimi, |mut sub| {
-                sub.set_model(Some("kimi-for-coding".into()));
+                sub.set_model(Some("k3".into()));
                 sub
             })
             .expect("saves");
 
-        let overview = overview(Some(&store));
+        let models_for = |kind| {
+            let model_id = match kind {
+                ProviderKind::Codex => "gpt-6-luna",
+                ProviderKind::Zai => "glm-5.3-flash",
+                ProviderKind::Minimax => "MiniMax-M3",
+                ProviderKind::Kimi => "k3",
+            };
+            let effort_id = match kind {
+                ProviderKind::Codex => "minimal",
+                ProviderKind::Zai => "low",
+                ProviderKind::Minimax => "disabled",
+                ProviderKind::Kimi => "low",
+            };
+            Ok(vec![KickoffModelInfo {
+                provider_id: "fixture".to_string(),
+                id: model_id.to_string(),
+                label: model_id.to_string(),
+                efforts: vec![KickoffEffortInfo::new(effort_id, effort_id)],
+                cheapest: true,
+            }])
+        };
+        let overview = overview(Some(&store), models_for);
         assert_eq!(overview.subscriptions.len(), 4);
         let kimi = overview
             .subscriptions
             .iter()
             .find(|view| view.kind == ProviderKind::Kimi)
             .expect("kimi");
-        assert_eq!(kimi.model_id.as_deref(), Some("kimi-for-coding"));
-        assert_eq!(kimi.effective_model, "kimi-for-coding");
-        assert!(kimi.models.len() >= 2);
+        assert_eq!(kimi.model_id.as_deref(), Some("k3"));
+        assert_eq!(kimi.effective_model, "k3");
+        assert_eq!(kimi.models.len(), 1);
+        assert_eq!(kimi.effort_id, "low");
 
         let codex = overview
             .subscriptions
             .iter()
             .find(|view| view.kind == ProviderKind::Codex)
             .expect("codex");
-        assert_eq!(codex.effective_model, cheapest_model(ProviderKind::Codex));
+        assert_eq!(codex.effective_model, "gpt-6-luna");
         assert!(!overview.scheduler.installed);
     }
 
     #[test]
     fn the_overview_without_a_store_still_renders() {
-        let overview = overview(None);
+        let overview = overview(None, |_| Ok(Vec::new()));
         assert_eq!(overview.subscriptions.len(), 4);
         assert!(!overview.scheduler.installed);
     }

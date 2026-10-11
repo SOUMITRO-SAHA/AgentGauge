@@ -17,7 +17,8 @@ use crate::shared::provider::PingOutcome;
 use super::{KickoffStore, KICKOFF_PROMPT};
 
 /// Sends one kickoff prompt to one provider with an explicit model.
-pub type KickFn<'a> = dyn Fn(ProviderKind, &str, Option<&str>) -> Result<PingOutcome, Error> + 'a;
+pub type KickFn<'a> =
+    dyn Fn(ProviderKind, &str, Option<&str>, Option<&str>) -> Result<PingOutcome, Error> + 'a;
 
 /// Runs one tick: fires every due kickoff and persists the outcomes.
 ///
@@ -34,8 +35,9 @@ pub fn tick(store: &KickoffStore, now_ms: i64, kick: &KickFn) -> Result<usize, E
         .filter(|sub| sub.is_due(now_ms))
     {
         fired += 1;
-        let model = sub.selected_model();
-        match kick(sub.kind, KICKOFF_PROMPT, Some(model)) {
+        let model = sub.model_id.as_deref();
+        let effort = (!sub.effort_id.is_empty()).then_some(sub.effort_id.as_str());
+        match kick(sub.kind, KICKOFF_PROMPT, model, effort) {
             Ok(outcome) if outcome.accepted => sub.record_success(now_ms, &outcome.reply),
             Ok(outcome) => sub.record_failure(
                 now_ms,
@@ -78,9 +80,13 @@ mod tests {
         let store = store_with(sub, "due");
 
         let seen = RefCell::new(Vec::new());
-        let kick = |kind: ProviderKind, prompt: &str, model: Option<&str>| {
-            seen.borrow_mut()
-                .push((kind, prompt.to_string(), model.map(String::from)));
+        let kick = |kind: ProviderKind, prompt: &str, model: Option<&str>, effort: Option<&str>| {
+            seen.borrow_mut().push((
+                kind,
+                prompt.to_string(),
+                model.map(String::from),
+                effort.map(String::from),
+            ));
             Ok(PingOutcome {
                 accepted: true,
                 reply: "Hello!".into(),
@@ -93,11 +99,7 @@ mod tests {
         assert_eq!(fired, 1);
         assert_eq!(
             seen.borrow().clone(),
-            vec![(
-                ProviderKind::Zai,
-                "hi".to_string(),
-                Some("glm-5.3-flash".to_string())
-            )]
+            vec![(ProviderKind::Zai, "hi".to_string(), None, None,)]
         );
 
         let saved = store.load();
@@ -116,9 +118,10 @@ mod tests {
         sub.set_enabled(true, 0);
         let store = store_with(sub, "failed");
 
-        let kick = |_kind: ProviderKind, _prompt: &str, _model: Option<&str>| {
-            Err(Error::timeout("The provider did not answer."))
-        };
+        let kick =
+            |_kind: ProviderKind, _prompt: &str, _model: Option<&str>, _effort: Option<&str>| {
+                Err(Error::timeout("The provider did not answer."))
+            };
 
         let fired = tick(&store, 5_000, &kick).expect("ticks");
         assert_eq!(fired, 1);
@@ -138,14 +141,15 @@ mod tests {
         sub.set_enabled(true, 0);
         let store = store_with(sub, "refused");
 
-        let kick = |_kind: ProviderKind, _prompt: &str, _model: Option<&str>| {
-            Ok(PingOutcome {
-                accepted: false,
-                reply: String::new(),
-                usage: None,
-                reason: Some("OpenCode holds no readable credential.".into()),
-            })
-        };
+        let kick =
+            |_kind: ProviderKind, _prompt: &str, _model: Option<&str>, _effort: Option<&str>| {
+                Ok(PingOutcome {
+                    accepted: false,
+                    reply: String::new(),
+                    usage: None,
+                    reason: Some("OpenCode holds no readable credential.".into()),
+                })
+            };
 
         tick(&store, 1_000, &kick).expect("ticks");
         let minimax = store
@@ -166,8 +170,10 @@ mod tests {
             .modified()
             .expect("mtime");
 
-        let fired =
-            tick(&store, 1_000, &|_k, _p, _m| unreachable!("nothing is due")).expect("ticks");
+        let fired = tick(&store, 1_000, &|_k, _p, _m, _e| {
+            unreachable!("nothing is due")
+        })
+        .expect("ticks");
         assert_eq!(fired, 0);
         assert_eq!(
             before,
@@ -187,7 +193,7 @@ mod tests {
         sub.next_kick_at = Some(0);
         let store = store_with(sub, "disabled");
 
-        let fired = tick(&store, 9_000, &|_k, _p, _m| {
+        let fired = tick(&store, 9_000, &|_k, _p, _m, _e| {
             unreachable!("disabled must not fire")
         })
         .expect("ticks");

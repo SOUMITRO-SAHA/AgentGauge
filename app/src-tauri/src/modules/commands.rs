@@ -185,15 +185,41 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
         }
 
         AppRequest::KickoffState => Ok(AppResponse::Kickoff {
-            state: kickoff::overview(state.kickoff.as_deref()),
+            state: kickoff_overview(state),
         }),
 
         AppRequest::SetKickoffEnabled { kind, enabled } => {
             let store = require_kickoff_store(state)?;
-            store.update(kind, |mut sub| {
-                sub.set_enabled(enabled, now_millis());
-                sub
-            })?;
+            let (model_id, minimum_effort) = if enabled {
+                let current = store
+                    .load()
+                    .subscriptions
+                    .into_iter()
+                    .find(|sub| sub.kind == kind)
+                    .and_then(|sub| sub.model_id);
+                let models = state.registry.kickoff_models(kind)?;
+                let model = current
+                    .as_deref()
+                    .and_then(|id| models.iter().find(|model| model.id == id))
+                    .or_else(|| models.first())
+                    .ok_or_else(|| {
+                        Error::provider_error(format!(
+                            "No currently available, price-listed model is available for {}.",
+                            kind.display_name()
+                        ))
+                    })?;
+                let effort = model.lowest_effort().ok_or_else(|| {
+                    Error::provider_error(format!(
+                        "{} reported no supported effort for `{}`.",
+                        kind.display_name(),
+                        model.id
+                    ))
+                })?;
+                (Some(model.id.clone()), Some(effort.to_string()))
+            } else {
+                (None, None)
+            };
+            store.set_enabled(kind, enabled, now_millis(), model_id, minimum_effort)?;
             // The system scheduler exists exactly while a sub is opted in:
             // enabling installs it, the last disable removes it. A failure is
             // propagated — silently running (or not running) a quota-spending
@@ -203,24 +229,58 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
                 &store.load(),
             )?;
             Ok(AppResponse::Kickoff {
-                state: kickoff::overview(state.kickoff.as_deref()),
+                state: kickoff_overview(state),
             })
         }
 
         AppRequest::SetKickoffModel { kind, model_id } => {
             let store = require_kickoff_store(state)?;
-            if !kickoff::is_known_model(kind, &model_id) {
+            let models = state.registry.kickoff_models(kind)?;
+            let model = models
+                .iter()
+                .find(|model| model.id == model_id)
+                .ok_or_else(|| {
+                    Error::invalid_request(format!(
+                        "`{model_id}` is not currently available and price-listed for {}.",
+                        kind.display_name()
+                    ))
+                })?;
+            let effort = model.lowest_effort().ok_or_else(|| {
+                Error::invalid_request(format!("`{model_id}` has no supported kickoff effort."))
+            })?;
+            store.configure_model(kind, model_id, effort.to_string())?;
+            Ok(AppResponse::Kickoff {
+                state: kickoff_overview(state),
+            })
+        }
+
+        AppRequest::SetKickoffEffort { kind, effort_id } => {
+            let store = require_kickoff_store(state)?;
+            let schedule = store.load();
+            let stored_model = schedule
+                .subscriptions
+                .iter()
+                .find(|sub| sub.kind == kind)
+                .and_then(|sub| sub.model_id.as_deref());
+            let models = state.registry.kickoff_models(kind)?;
+            let model = stored_model
+                .and_then(|id| models.iter().find(|model| model.id == id))
+                .or_else(|| models.first())
+                .ok_or_else(|| {
+                    Error::provider_error(format!(
+                        "No currently available, price-listed model is available for {}.",
+                        kind.display_name()
+                    ))
+                })?;
+            if !model.efforts.iter().any(|effort| effort.id == effort_id) {
                 return Err(Error::invalid_request(format!(
-                    "`{model_id}` is not a model this build offers for {}.",
-                    kind.display_name()
+                    "`{effort_id}` is not a supported effort for `{}`.",
+                    model.id
                 )));
             }
-            store.update(kind, |mut sub| {
-                sub.set_model(Some(model_id));
-                sub
-            })?;
+            store.configure_selection(kind, model.id.clone(), effort_id)?;
             Ok(AppResponse::Kickoff {
-                state: kickoff::overview(state.kickoff.as_deref()),
+                state: kickoff_overview(state),
             })
         }
 
@@ -271,6 +331,12 @@ fn require_kickoff_store(state: &AppState) -> Result<&KickoffStore, Error> {
             crate::shared::error::ErrorKind::InvalidRequest,
             "No home directory is available, so the kickoff schedule cannot be stored.",
         )
+    })
+}
+
+fn kickoff_overview(state: &AppState) -> kickoff::KickoffOverview {
+    kickoff::overview(state.kickoff.as_deref(), |kind| {
+        state.registry.kickoff_models(kind)
     })
 }
 
@@ -396,12 +462,18 @@ fn validate(request: &AppRequest) -> Result<(), Error> {
         {
             Err(Error::invalid_request("The model id is not a model id."))
         }
+        AppRequest::SetKickoffEffort { effort_id, .. }
+            if effort_id.is_empty() || effort_id.chars().count() > MAX_EFFORT_ID_CHARS =>
+        {
+            Err(Error::invalid_request("The effort id is not an effort id."))
+        }
         _ => Ok(()),
     }
 }
 
 /// Longest model id accepted, in characters.
 const MAX_MODEL_ID_CHARS: usize = 64;
+const MAX_EFFORT_ID_CHARS: usize = 32;
 
 #[cfg(test)]
 mod tests {
