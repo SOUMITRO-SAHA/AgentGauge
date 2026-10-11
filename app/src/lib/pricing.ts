@@ -25,13 +25,13 @@ export type ModelPrice = {
 type CostPerMillion = { readonly input: number; readonly output: number };
 
 type ModelEntry = {
-  readonly costPerMillion?: CostPerMillion;
-  readonly apiCostPerMillion?: CostPerMillion;
+  readonly cost_per_million?: CostPerMillion;
+  readonly api_cost_per_million?: CostPerMillion;
 };
 
 type PlanEntry = {
   readonly name: string;
-  readonly priceUsdPerMonth: number | null;
+  readonly price_usd_per_month: number | null;
 };
 
 type ProviderEntry = {
@@ -62,7 +62,7 @@ export function modelPrice(
   modelId: string,
 ): ModelPrice | null {
   const entry = list.providers[providerId]?.models?.[modelId.toLowerCase()];
-  const cost = entry?.costPerMillion ?? entry?.apiCostPerMillion;
+  const cost = entry?.cost_per_million ?? entry?.api_cost_per_million;
   if (!cost || typeof cost.input !== "number" || typeof cost.output !== "number") {
     return null;
   }
@@ -144,7 +144,7 @@ export function planPriceUsd(
   const match = list.providers[providerId]?.subscription?.plans?.find(
     (entry) => normalizePlanName(entry.name) === wanted,
   );
-  return match?.priceUsdPerMonth ?? null;
+  return match?.price_usd_per_month ?? null;
 }
 
 function normalizePlanName(value: string): string {
@@ -170,6 +170,16 @@ export function formatUsd(value: number): string {
     minimumFractionDigits: fractionDigits,
   }).format(value);
 }
+
+/** The price-list provider id each readable stats provider prices against. */
+export const PRICING_PROVIDER_IDS: Readonly<
+  Record<Ipc.ProviderKind, string>
+> = {
+  codex: "openai",
+  zai: "zai-coding-plan",
+  minimax: "minimax-coding-plan",
+  kimi: "kimi-code-plan-global",
+};
 
 /** Fetches the bundled price list. Failure is a real state the UI must show. */
 export async function loadPriceList(): Promise<PriceList> {

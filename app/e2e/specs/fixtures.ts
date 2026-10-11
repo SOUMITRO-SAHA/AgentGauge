@@ -366,6 +366,138 @@ export function subscription(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** A process-insights group, as the `processInsights` reply would carry it. */
+export function processGroup(id: string, overrides: Record<string, unknown> = {}) {
+  const displayNames: Record<string, string> = {
+    agentgauge: "AgentGauge",
+    codex: "Codex",
+    opencode: "OpenCode",
+  };
+  return {
+    id,
+    displayName: displayNames[id] ?? id,
+    processes: [] as Array<Record<string, unknown>>,
+    totalMemoryBytes: 0,
+    storage: {
+      state: "absent",
+      reason: `${displayNames[id] ?? id} has not created its data directory yet.`,
+    },
+    ...overrides,
+  };
+}
+
+/** One running process in a `processInsights` reply. */
+export function processSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    pid: 4242,
+    name: "codex",
+    command: "codex app-server",
+    startedAt: Math.floor(Date.now() / 1000) - 3_600,
+    memoryBytes: 432_000_000,
+    ...overrides,
+  };
+}
+
+/** The floor reply for specs that do not configure process insights. */
+function emptyProcessInsights() {
+  return {
+    fetchedAt: Date.now(),
+    groups: [processGroup("agentgauge"), processGroup("codex"), processGroup("opencode")],
+  };
+}
+
+/**
+ * A full process-insights reply: the app with two processes (itself and a
+ * webview helper), Codex with one process and measured storage, OpenCode
+ * idle with its data directory absent. Every explicit state the screen can
+ * render, in one report.
+ */
+export function processInsightsReport() {
+  return {
+    fetchedAt: Date.now(),
+    groups: [
+      processGroup("agentgauge", {
+        processes: [
+          processSummary({
+            pid: 1000,
+            name: "agentgauge",
+            command:
+              "/Applications/AgentGauge.app/Contents/MacOS/agentgauge",
+            memoryBytes: 300_000_000,
+          }),
+          processSummary({
+            pid: 1001,
+            name: "com.apple.WebKit.WebContent",
+            command: null,
+            memoryBytes: 132_000_000,
+          }),
+        ],
+        totalMemoryBytes: 432_000_000,
+        storage: {
+          state: "measured",
+          totalBytes: 3_000,
+          totalFiles: 4,
+          rows: [
+            { label: "App data", path: "/app-data", bytes: 2_000, fileCount: 3 },
+            {
+              label: "Widget & schedule data",
+              path: "/shared",
+              bytes: 1_000,
+              fileCount: 1,
+            },
+          ],
+        },
+      }),
+      processGroup("codex", {
+        processes: [processSummary({ pid: 4242 })],
+        totalMemoryBytes: 432_000_000,
+        storage: {
+          state: "measured",
+          totalBytes: 500_000_000,
+          totalFiles: 90,
+          rows: [
+            {
+              label: "Session transcripts",
+              path: "/Users/dev/.codex/sessions",
+              bytes: 432_000_000,
+              fileCount: 89,
+            },
+            {
+              label: "Everything else",
+              path: "/Users/dev/.codex",
+              bytes: 68_000_000,
+              fileCount: 1,
+            },
+          ],
+        },
+      }),
+      processGroup("opencode", {
+        processes: [],
+        totalMemoryBytes: 0,
+        storage: {
+          state: "absent",
+          reason:
+            "OpenCode has not created `/Users/dev/.local/share/opencode` yet.",
+        },
+      }),
+    ],
+  };
+}
+
+/** Onboarding dismissed, the Processes screen reading a full report. */
+export async function processScreenLive(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+    processInsights: processInsightsReport(),
+  });
+}
+
 /** A live-looking Z.AI reading: 16% used of the 5-hour window. */
 export function zaiSnapshot(overrides: Record<string, unknown> = {}) {
   const resetsAt = Math.floor(Date.now() / 1000) + 3600;
@@ -454,9 +586,16 @@ export interface DispatchFixtures {
     readonly installed?: boolean;
     readonly enabledByKind?: Record<string, boolean>;
     readonly modelByKind?: Record<string, string>;
+    readonly effortByKind?: Record<string, string>;
     readonly nextKickInMs?: number;
     readonly lastAccepted?: boolean;
   };
+  /**
+   * The process-insights reply, as the `processInsights` response would carry
+   * it. Absent means every group renders empty with absent storage — the
+   * deterministic floor for specs that do not care about this screen.
+   */
+  readonly processInsights?: Record<string, unknown>;
   /**
    * Whether this build contains the widget extension.
    *
@@ -525,6 +664,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       __ismAnalyticsEnabled__?: boolean;
       __ismKickoffEnabled__?: Record<string, boolean>;
       __ismKickoffModels__?: Record<string, string>;
+      __ismKickoffEfforts__?: Record<string, string>;
       __ismAutomationRunning__?: Record<string, boolean>;
       __wdio_mocks__: Record<
         string,
@@ -557,6 +697,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
     };
     w.__ismKickoffEnabled__ = { ...(f().kickoff?.enabledByKind ?? {}) };
     w.__ismKickoffModels__ = { ...(f().kickoff?.modelByKind ?? {}) };
+    w.__ismKickoffEfforts__ = { ...(f().kickoff?.effortByKind ?? {}) };
     w.__ismAutomationRunning__ = {
       codex: f().automationRunning === true,
       ...(f().automationRunningByKind ?? {}),
@@ -635,6 +776,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                 totalRequests: null,
               },
               windowDays: null,
+              models: [],
               dailyUsageBuckets: [
                 { startDate: "2026-10-07", tokens: 2300 },
                 { startDate: "2026-10-08", tokens: 0 },
@@ -682,6 +824,12 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               },
             ],
           };
+        case "processInsights":
+          return {
+            type: "processInsights",
+            insights:
+              data.processInsights ?? emptyProcessInsights(),
+          };
         case "automationState":
         case "startAutomation":
         case "stopAutomation":
@@ -714,7 +862,8 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
         }
         case "kickoffState":
         case "setKickoffEnabled":
-        case "setKickoffModel": {
+        case "setKickoffModel":
+        case "setKickoffEffort": {
           if (
             request.type === "setKickoffEnabled" &&
             typeof request.kind === "string"
@@ -728,26 +877,74 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
           ) {
             w.__ismKickoffModels__[request.kind] = request.modelId;
           }
+          if (
+            request.type === "setKickoffEffort" &&
+            typeof request.kind === "string" &&
+            typeof request.effortId === "string"
+          ) {
+            w.__ismKickoffEfforts__[request.kind] = request.effortId;
+          }
           const enabled = w.__ismKickoffEnabled__;
           const selectedModels = w.__ismKickoffModels__;
+          const selectedEfforts = w.__ismKickoffEfforts__;
           const kickoff = data.kickoff ?? {};
           const kinds = ["codex", "zai", "minimax", "kimi"];
           const models: Record<
             string,
-            Array<{ id: string; label: string; cheapest: boolean }>
+            Array<{
+              id: string;
+              label: string;
+              cheapest: boolean;
+              efforts: Array<{ id: string; label: string }>;
+            }>
           > = {
             codex: [
-              { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", cheapest: false },
-              { id: "gpt-6-luna", label: "GPT-6 Luna", cheapest: true },
+              {
+                id: "gpt-6.1-sol",
+                label: "GPT-6.1 Sol",
+                cheapest: false,
+                efforts: [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }],
+              },
+              {
+                id: "gpt-6-luna",
+                label: "GPT-6 Luna",
+                cheapest: true,
+                efforts: [{ id: "minimal", label: "Minimal" }, { id: "low", label: "Low" }],
+              },
             ],
             zai: [
-              { id: "glm-5.3", label: "GLM-5.3", cheapest: false },
-              { id: "glm-5.3-flash", label: "GLM-5.3 Flash", cheapest: true },
+              {
+                id: "glm-5.3",
+                label: "GLM-5.3",
+                cheapest: false,
+                efforts: [{ id: "low", label: "Low" }, { id: "high", label: "High" }],
+              },
+              {
+                id: "glm-5.3-flash",
+                label: "GLM-5.3 Flash",
+                cheapest: true,
+                efforts: [{ id: "low", label: "Low" }, { id: "high", label: "High" }],
+              },
             ],
             minimax: [
-              { id: "MiniMax-M2", label: "MiniMax M2", cheapest: true },
+              {
+                id: "MiniMax-M3",
+                label: "MiniMax M3",
+                cheapest: true,
+                efforts: [
+                  { id: "disabled", label: "Disabled" },
+                  { id: "adaptive", label: "Adaptive" },
+                ],
+              },
             ],
-            kimi: [{ id: "k3-256k", label: "K3 256K", cheapest: true }],
+            kimi: [
+              {
+                id: "k3",
+                label: "K3",
+                cheapest: true,
+                efforts: [{ id: "low", label: "Low" }, { id: "high", label: "High" }],
+              },
+            ],
           };
           return {
             type: "kickoff",
@@ -757,11 +954,19 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                 const cheapest =
                   kindModels.find((model) => model.cheapest)?.id ?? "";
                 const isEnabled = enabled[kind] === true;
+                const selectedModel =
+                  kindModels.find((model) => model.id === selectedModels[kind]) ??
+                  kindModels.find((model) => model.id === cheapest);
+                const minimumEffort = selectedModel?.efforts[0]?.id ?? "";
                 return {
                   kind,
                   enabled: isEnabled,
                   modelId: selectedModels[kind] ?? null,
                   effectiveModel: selectedModels[kind] ?? cheapest,
+                  effortId: isEnabled
+                    ? minimumEffort
+                    : (selectedEfforts[kind] ?? minimumEffort),
+                  modelError: null,
                   models: kindModels,
                   nextKickAt: isEnabled
                     ? Date.now() + (kickoff.nextKickInMs ?? 3_600_000)
@@ -942,7 +1147,8 @@ type UiNudge =
   | "refresh-provider"
   | "refresh-usage"
   | "refresh-automation"
-  | "refresh-widget";
+  | "refresh-widget"
+  | "refresh-processes-agentgauge";
 
 export async function settle(nudge: UiNudge): Promise<void> {
   const target = await firstDisplayed(`[data-testid="${nudge}"]`);
@@ -984,7 +1190,7 @@ export async function firstDisplayed(
  * so a spec never touches the on-disk settings file).
  */
 export async function gotoView(
-  view: "home" | "automation" | "stats" | "settings",
+  view: "home" | "automation" | "stats" | "processes" | "settings",
 ): Promise<void> {
   const button = await firstDisplayed(`[data-testid="nav-${view}"]`);
   if (!button) {
@@ -1083,10 +1289,11 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
           { view: "home", control: "refresh-provider" },
           { view: "home", control: "refresh-usage" },
           { view: "automation", control: "refresh-automation" },
+          { view: "processes", control: "refresh-processes-agentgauge" },
           { view: "settings", control: "refresh-widget" },
         ]),
   ] as ReadonlyArray<{
-    view: "home" | "automation" | "settings" | null;
+    view: "home" | "automation" | "processes" | "settings" | null;
     control: UiNudge;
   }>;
   for (let pass = 0; pass < 2; pass += 1) {
@@ -1240,6 +1447,15 @@ export function zaiAccountUsage() {
     dailyUsageBuckets: [
       { startDate: "2026-10-08", tokens: 1470000000 },
       { startDate: "2026-10-09", tokens: 275000000 },
+    ],
+    models: [
+      { id: "glm-5.3", displayName: "GLM-5.3", tokens: 8472310570, requests: null },
+      {
+        id: "glm-5.3-flash",
+        displayName: "GLM-5.3-Flash",
+        tokens: 13227689430,
+        requests: null,
+      },
     ],
   };
 }

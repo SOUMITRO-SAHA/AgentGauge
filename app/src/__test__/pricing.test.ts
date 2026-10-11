@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   estimateModelCosts,
@@ -25,24 +26,24 @@ const LIST: PriceList = {
     "zai-coding-plan": {
       subscription: {
         plans: [
-          { name: "Lite", priceUsdPerMonth: 18 },
-          { name: "Pro", priceUsdPerMonth: 80 },
-          { name: "Max", priceUsdPerMonth: 168 },
+          { name: "Lite", price_usd_per_month: 18 },
+          { name: "Pro", price_usd_per_month: 80 },
+          { name: "Max", price_usd_per_month: 168 },
         ],
       },
       models: {
         "glm-5.3": {
-          apiCostPerMillion: { input: 1.4, output: 4.4, cacheRead: 0.26 },
+          api_cost_per_million: { input: 1.4, output: 4.4, cache_read: 0.26 },
         },
         "glm-5.3-flash": {
-          apiCostPerMillion: { input: 0.15, output: 0.5, cacheRead: 0.03 },
+          api_cost_per_million: { input: 0.15, output: 0.5, cache_read: 0.03 },
         },
       },
     },
     openai: {
-      subscription: { plans: [{ name: "Pro", priceUsdPerMonth: 100 }] },
+      subscription: { plans: [{ name: "Pro", price_usd_per_month: 100 }] },
       models: {
-        "gpt-6-luna": { costPerMillion: { input: 0.1, output: 0.5 } },
+        "gpt-6-luna": { cost_per_million: { input: 0.1, output: 0.5 } },
       },
     },
     "opencode": { subscription: { plans: [] }, models: {} },
@@ -163,5 +164,55 @@ describe("formatUsd", () => {
 
   it("keeps cents for small amounts", () => {
     expect(formatUsd(4.489)).toBe("$4.49");
+  });
+});
+
+describe("the committed price list", () => {
+  /**
+   * The catalog on disk is the one the shipped app reads — a stub that
+   * drifts from its real shape would pass every unit test and still render
+   * no estimates, exactly the bug the e2e run caught. This reads the real
+   * file so the schema contract is pinned against it.
+   */
+  const real = JSON.parse(
+    readFileSync("public/price_list.json", "utf8"),
+  ) as PriceList;
+
+  it("prices the Z.AI plan's models from their pay-as-you-go references", () => {
+    expect(modelPrice(real, "zai-coding-plan", "glm-5.3")).toEqual({
+      input: 1.4,
+      output: 4.4,
+    });
+    expect(modelPrice(real, "zai-coding-plan", "GLM-5.3-Flash")).toEqual({
+      input: 0.15,
+      output: 0.5,
+    });
+  });
+
+  it("knows the Pro plan's monthly price", () => {
+    expect(planPriceUsd(real, "zai-coding-plan", "pro")).toBe(80);
+  });
+
+  it("prices the live 30-day split to the researched ≈ $3,371", () => {
+    const estimate = estimateModelCosts(
+      [
+        {
+          id: "glm-5.3",
+          displayName: "GLM-5.3",
+          tokens: 1_438_489_431,
+          requests: null,
+        },
+        {
+          id: "glm-5.3-flash",
+          displayName: "GLM-5.3-Flash",
+          tokens: 2_247_671_759,
+          requests: null,
+        },
+      ],
+      real,
+      "zai-coding-plan",
+    );
+    expect(estimate.estimatedTotalUsd).toBeCloseTo(3_371.47, 0);
+    expect(estimate.unpricedTokens).toBe(0);
   });
 });

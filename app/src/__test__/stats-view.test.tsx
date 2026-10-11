@@ -208,10 +208,10 @@ const PRICE_LIST: PriceList = {
   meta: { currency: "USD", updated: "2026-10-11" },
   providers: {
     "zai-coding-plan": {
-      subscription: { plans: [{ name: "Pro", priceUsdPerMonth: 80 }] },
+      subscription: { plans: [{ name: "Pro", price_usd_per_month: 80 }] },
       models: {
-        "glm-5.3": { apiCostPerMillion: { input: 1.4, output: 4.4 } },
-        "glm-5.3-flash": { apiCostPerMillion: { input: 0.15, output: 0.5 } },
+        "glm-5.3": { api_cost_per_million: { input: 1.4, output: 4.4 } },
+        "glm-5.3-flash": { api_cost_per_million: { input: 0.15, output: 0.5 } },
       },
     },
   },

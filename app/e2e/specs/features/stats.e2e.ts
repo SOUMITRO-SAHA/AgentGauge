@@ -302,4 +302,41 @@ describe("stats", () => {
       await $('[data-testid="stats-analytics-off"]').isExisting(),
     ).toBe(false);
   });
+
+  it("shows the model mix with both shares and the plan value", async () => {
+    await dashboardWithZaiAnalytics();
+    await gotoView("stats");
+
+    await clickDisplayed('[data-testid="stats-tab-zai"]');
+    await expectDisplayed('[data-testid="stats-model-mix"]');
+    await expectDisplayed('[data-testid="stats-model-row-glm-5.3"]');
+    await expectDisplayed('[data-testid="stats-model-row-glm-5.3-flash"]');
+    await expectDisplayed('[data-testid="stats-est-cost"]');
+    await expectDisplayed('[data-testid="stats-value-ratio"]');
+
+    // The two lenses read as text, locale-free: the vendor's primary model
+    // leads with 39% of tokens but 85% of the estimated dollars.
+    const shares = await browser.execute(() => {
+      const read = (id: string) =>
+        document
+          .querySelector(`[data-testid="${id}"]`)
+          ?.textContent?.replace(/\s+/g, " ") ?? "";
+      return {
+        glm: read("stats-model-row-glm-5.3"),
+        flash: read("stats-model-row-glm-5.3-flash"),
+        ratio: read("stats-value-ratio"),
+        source: read("stats-model-mix-source"),
+      };
+    });
+    expect(shares.glm).toContain("39% of tokens");
+    expect(shares.glm).toContain("85% of est. cost");
+    expect(shares.flash).toContain("61% of tokens");
+    expect(shares.flash).toContain("15% of est. cost");
+    expect(shares.ratio).toContain("248");
+    // The provenance travels with the estimate: price-list date, the
+    // input-share assumption, and the not-a-bill disclaimer.
+    expect(shares.source).toContain("price list 2026-10-11");
+    expect(shares.source).toContain("80% input");
+    expect(shares.source).toContain("not a bill");
+  });
 });
