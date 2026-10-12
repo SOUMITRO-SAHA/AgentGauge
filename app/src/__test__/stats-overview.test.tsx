@@ -138,7 +138,7 @@ function codexAccountUsage() {
       ],
       days: [{ day: "2026-09-24", tokens: 132_680_354 }],
       costUsd: 112.46,
-      unpricedTokens: 0,
+      unpricedTokens: 1_100_000,
       sessions: 168,
       filesScanned: 168,
       filesUnreadable: 0,
@@ -300,6 +300,20 @@ it("lists every readable plan with its own window, tokens and cost", async () =>
   expect(screen.getByTestId("stats-plan-row-zai-cost-basis").textContent).toMatch(
     /price list|estimate/i,
   );
+  expect(screen.getByTestId("stats-plan-row-zai-cost-basis").textContent).toContain(
+    "80% input / 20% output",
+  );
+  expect(screen.getByTestId("stats-plan-row-zai-cost-basis").textContent).toContain(
+    "2026-10-11",
+  );
+  expect(screen.getByTestId("stats-plan-row-codex-cost-basis").textContent).toContain(
+    "2026-10-11",
+  );
+  expect(screen.getByTestId("stats-plan-row-codex-cost-basis").textContent).toContain(
+    "1.1M tokens remain unpriced",
+  );
+  const codexRequests = screen.getByTestId("stats-plan-row-codex-requests").textContent ?? "";
+  expect(codexRequests.replace(/\D/g, "")).toBe("1146");
 
   // Both rows state where they were read from in the same shape, so the two
   // plans are comparable at a glance rather than by decoding two conventions.
@@ -308,6 +322,9 @@ it("lists every readable plan with its own window, tokens and cost", async () =>
   ).toMatch(/local sessions/);
   expect(screen.getByTestId("stats-plan-row-zai-source").textContent).toMatch(
     /provider window/,
+  );
+  expect(screen.getByTestId("stats-plan-row-zai-peak").textContent).toContain(
+    "2026-10-08",
   );
 
   // Nothing is summed across spans that do not match.

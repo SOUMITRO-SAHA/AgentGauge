@@ -236,8 +236,12 @@ function PlanSummaryRow({
     list !== null
       ? estimateModelCosts(account.models, list, PRICING_PROVIDER_IDS[kind])
       : null;
-  const cost = costOf(account, estimate);
-  const requests = account?.summary.totalRequests ?? null;
+  const cost = costOf(account, estimate, list);
+  const localRequests =
+    local === null
+      ? null
+      : local.models.reduce((sum, model) => sum + model.responses, 0);
+  const requests = account?.summary.totalRequests ?? localRequests;
   const peakDay = account?.summary.peakDailyTokens ?? null;
   const peakBucket = (account?.dailyUsageBuckets ?? []).reduce<
     { startDate: string; tokens: number | null } | null
@@ -313,7 +317,9 @@ function PlanSummaryRow({
             className="text-muted-foreground"
             data-testid={`stats-plan-row-${kind}-peak`}
           >
-            peak {formatCompactCount(peakDay)} on {peakDayDate}
+            {peakDayDate === null
+              ? `peak ${formatCompactCount(peakDay)} tokens`
+              : `peak ${formatCompactCount(peakDay)} tokens · ${peakDayDate}`}
           </span>
         ) : null}
       </div>
@@ -367,10 +373,6 @@ function coverageOf(
 }
 
 /**
- * What a plan's usage would have cost at API prices, or the honest reason
- * there is no figure: an unpriced plan, or one that has reported nothing.
- */
-/**
  * A plan's cost, and where that number came from.
  *
  * Both kinds of plan end up with a figure, because a dash beside a dollar
@@ -382,13 +384,23 @@ function coverageOf(
 function costOf(
   account: Ipc.AccountUsage | null,
   estimate: ModelCostEstimate | null,
+  priceList: PriceList | null,
 ): { cost: string; basis: string | null } {
   if (account === null) return { cost: "—", basis: null };
+  const priceListDate =
+    priceList === null
+      ? "bundled price list date unavailable"
+      : `bundled price list updated ${priceList.meta.updated}`;
   if (account.local !== null) {
     if (account.local.costUsd > 0) {
+      const unpriced =
+        account.local.unpricedTokens > 0
+          ? `${formatCompactCount(account.local.unpricedTokens)} tokens remain unpriced`
+          : null;
+      const basis = `exact per-response API rates · ${priceListDate}`;
       return {
         cost: `≈ ${formatUsd(account.local.costUsd)}`,
-        basis: "exact per-response rates",
+        basis: unpriced === null ? basis : `${basis} · ${unpriced}`,
       };
     }
     return {
@@ -398,7 +410,7 @@ function costOf(
           : "No cost recorded",
       basis:
         account.local.unpricedTokens > 0
-          ? `${formatCompactCount(account.local.unpricedTokens)} tokens on models the price list does not carry`
+          ? `${formatCompactCount(account.local.unpricedTokens)} tokens on models the price list does not carry · ${priceListDate}`
           : null,
     };
   }
@@ -406,13 +418,13 @@ function costOf(
   if (estimate.unpricedTokens > 0) {
     return {
       cost: "Not priced",
-      basis: `${formatCompactCount(estimate.unpricedTokens)} tokens on models the price list does not carry`,
+      basis: `${formatCompactCount(estimate.unpricedTokens)} tokens on models the price list does not carry · ${priceListDate}`,
     };
   }
   if (estimate.estimatedTotalUsd <= 0) return { cost: "No cost recorded", basis: null };
   return {
     cost: `≈ ${formatUsd(estimate.estimatedTotalUsd)}`,
-    basis: `estimated from the bundled price list`,
+    basis: `${Math.round(estimate.inputShare * 100)}% input / ${Math.round((1 - estimate.inputShare) * 100)}% output blend · ${priceListDate}`,
   };
 }
 

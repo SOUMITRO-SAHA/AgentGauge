@@ -445,6 +445,7 @@ describe("stats", () => {
         zaiCost: read("stats-plan-row-zai-cost"),
         zaiBasis: read("stats-plan-row-zai-cost-basis"),
         codexBasis: read("stats-plan-row-codex-cost-basis"),
+        codexRequests: read("stats-plan-row-codex-requests"),
         zaiRequests: read("stats-plan-row-zai-requests"),
         zaiPeak: read("stats-plan-row-zai-peak"),
         note: read("stats-all-plans-not-summed"),
@@ -465,10 +466,16 @@ describe("stats", () => {
     expect(overview.zaiCost).not.toBe("—");
     expect(overview.zaiCost).toContain("$");
     expect(overview.zaiBasis).toContain("price list");
+    expect(overview.zaiBasis).toContain("80% input / 20% output");
+    expect(overview.zaiBasis).toContain("2026-10-11");
     expect(overview.codexBasis).toContain("not a bill");
+    expect(overview.codexBasis).toContain("2026-10-11");
+    expect(overview.codexBasis).toContain("1.1M tokens remain unpriced");
     // Basic figures every plan has, shown the same way on every row.
+    expect(overview.codexRequests.replace(/\D/g, "")).toBe("2236");
     expect(overview.zaiRequests).toContain("requests");
     expect(overview.zaiPeak).toContain("peak");
+    expect(overview.zaiPeak).toContain("2026-10-08");
     expect(overview.totalExists).toBe(false);
     expect(overview.note).toContain("summed");
   });
