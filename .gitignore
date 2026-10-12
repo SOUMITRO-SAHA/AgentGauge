@@ -27,15 +27,6 @@ target
 app/src-tauri/widget/build/
 app/src-tauri/widget/**/xcuserdata/
 
-# Cloned upstream references (e.g. .agents/references/effect, ~59MB)
-.agents/references/
-
-# Task registry: local to the clone, except research/ which is committed so
-# findings persist. `tasks/*` rather than `tasks/` so the research dir can be
-# re-included — git cannot re-include a path under an ignored directory.
-.agents/tasks/*
-!.agents/tasks/research/
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
