@@ -399,6 +399,7 @@ pub fn decode_model_usage(payload: &str, now_ms: i64) -> Result<AccountUsage, Er
         },
         daily_usage_buckets: buckets,
         models,
+        local: None,
         window_days: Some(ANALYTICS_WINDOW_DAYS as u64),
     })
 }

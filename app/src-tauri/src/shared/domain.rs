@@ -115,7 +115,7 @@ impl UsageWindow {
 
 /// Provider-reported account token activity, distinct from subscription
 /// limits.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountUsage {
     pub fetched_at: i64,
@@ -125,6 +125,12 @@ pub struct AccountUsage {
     /// answer ("this provider totals only"), never a failed decode.
     #[serde(default)]
     pub models: Vec<ModelUsage>,
+    /// What the app read from the user's own local harness logs, when the
+    /// provider's local record was readable. `None` means the local record is
+    /// absent — no Codex home, or a home with no rollouts — which is different
+    /// from a scan that found nothing to price.
+    #[serde(default)]
+    pub local: Option<LocalUsage>,
     /// How many days the reported window covers, when the provider reports a
     /// bounded span rather than the account's lifetime. `None` means the
     /// numbers are lifetime, so the UI may label them "lifetime"; a present
@@ -170,6 +176,180 @@ pub struct ModelUsage {
     /// Model calls attributed to this model, when the provider counts them.
     #[serde(default)]
     pub requests: Option<u64>,
+}
+
+/// One model's usage read from the user's own local logs, with the token split
+/// a provider total can never carry.
+///
+/// `cost_usd` is `None` when the price list has no reference for this model, or
+/// when it prices the model but omits a rate for a token class this model
+/// actually used. It is never `Some(0.0)` for a model that could not be
+/// priced: an unpriced model is a token count, not a free one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalModelUsage {
+    /// The catalog slug when the model is known, otherwise the raw id the
+    /// logs carried (Codex writes its own slugs, so this joins the price list
+    /// directly).
+    pub id: String,
+    pub display_name: String,
+    /// Prompt tokens, cache reads included.
+    pub input: u64,
+    pub cached_input: u64,
+    pub cache_write: u64,
+    /// Completion tokens, reasoning included.
+    pub output: u64,
+    /// The part of `output` spent reasoning.
+    pub reasoning: u64,
+    pub responses: u64,
+    pub cost_usd: Option<f64>,
+}
+
+impl LocalModelUsage {
+    pub fn total_tokens(&self) -> u64 {
+        self.input + self.output
+    }
+
+    /// Prompt tokens that were not served from the cache.
+    pub fn fresh_input(&self) -> u64 {
+        self.input.saturating_sub(self.cached_input)
+    }
+}
+
+/// One calendar day's total tokens across every model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalDayUsage {
+    pub day: String,
+    pub tokens: u64,
+}
+
+/// What the app read from the user's own local harness logs.
+///
+/// Separate from [`AccountUsage`] on purpose: the provider's account read is
+/// the provider's account, while this is the local record, with its own
+/// coverage window and its own failure counters. The UI presents them as
+/// different sources because they are — neither stands in for the other.
+///
+/// The counters are the provenance contract. `files_unreadable` and
+/// `files_compressed` name the rollouts whose tokens are *not* in these
+/// totals, so the UI can say what is missing instead of implying a complete
+/// picture.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalUsage {
+    pub models: Vec<LocalModelUsage>,
+    pub days: Vec<LocalDayUsage>,
+    /// API-equivalent cost of every priced model, summed. Zero when nothing
+    /// could be priced — paired with `unpriced_tokens` so the two read
+    /// together.
+    #[serde(rename = "costUsd")]
+    pub cost_usd: f64,
+    /// Tokens whose model the price list does not cover.
+    pub unpriced_tokens: u64,
+    pub sessions: u64,
+    pub files_scanned: u64,
+    pub files_unreadable: u64,
+    pub files_compressed: u64,
+    pub first_day: Option<String>,
+    pub last_day: Option<String>,
+}
+
+/// What one scan's per-model token counts came to in money, for the caller to
+/// fold into a [`LocalUsage`].
+pub struct LocalPricing {
+    pub total_cost_usd: f64,
+    pub unpriced_tokens: u64,
+}
+
+/// Prices local usage rows against the bundled price list.
+///
+/// This is the exact tier the provider API cannot offer: the logs carry a real
+/// per-response split, so cached prompt, fresh prompt, cache writes and
+/// completion are each charged their own rate — no blended average and no
+/// assumed input share.
+///
+/// A rate the list omits falls back to the input rate for the classes it
+/// always covers (prompt), and only makes a model unpriced when the model
+/// actually used a class with no rate at all (cache writes, on a model that
+/// lists no write rate).
+pub fn price_local_models(models: &mut [LocalModelUsage], provider_id: &str) -> LocalPricing {
+    price_local_models_with_catalog(
+        models,
+        provider_id,
+        include_str!("../../../public/price_list.json"),
+    )
+}
+
+pub fn price_local_models_with_catalog(
+    models: &mut [LocalModelUsage],
+    provider_id: &str,
+    catalog: &str,
+) -> LocalPricing {
+    let Ok(catalog) = serde_json::from_str::<serde_json::Value>(catalog) else {
+        return LocalPricing {
+            total_cost_usd: 0.0,
+            unpriced_tokens: models.iter().map(LocalModelUsage::total_tokens).sum(),
+        };
+    };
+
+    let mut total_cost_usd = 0.0;
+    let mut unpriced_tokens = 0;
+    for model in models.iter_mut() {
+        if let Some(name) = listed_model_entry(&catalog, provider_id, &model.id)
+            .and_then(|entry| entry.get("name"))
+            .and_then(serde_json::Value::as_str)
+        {
+            model.display_name = name.to_string();
+        }
+        match local_model_cost(&catalog, provider_id, model) {
+            Some(cost) => {
+                model.cost_usd = Some(cost);
+                total_cost_usd += cost;
+            }
+            None => {
+                model.cost_usd = None;
+                unpriced_tokens += model.total_tokens();
+            }
+        }
+    }
+    LocalPricing {
+        total_cost_usd,
+        unpriced_tokens,
+    }
+}
+
+/// The exact cost of one model's token split, or `None` when the catalog
+/// cannot price every class this model actually used.
+fn local_model_cost(
+    catalog: &serde_json::Value,
+    provider_id: &str,
+    model: &LocalModelUsage,
+) -> Option<f64> {
+    let entry = listed_model_entry(catalog, provider_id, &model.id)?;
+    let cost = ["cost_per_million", "api_cost_per_million"]
+        .into_iter()
+        .find_map(|field| entry.get(field))?;
+    let rate = |class: &str| cost.get(class).and_then(serde_json::Value::as_f64);
+
+    let input = rate("input")?;
+    let output = rate("output")?;
+    // Prompt cache reads are billed as prompt; a catalog that separates them
+    // only ever lowers the rate, so the specific one is preferred and the
+    // input rate is the honest floor.
+    let cache_read = rate("cache_read").unwrap_or(input);
+    let cache_write = match (rate("cache_write"), model.cache_write) {
+        (Some(rate), _) => rate,
+        (None, 0) => 0.0,
+        (None, _) => return None,
+    };
+
+    let cost = (model.fresh_input() as f64 * input
+        + model.cached_input as f64 * cache_read
+        + model.cache_write as f64 * cache_write
+        + model.output as f64 * output)
+        / 1_000_000.0;
+    cost.is_finite().then_some(cost)
 }
 
 /// The account plan behind the numbers, kept coarse so plan churn does not
@@ -751,6 +931,155 @@ mod tests {
         let json = r#"{"fetchedAt":1,"summary":{},"dailyUsageBuckets":[]}"#;
         let usage: AccountUsage = serde_json::from_str(json).expect("decodes");
         assert!(usage.models.is_empty());
+        assert_eq!(usage.local, None);
+    }
+
+    #[test]
+    fn a_local_reading_reaches_the_client_with_its_cost_in_camel_case() {
+        let usage = AccountUsage {
+            fetched_at: 1,
+            summary: AccountUsageSummary {
+                total_tokens: None,
+                peak_daily_tokens: None,
+                longest_running_turn_sec: None,
+                current_streak_days: None,
+                longest_streak_days: None,
+                total_requests: None,
+            },
+            daily_usage_buckets: Vec::new(),
+            models: Vec::new(),
+            local: Some(LocalUsage {
+                models: vec![LocalModelUsage {
+                    id: "gpt-6-luna".to_string(),
+                    display_name: "GPT-6 Luna".to_string(),
+                    input: 10,
+                    cached_input: 4,
+                    cache_write: 0,
+                    output: 2,
+                    reasoning: 1,
+                    responses: 1,
+                    cost_usd: Some(0.5),
+                }],
+                days: Vec::new(),
+                cost_usd: 0.5,
+                unpriced_tokens: 0,
+                sessions: 1,
+                files_scanned: 1,
+                files_unreadable: 0,
+                files_compressed: 0,
+                first_day: Some("2026-10-01".to_string()),
+                last_day: Some("2026-10-02".to_string()),
+            }),
+            window_days: None,
+        };
+
+        let json = serde_json::to_value(&usage).expect("serializes");
+        let local = &json["local"];
+        assert_eq!(local["costUsd"], 0.5);
+        assert_eq!(local["unpricedTokens"], 0u64);
+        assert_eq!(local["filesCompressed"], 0u64);
+        assert_eq!(local["models"][0]["displayName"], "GPT-6 Luna");
+        assert_eq!(local["models"][0]["cachedInput"], 4u64);
+        assert_eq!(local["firstDay"], "2026-10-01");
+    }
+
+    /// A split at real magnitudes — the research worked example saw Codex pass a
+    /// billion prompt tokens all-time — exercising every token class at known
+    /// rates: fresh 600M × $2, cached 400M × $0.20, output 200M × $12 =
+    /// **$3,680**.
+    fn local_model(id: &str) -> LocalModelUsage {
+        LocalModelUsage {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            input: 1_000_000_000,
+            cached_input: 400_000_000,
+            cache_write: 0,
+            output: 200_000_000,
+            reasoning: 120_000_000,
+            responses: 5,
+            cost_usd: None,
+        }
+    }
+
+    const SPLIT_CATALOG: &str = r#"{"providers":{"openai":{"models":{
+        "gpt-5.6-terra":{"name":"GPT-5.6 Terra","cost_per_million":{
+            "input":2,"output":12,"cache_read":0.2,"cache_write":2.5}},
+        "gpt-5.5":{"name":"GPT-5.5","cost_per_million":{"input":5,"output":30,"cache_read":0.5}}
+    }}}}"#;
+
+    #[test]
+    fn local_usage_prices_the_real_split_not_a_blended_average() {
+        let mut models = vec![local_model("gpt-5.6-terra")];
+        let priced = price_local_models_with_catalog(&mut models, "openai", SPLIT_CATALOG);
+
+        assert_eq!(models[0].display_name, "GPT-5.6 Terra");
+        let cost = models[0].cost_usd.expect("priced");
+        assert!((cost - 3_680.0).abs() < 0.0001, "cost was {cost}");
+        assert!((priced.total_cost_usd - 3_680.0).abs() < 0.0001);
+        assert_eq!(priced.unpriced_tokens, 0);
+    }
+
+    #[test]
+    fn cache_writes_are_priced_at_their_own_rate() {
+        let mut model = local_model("gpt-5.6-terra");
+        model.cache_write = 1_000_000_000;
+        let mut models = vec![model];
+        let priced = price_local_models_with_catalog(&mut models, "openai", SPLIT_CATALOG);
+
+        // The same 1B tokens as fresh prompt would cost $2,000; at the $2.50
+        // write rate they cost $2,500.
+        assert!((models[0].cost_usd.expect("priced") - 6_180.0).abs() < 0.0001);
+        assert!((priced.total_cost_usd - 6_180.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn a_model_the_list_does_not_carry_stays_unpriced_not_free() {
+        let mut models = vec![local_model("gpt-5.6-terra"), local_model("gpt-9-imaginary")];
+        let priced = price_local_models_with_catalog(&mut models, "openai", SPLIT_CATALOG);
+
+        assert!(models[1].cost_usd.is_none());
+        assert_eq!(models[1].display_name, "gpt-9-imaginary");
+        assert_eq!(priced.unpriced_tokens, 1_200_000_000);
+        assert!((priced.total_cost_usd - 3_680.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn a_missing_rate_for_tokens_that_ran_makes_the_model_unpriced() {
+        // GPT-5.5 lists no cache-write rate. Pricing its cache writes at the
+        // input rate would understate the bill, so the whole model stays
+        // unpriced instead.
+        let mut model = local_model("gpt-5.5");
+        model.cache_write = 1000;
+        let mut models = vec![model];
+        let priced = price_local_models_with_catalog(&mut models, "openai", SPLIT_CATALOG);
+
+        assert!(models[0].cost_usd.is_none());
+        assert_eq!(priced.unpriced_tokens, 1_200_000_000);
+        assert_eq!(priced.total_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn a_missing_rate_costs_nothing_when_the_model_never_used_it() {
+        // The same GPT-5.5 with zero cache writes prices fine.
+        let mut models = vec![local_model("gpt-5.5")];
+        let priced = price_local_models_with_catalog(&mut models, "openai", SPLIT_CATALOG);
+
+        assert!(models[0].cost_usd.is_some());
+        assert_eq!(priced.unpriced_tokens, 0);
+    }
+
+    #[test]
+    fn the_api_reference_rate_prices_a_model_with_no_direct_charge() {
+        let catalog = r#"{"providers":{"zai-coding-plan":{"models":{
+            "glm-5.3":{"name":"GLM-5.3","api_cost_per_million":{"input":1.4,"output":4.4}}
+        }}}}"#;
+        let mut models = vec![local_model("glm-5.3")];
+        price_local_models_with_catalog(&mut models, "zai-coding-plan", catalog);
+
+        // fresh 600M × 1.4 + cached 400M × 1.4 + output 200M × 4.4 = $2,280.
+        // No cache-read rate listed, so cached prompt falls back to the input
+        // rate rather than being dropped from the total.
+        assert!((models[0].cost_usd.expect("priced") - 2_280.0).abs() < 0.0001);
     }
 
     #[test]

@@ -9,6 +9,7 @@
 //! renderer, or any file we write.
 
 pub(crate) mod protocol;
+mod rollouts;
 pub(crate) mod transport;
 
 use std::sync::Mutex;
@@ -159,15 +160,29 @@ impl Provider for CodexProvider {
         })
     }
 
+    /// The provider's account totals, plus what the local rollout logs add.
+    ///
+    /// The app-server account read reports one lifetime total and no
+    /// per-model split, no cache breakdown and no cost — none of which the
+    /// account surface can offer. The rollout logs can, because they record
+    /// every response. The scan is the long pole here (a year of logs is
+    /// gigabytes), which is safe because every command already runs on a
+    /// blocking thread; the renderer paints its skeleton meanwhile.
+    ///
+    /// A missing or unreadable local record is `None`, never a failure: the
+    /// account read still answers, and the UI says the local record is absent
+    /// rather than showing a confident zero.
     fn read_account_usage(&self) -> Result<crate::shared::domain::AccountUsage, Error> {
-        self.with_server(|server| {
+        let mut usage = self.with_server(|server| {
             let payload = server.request("account/usage/read", Some(serde_json::json!({})))?;
             let fetched_at = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as i64;
             protocol::decode_account_usage(&payload, fetched_at)
-        })
+        })?;
+        usage.local = rollouts::read_local_usage();
+        Ok(usage)
     }
 
     fn account(&self) -> Result<Option<PlanKind>, Error> {
