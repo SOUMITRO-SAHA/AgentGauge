@@ -183,13 +183,27 @@ export async function pollForDisplayed(
  * to press is often not the one `$` returns, and the click fails with "element
  * wasn't found" on a screen that plainly has the button. `firstDisplayed` walks
  * the matches instead of taking the first.
+ *
+ * Retries until the deadline rather than snapshotting once. A spec that clicks
+ * a tab right after navigating races the render that produces it, and the
+ * losing side is whichever spec happens to run on a loaded machine — a
+ * different spec each run, with nothing in the app to explain it.
  */
-export async function clickDisplayed(selector: string): Promise<void> {
-  const target = await firstDisplayed(selector);
-  if (!target) {
-    throw new Error(`nothing displayed for ${selector}`);
+export async function clickDisplayed(
+  selector: string,
+  timeoutMs = 10_000,
+): Promise<void> {
+  for (let waited = 0; waited <= timeoutMs; waited += 250) {
+    const target = await firstDisplayed(selector);
+    if (target) {
+      await target.click();
+      return;
+    }
+    await browser.pause(250);
   }
-  await target.click();
+  throw new Error(
+    `nothing displayed for ${selector} within ${timeoutMs}ms`,
+  );
 }
 
 /**
@@ -1527,6 +1541,39 @@ export function zaiAccountUsage() {
  * Onboarding dismissed, with Z.AI connected and reporting both window quotas
  * and token analytics.
  */
+/**
+ * Z.AI reporting a week of days, with one day it did not report at all — the
+ * shape the activity heatmap has to draw. Kept apart from the default series
+ * because another spec probes the daily chart's tooltip by hovering it.
+ */
+export function zaiAccountUsageWithWeek() {
+  return {
+    ...zaiAccountUsage(),
+    dailyUsageBuckets: [
+      { startDate: "2026-10-07", tokens: 640_000_000 },
+      { startDate: "2026-10-08", tokens: 1470_000_000 },
+      // 2026-10-09 is deliberately absent: a day with no report.
+      { startDate: "2026-10-10", tokens: 275_000_000 },
+    ],
+  };
+}
+
+/** Z.AI connected, reporting a week of daily activity. */
+export async function dashboardWithZaiWeek(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    subscriptions: [subscription()],
+    usageByProvider: { zai: zaiSnapshot() },
+    accountUsageByProvider: { zai: zaiAccountUsageWithWeek() },
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+  });
+}
+
 export async function dashboardWithZaiAnalytics(): Promise<void> {
   await boot({
     visible: false,

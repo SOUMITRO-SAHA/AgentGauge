@@ -325,25 +325,25 @@ it("draws the activity heatmap over the span the logs actually cover", () => {
     }),
   );
 
-  const heatmap = screen.getByTestId("stats-local-heatmap");
+  const heatmap = screen.getByTestId("stats-activity-heatmap");
   // The grid spans the coverage, and says which span it is.
   expect(heatmap.textContent ?? "").toContain("2026-09-22");
   expect(heatmap.textContent ?? "").toContain("2026-09-26");
   // A day with no record is a gap, distinct from a day with no tokens.
-  expect(screen.getByTestId("stats-heatmap-cell-2026-09-24")).toBeTruthy();
-  expect(screen.getByTestId("stats-heatmap-cell-2026-09-24").dataset.state).toBe(
-    "no-record",
-  );
+  expect(screen.getByTestId("stats-activity-cell-2026-09-24")).toBeTruthy();
+  expect(
+    screen.getByTestId("stats-activity-cell-2026-09-24").dataset.state,
+  ).toBe("no-record");
   // A day that recorded zero tokens is not a day with no record: the two are
   // drawn differently, so a missing log never reads as an idle one.
-  expect(screen.getByTestId("stats-heatmap-cell-2026-09-23").dataset.state).toBe(
-    "empty",
-  );
+  expect(
+    screen.getByTestId("stats-activity-cell-2026-09-23").dataset.state,
+  ).toBe("empty");
   // The busiest day in range is the top of the scale.
-  expect(screen.getByTestId("stats-heatmap-cell-2026-09-25").dataset.state).toBe(
-    "peak",
-  );
-  expect(screen.getByTestId("stats-heatmap-busiest")).toBeTruthy();
+  expect(
+    screen.getByTestId("stats-activity-cell-2026-09-25").dataset.state,
+  ).toBe("peak");
+  expect(screen.getByTestId("stats-activity-busiest")).toBeTruthy();
 });
 
 it("leaves the heatmap out when the logs have no day records", () => {
@@ -354,5 +354,43 @@ it("leaves the heatmap out when the logs have no day records", () => {
     }),
   );
 
-  expect(screen.queryByTestId("stats-local-heatmap")).toBeNull();
+  expect(screen.queryByTestId("stats-activity-heatmap")).toBeNull();
+});
+
+it("draws the heatmap from a provider's own daily series too", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const tab = await screen.findByTestId("stats-tab-zai");
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+
+  // Z.AI reports 30 days of its own. A heatmap fed only from local logs
+  // would leave the tab a Z.AI user actually lives on with no activity view
+  // at all, even though the data is right there in its daily buckets.
+  const heatmap = await screen.findByTestId("stats-activity-heatmap");
+  expect(heatmap).toBeTruthy();
+
+  const source = screen.getByTestId("stats-activity-source");
+  expect(source.textContent ?? "").toContain("Z.AI");
+  expect(source.textContent ?? "").toContain("30 days");
+  expect(screen.getByTestId("stats-activity-cell-2026-10-08")).toBeTruthy();
+});
+
+it("does not stack two heatmaps on a tab that has both series", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const tab = await screen.findByTestId("stats-tab-zai");
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+
+  // One activity view per tab: the provider's series when it reports one,
+  // the local logs otherwise, never both stacked.
+  await screen.findByTestId("stats-activity-heatmap");
+  expect(
+    document.querySelectorAll("[data-testid='stats-activity-heatmap']").length,
+  ).toBe(1);
 });

@@ -6,6 +6,7 @@ import {
   dashboardWithPlans,
   dashboardWithSlowStats,
   dashboardWithZaiAnalytics,
+  dashboardWithZaiWeek,
   dispatchCalls,
   clickDisplayed,
   expectDisplayed,
@@ -461,12 +462,12 @@ describe("stats", () => {
     await gotoView("stats");
 
     await clickDisplayed('[data-testid="stats-tab-codex"]');
-    await expectDisplayed('[data-testid="stats-local-heatmap"]');
+    await expectDisplayed('[data-testid="stats-activity-heatmap"]');
 
     const heatmap = await browser.execute(() => {
-      const root = document.querySelector('[data-testid="stats-local-heatmap"]');
+      const root = document.querySelector('[data-testid="stats-activity-heatmap"]');
       const cells = Array.from(
-        root?.querySelectorAll("[data-testid^='stats-heatmap-cell-']") ?? [],
+        root?.querySelectorAll("[data-testid^='stats-activity-cell-']") ?? [],
       ).map((cell) => ({
         id: cell.getAttribute("data-testid") ?? "",
         state: cell.getAttribute("data-state") ?? "",
@@ -474,7 +475,7 @@ describe("stats", () => {
       return {
         label:
           root
-            ?.querySelector('[data-testid="stats-heatmap-busiest"]')
+            ?.querySelector('[data-testid="stats-activity-busiest"]')
             ?.textContent?.replace(/\s+/g, " ") ?? "",
         cells,
       };
@@ -493,5 +494,39 @@ describe("stats", () => {
       cell.id.endsWith("2026-09-04"),
     );
     expect(recorded?.state).toBe("peak");
+  });
+  it("draws the heatmap on a provider tab from its own daily series", async () => {
+    await dashboardWithZaiWeek();
+    await gotoView("stats");
+
+    await clickDisplayed('[data-testid="stats-tab-zai"]');
+    // The heatmap is not a local-logs feature: a provider that reports its
+    // own daily series gets the same activity view, or the tab a Z.AI user
+    // lives on has no "when" at all.
+    await expectDisplayed('[data-testid="stats-activity-heatmap"]');
+
+    const reading = await browser.execute(() => {
+      const read = (id: string) =>
+        document
+          .querySelector(`[data-testid="${id}"]`)
+          ?.textContent?.replace(/\s+/g, " ") ?? "";
+      return {
+        source: read("stats-activity-source"),
+        busiest: read("stats-activity-busiest"),
+        cellExists:
+          document.querySelector('[data-testid="stats-activity-cell-2026-10-08"]') !==
+          null,
+        heatmaps: document.querySelectorAll("[data-testid='stats-activity-heatmap']")
+          .length,
+      };
+    });
+
+    expect(reading.cellExists).toBe(true);
+    expect(reading.source).toContain("Z.AI");
+    expect(reading.source).toContain("30 days");
+    expect(reading.busiest).toContain("2026-10-07");
+    expect(reading.busiest).toContain("2026-10-10");
+    // Exactly one activity view per tab.
+    expect(reading.heatmaps).toBe(1);
   });
 });

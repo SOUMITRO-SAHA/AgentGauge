@@ -499,6 +499,7 @@ export function LocalLogPanel({
         days={usage.days}
         firstDay={usage.firstDay}
         lastDay={usage.lastDay}
+        source={`${usage.sessions} local logs, shaded by tokens. A gap is a day with no record, not a day with none.`}
       />
       {usage.unpricedTokens > 0 ? (
         <p
@@ -556,10 +557,12 @@ export function ActivityHeatmap({
   days,
   firstDay,
   lastDay,
+  source = "Every day the logs cover, shaded by tokens. A gap is a day with no record, not a day with none.",
 }: {
-  readonly days: readonly Ipc.LocalDayUsage[];
+  readonly days: readonly { readonly day: string; readonly tokens: number | null }[];
   readonly firstDay: string | null;
   readonly lastDay: string | null;
+  readonly source?: string;
 }) {
   const span = useMemo(() => {
     if (days.length === 0 || firstDay === null || lastDay === null) return [];
@@ -586,12 +589,12 @@ export function ActivityHeatmap({
   const activeDays = span.filter((cell) => (cell.tokens ?? 0) > 0).length;
 
   return (
-    <div className="flex flex-col gap-2" data-testid="stats-local-heatmap">
+    <div className="flex flex-col gap-2" data-testid="stats-activity-heatmap">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h4 className="text-xs font-medium text-foreground">When you worked</h4>
         <span
           className="text-xs text-muted-foreground"
-          data-testid="stats-heatmap-busiest"
+          data-testid="stats-activity-busiest"
         >
           {firstDay} → {lastDay} · {activeDays} active{" "}
           {activeDays === 1 ? "day" : "days"}
@@ -604,19 +607,33 @@ export function ActivityHeatmap({
             <span
               key={cell.day}
               className={`h-3 w-3 rounded-[2px] ${HEATMAP_FILL[state]}`}
-              data-testid={`stats-heatmap-cell-${cell.day}`}
+              data-testid={`stats-activity-cell-${cell.day}`}
               data-state={state}
               title={`${cell.day}: ${cell.tokens === null ? "no record" : `${formatCompactCount(cell.tokens)} tokens`}`}
             />
           );
         })}
       </div>
-      <p className="text-xs text-muted-foreground">
-        Every day the logs cover, shaded by tokens. A gap is a day with no
-        record, not a day with none.
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="stats-activity-source"
+      >
+        {source}
       </p>
     </div>
   );
+}
+
+/**
+ * A provider's daily buckets as the heatmap's day series.
+ *
+ * A day the provider did not report a count for stays a gap rather than
+ * becoming a zero, which is the same distinction the local series keeps.
+ */
+function reportedDays(usage: Ipc.AccountUsage) {
+  return [...usage.dailyUsageBuckets]
+    .sort((left, right) => left.startDate.localeCompare(right.startDate))
+    .map((bucket) => ({ day: bucket.startDate, tokens: bucket.tokens }));
 }
 
 /** A day's shade, relative to the busiest day in range. */
@@ -804,6 +821,18 @@ function PlanAnalytics({
             )}
             {result.value.local !== null && result.value.models.length === 0 ? (
               <LocalLogPanel usage={result.value.local} source="OpenCode" />
+            ) : result.value.local === null &&
+              result.value.dailyUsageBuckets.length > 0 ? (
+              <ActivityHeatmap
+                days={reportedDays(result.value)}
+                firstDay={result.value.dailyUsageBuckets[0]?.startDate ?? null}
+                lastDay={
+                  result.value.dailyUsageBuckets[
+                    result.value.dailyUsageBuckets.length - 1
+                  ]?.startDate ?? null
+                }
+                source={`${label}'s own ${result.value.windowDays ?? "reported"} days, shaded by tokens.`}
+              />
             ) : null}
             {result.value.models.length > 0 ? (
               <ModelMixBlock
