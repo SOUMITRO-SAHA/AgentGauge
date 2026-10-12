@@ -45,6 +45,7 @@ export function ProcessGroupPanel({
         <Totals group={group} />
         <Processes group={group} nowMs={nowMs} />
         <Storage group={group} />
+        <PortsUnavailable group={group} />
       </div>
     </section>
   );
@@ -55,6 +56,10 @@ function Totals({ group }: { readonly group: Ipc.ProcessGroup }) {
     group.storage.state === "measured"
       ? `${formatBytes(group.storage.totalBytes)} · ${group.storage.totalFiles} files`
       : "—";
+  const ports =
+    group.ports.state === "checked"
+      ? uniquePorts(group).join(", ") || "None listening"
+      : "—";
 
   return (
     <div
@@ -63,8 +68,36 @@ function Totals({ group }: { readonly group: Ipc.ProcessGroup }) {
     >
       <Total label="Memory" value={formatBytes(group.totalMemoryBytes)} />
       <Total label="Processes" value={String(group.processes.length)} />
+      <Total label="Ports" value={ports} />
       <Total label="On disk" value={onDisk} />
     </div>
+  );
+}
+
+/** The group's listening ports, unique and ascending. */
+function uniquePorts(group: Ipc.ProcessGroup): number[] {
+  if (group.ports.state !== "checked") {
+    return [];
+  }
+  const ports = [
+    ...new Set(group.ports.listening.map((entry) => entry.port)),
+  ];
+  ports.sort((a, b) => a - b);
+  return ports;
+}
+
+/** The honest reason the ports question could not be asked at all. */
+function PortsUnavailable({ group }: { readonly group: Ipc.ProcessGroup }) {
+  if (group.ports.state !== "unavailable") {
+    return null;
+  }
+  return (
+    <p
+      className="text-xs text-muted-foreground"
+      data-testid={`process-ports-unavailable-${group.id}`}
+    >
+      {group.ports.reason}
+    </p>
   );
 }
 
@@ -101,6 +134,7 @@ function Processes({
         <TableRow>
           <TableHead className="pl-0">Process</TableHead>
           <TableHead className="text-right">PID</TableHead>
+          <TableHead className="text-right">Ports</TableHead>
           <TableHead className="text-right">Memory</TableHead>
           <TableHead className="pr-0 text-right">Uptime</TableHead>
         </TableRow>
@@ -122,6 +156,12 @@ function Processes({
             </TableCell>
             <TableCell className="text-right text-xs tabular text-muted-foreground">
               {process.pid}
+            </TableCell>
+            <TableCell
+              className="text-right text-sm tabular text-foreground"
+              data-testid={`process-ports-${process.pid}`}
+            >
+              {process.listeningPorts.map((port) => `:${port}`).join(" ")}
             </TableCell>
             <TableCell
               className="text-right text-sm tabular text-foreground"

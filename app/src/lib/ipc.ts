@@ -149,6 +149,8 @@ export type CliToolStatus = typeof CliToolStatus.Type;
  *
  * `startedAt` is Unix **seconds**; uptime is derived against the clock so it
  * ticks without another read. `memoryBytes` is the resident set size.
+ * `listeningPorts` are the TCP ports the process listens on — empty is a
+ * real answer (a stdio server listens on nothing), not a missing reading.
  */
 export const ProcessSummary = Schema.Struct({
   pid: Schema.Number,
@@ -156,8 +158,36 @@ export const ProcessSummary = Schema.Struct({
   command: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.Number),
   memoryBytes: Schema.NullOr(Schema.Number),
+  listeningPorts: Schema.Array(Schema.Number),
 });
 export type ProcessSummary = typeof ProcessSummary.Type;
+
+/** One process's listening TCP socket, as the platform scan reported it. */
+export const ProcessPort = Schema.Struct({
+  pid: Schema.Number,
+  port: Schema.Number,
+});
+export type ProcessPort = typeof ProcessPort.Type;
+
+/**
+ * Whether the group's listening ports could be determined, and where they
+ * are.
+ *
+ * `checked` with an empty list is a real answer — the platform was asked and
+ * nothing is listening — while `unavailable` carries the reason the question
+ * could not be asked (no port-inspection tool on this platform).
+ */
+export const PortScan = Schema.Union([
+  Schema.Struct({
+    state: Schema.Literal("checked"),
+    listening: Schema.Array(ProcessPort),
+  }),
+  Schema.Struct({
+    state: Schema.Literal("unavailable"),
+    reason: Schema.String,
+  }),
+]);
+export type PortScan = typeof PortScan.Type;
 
 /** One labelled piece of a storage footprint. */
 export const StorageRow = Schema.Struct({
@@ -199,6 +229,7 @@ export const ProcessGroup = Schema.Struct({
   processes: Schema.Array(ProcessSummary),
   totalMemoryBytes: Schema.Number,
   storage: StorageReport,
+  ports: PortScan,
 });
 export type ProcessGroup = typeof ProcessGroup.Type;
 

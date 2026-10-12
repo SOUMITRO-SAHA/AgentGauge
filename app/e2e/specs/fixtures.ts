@@ -382,6 +382,7 @@ export function processGroup(id: string, overrides: Record<string, unknown> = {}
       state: "absent",
       reason: `${displayNames[id] ?? id} has not created its data directory yet.`,
     },
+    ports: { state: "checked", listening: [] as Array<Record<string, unknown>> },
     ...overrides,
   };
 }
@@ -394,6 +395,7 @@ export function processSummary(overrides: Record<string, unknown> = {}) {
     command: "codex app-server",
     startedAt: Math.floor(Date.now() / 1000) - 3_600,
     memoryBytes: 432_000_000,
+    listeningPorts: [] as number[],
     ...overrides,
   };
 }
@@ -454,7 +456,7 @@ export function processInsightsReport() {
         storage: {
           state: "measured",
           totalBytes: 500_000_000,
-          totalFiles: 90,
+          totalFiles: 95,
           rows: [
             {
               label: "Session transcripts",
@@ -463,9 +465,15 @@ export function processInsightsReport() {
               fileCount: 89,
             },
             {
+              label: "Databases (SQLite)",
+              path: "state_5.sqlite, thread_history_1.sqlite, goals_1.sqlite",
+              bytes: 60_000_000,
+              fileCount: 5,
+            },
+            {
               label: "Everything else",
               path: "/Users/dev/.codex",
-              bytes: 68_000_000,
+              bytes: 8_000_000,
               fileCount: 1,
             },
           ],
@@ -495,6 +503,49 @@ export async function processScreenLive(): Promise<void> {
     widgetSupported: true,
     automationRunning: true,
     processInsights: processInsightsReport(),
+  });
+}
+
+/**
+ * The same screen with OpenCode serving and listening — the positive port
+ * story: `opencode serve` binds loopback (4096 first, then any free port,
+ * per the vendored source), so 49374 is a realistic answer — and an
+ * unavailable port scan for Codex to cover that state too.
+ */
+export async function processScreenWithPorts(): Promise<void> {
+  const report = processInsightsReport();
+  const opencode = report.groups.find(
+    (group) => group.id === "opencode",
+  ) as { processes: Array<Record<string, unknown>>; ports: Record<string, unknown> };
+  opencode.processes = [
+    processSummary({
+      pid: 5309,
+      name: "opencode",
+      command: "opencode serve --hostname 127.0.0.1",
+      listeningPorts: [49374],
+    }),
+  ];
+  opencode.ports = {
+    state: "checked",
+    listening: [{ pid: 5309, port: 49374 }],
+  };
+  const codex = report.groups.find(
+    (group) => group.id === "codex",
+  ) as { ports: Record<string, unknown> };
+  codex.ports = {
+    state: "unavailable",
+    reason: "Listening ports could not be inspected: lsof was not found.",
+  };
+
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+    processInsights: report,
   });
 }
 

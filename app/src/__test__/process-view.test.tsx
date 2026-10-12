@@ -26,6 +26,7 @@ function summary(overrides: Record<string, unknown> = {}) {
     command: "codex app-server",
     startedAt: Math.floor(Date.now() / 1000) - HOUR_SEC,
     memoryBytes: 432_000_000,
+    listeningPorts: [],
     ...overrides,
   };
 }
@@ -37,6 +38,7 @@ function group(id: string, overrides: Record<string, unknown> = {}) {
     processes: [],
     totalMemoryBytes: 0,
     storage: { state: "absent", reason: "has not created its data directory yet." },
+    ports: { state: "checked", listening: [] },
     ...overrides,
   };
 }
@@ -95,7 +97,12 @@ it("shows each process with its memory and uptime beside the group totals", asyn
     group("agentgauge", {
       processes: [
         summary({ pid, name: "agentgauge", memoryBytes: 300 }),
-        summary({ pid: 4243, name: "com.apple.WebKit.WebContent", memoryBytes: 100, command: null }),
+        summary({
+          pid: 4243,
+          name: "com.apple.WebKit.WebContent",
+          memoryBytes: 100,
+          command: null,
+        }),
       ],
       totalMemoryBytes: 400,
       storage: {
@@ -123,6 +130,93 @@ it("shows each process with its memory and uptime beside the group totals", asyn
     "App data",
   );
   expect(screen.getByTestId("process-storage-agentgauge")?.textContent).toContain("2 kB");
+});
+
+it("renders listening ports per process and in the group totals", async () => {
+  installDispatch([
+    group("agentgauge"),
+    group("codex"),
+    group("opencode", {
+      processes: [
+        summary({
+          pid: 5309,
+          name: "opencode",
+          command: "opencode serve --hostname 127.0.0.1",
+          listeningPorts: [49374],
+        }),
+      ],
+      ports: {
+        state: "checked",
+        listening: [{ pid: 5309, port: 49374 }],
+      },
+    }),
+  ]);
+  await renderView();
+
+  expect(screen.getByTestId("process-ports-5309")?.textContent).toBe(":49374");
+  expect(screen.getByTestId("process-totals-opencode")?.textContent).toContain(
+    "49374",
+  );
+});
+
+it("says none are listening when the scan checked and found nothing", async () => {
+  installDispatch([group("agentgauge"), group("codex"), group("opencode")]);
+  await renderView();
+
+  expect(screen.getByTestId("process-totals-codex")?.textContent).toContain(
+    "None listening",
+  );
+  expect(screen.queryByTestId("process-ports-unavailable-codex")).toBeNull();
+});
+
+it("carries the reason when ports cannot be inspected at all", async () => {
+  installDispatch([
+    group("agentgauge"),
+    group("codex"),
+    group("opencode", {
+      ports: {
+        state: "unavailable",
+        reason: "Listening ports could not be inspected: program not found.",
+      },
+    }),
+  ]);
+  await renderView();
+
+  expect(
+    screen.getByTestId("process-ports-unavailable-opencode")?.textContent,
+  ).toContain("could not be inspected");
+  expect(screen.getByTestId("process-totals-opencode")?.textContent).not.toContain(
+    "None listening",
+  );
+});
+
+it("names the databases inside the storage breakdown", async () => {
+  installDispatch([
+    group("agentgauge"),
+    group("codex", {
+      storage: {
+        state: "measured",
+        totalBytes: 500_000_000,
+        totalFiles: 95,
+        rows: [
+          {
+            label: "Databases (SQLite)",
+            path: "state_5.sqlite, thread_history_1.sqlite, goals_1.sqlite",
+            bytes: 60_000_000,
+            fileCount: 5,
+          },
+          { label: "Everything else", path: "/Users/dev/.codex", bytes: 440_000_000, fileCount: 90 },
+        ],
+      },
+    }),
+    group("opencode"),
+  ]);
+  await renderView();
+
+  const storage = screen.getByTestId("process-storage-codex");
+  expect(storage.textContent).toContain("Databases (SQLite)");
+  expect(storage.textContent).toContain("state_5.sqlite");
+  expect(storage.textContent).toContain("60 MB");
 });
 
 it("renders an absent footprint as its reason, never as zero bytes", async () => {

@@ -4,6 +4,7 @@ import {
   expectDisplayed,
   gotoView,
   processScreenLive,
+  processScreenWithPorts,
   restoreOnboardingStore,
 } from "../fixtures.js";
 
@@ -78,6 +79,27 @@ describe("processes", () => {
     );
   });
 
+  it("names the SQLite databases in the breakdown", async () => {
+    await gotoView("processes");
+
+    const text = await $('[data-testid="process-storage-codex"]').getText();
+    expect(text).toContain("Databases (SQLite)");
+    expect(text).toContain("state_5.sqlite");
+    expect(text).toContain("goals_1.sqlite");
+    expect(text).toContain("60 MB");
+  });
+
+  it("says none are listening when the port scan found nothing", async () => {
+    await gotoView("processes");
+
+    await expect($('[data-testid="process-totals-codex"]')).toHaveText(
+      expect.stringContaining("None listening"),
+    );
+    expect(
+      await $$('[data-testid="process-ports-unavailable-codex"]'),
+    ).toHaveLength(0);
+  });
+
   it("renders an absent footprint as its reason, never as zero bytes", async () => {
     await gotoView("processes");
     await expectDisplayed('[data-testid="process-storage-absent-opencode"]');
@@ -108,6 +130,35 @@ describe("processes", () => {
 
     await expect($('[data-testid="process-readonly-note"]')).toHaveText(
       expect.stringContaining("only reads"),
+    );
+  });
+});
+
+describe("processes with a listening server", () => {
+  beforeEach(async () => {
+    await processScreenWithPorts();
+  });
+
+  it("renders the listening port per process and in the group totals", async () => {
+    await gotoView("processes");
+
+    await expectDisplayed('[data-testid="process-row-5309"]');
+    await expect($('[data-testid="process-ports-5309"]')).toHaveText(":49374");
+    await expect($('[data-testid="process-totals-opencode"]')).toHaveText(
+      expect.stringContaining("49374"),
+    );
+  });
+
+  it("carries the reason when ports cannot be inspected at all", async () => {
+    await gotoView("processes");
+
+    await expectDisplayed('[data-testid="process-ports-unavailable-codex"]');
+    await expect($('[data-testid="process-ports-unavailable-codex"]')).toHaveText(
+      expect.stringContaining("could not be inspected"),
+    );
+    // An unaskable question must not render as its answered-empty form.
+    await expect($('[data-testid="process-totals-codex"]')).toHaveText(
+      expect.not.stringContaining("None listening"),
     );
   });
 });

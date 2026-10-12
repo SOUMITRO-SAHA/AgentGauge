@@ -32,6 +32,33 @@ pub struct ProcessSummary {
     pub started_at: Option<u64>,
     /// Resident set size in bytes.
     pub memory_bytes: Option<u64>,
+    /// The TCP ports this process is listening on, sorted. Empty is a real
+    /// answer — a stdio server listens on nothing.
+    pub listening_ports: Vec<u16>,
+}
+
+/// One process's listening TCP socket, as reported by the platform scan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessPort {
+    pub pid: u32,
+    pub port: u16,
+}
+
+/// The group-level answer to "which ports are these processes listening on?".
+///
+/// `Checked` with an empty list is a real answer, not a gap: a stdio server
+/// (`codex app-server`) listens on nothing, and the screen must say so
+/// rather than imply a reading is missing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum PortScan {
+    Checked { listening: Vec<ProcessPort> },
+    Unavailable { reason: String },
 }
 
 /// One labelled piece of a storage footprint.
@@ -75,6 +102,8 @@ pub struct ProcessGroup {
     pub processes: Vec<ProcessSummary>,
     pub total_memory_bytes: u64,
     pub storage: StorageReport,
+    /// Whether and where this group's processes are listening on TCP.
+    pub ports: PortScan,
 }
 
 /// The whole read: one row per group, in the order the screen shows them.
@@ -301,12 +330,67 @@ fn walk_size(root: &Path) -> std::io::Result<Walked> {
     Ok(walked)
 }
 
+/// One labelled piece of a footprint.
+enum Component {
+    /// A subdirectory of the root, walked whole.
+    Directory {
+        label: &'static str,
+        name: &'static str,
+    },
+    /// The root's SQLite database files — `*.sqlite` / `*.db` plus their
+    /// `-wal` and `-shm` siblings — summed into one row whose path names
+    /// every file counted.
+    SqliteFiles { label: &'static str },
+}
+
+/// Whether a root-level file is part of a SQLite database.
+///
+/// The `-wal` and `-shm` siblings are part of the database's footprint and
+/// can dwarf the main file between checkpoints. A lookalike suffix
+/// (`foo.sqlitebackup`) is not a database file.
+fn is_database_file(name: &str) -> bool {
+    name.ends_with(".sqlite")
+        || name.ends_with(".db")
+        || name.contains(".sqlite-")
+        || name.contains(".db-")
+}
+
+/// Sums the root's database files, returning the walk and the matched names.
+fn walk_sqlite_files(root: &Path) -> Option<(Walked, Vec<String>)> {
+    let entries = std::fs::read_dir(root).ok()?;
+    let mut walked = Walked::default();
+    let mut names = Vec::new();
+
+    for entry in entries.flatten() {
+        let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if metadata.is_dir() || metadata.file_type().is_symlink() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !is_database_file(&name) {
+            continue;
+        }
+        walked.bytes += metadata.len();
+        walked.file_count += 1;
+        names.push(name);
+    }
+
+    if names.is_empty() {
+        None
+    } else {
+        names.sort_unstable();
+        Some((walked, names))
+    }
+}
+
 /// Measures a footprint from a root and labelled components inside it.
 ///
 /// `total` always describes the whole root; each component that exists
 /// becomes a row, and one arithmetic "everything else" row closes the gap so
 /// the rows always sum to the total.
-fn measure_storage(root: &Path, components: &[(&str, &str)]) -> StorageReport {
+fn measure_storage(root: &Path, components: &[Component]) -> StorageReport {
     let Ok(total) = walk_size(root) else {
         return StorageReport::Absent {
             reason: format!("`{}` does not exist or cannot be read.", root.display()),
@@ -316,17 +400,33 @@ fn measure_storage(root: &Path, components: &[(&str, &str)]) -> StorageReport {
     let mut rows = Vec::new();
     let mut component_bytes = 0;
     let mut component_files = 0;
-    for (label, name) in components {
-        let path = root.join(name);
-        if let Ok(walked) = walk_size(&path) {
-            component_bytes += walked.bytes;
-            component_files += walked.file_count;
-            rows.push(StorageRow {
-                label: (*label).to_owned(),
-                path: path.display().to_string(),
-                bytes: walked.bytes,
-                file_count: walked.file_count,
-            });
+    for component in components {
+        match component {
+            Component::Directory { label, name } => {
+                let path = root.join(name);
+                if let Ok(walked) = walk_size(&path) {
+                    component_bytes += walked.bytes;
+                    component_files += walked.file_count;
+                    rows.push(StorageRow {
+                        label: (*label).to_owned(),
+                        path: path.display().to_string(),
+                        bytes: walked.bytes,
+                        file_count: walked.file_count,
+                    });
+                }
+            }
+            Component::SqliteFiles { label } => {
+                if let Some((walked, names)) = walk_sqlite_files(root) {
+                    component_bytes += walked.bytes;
+                    component_files += walked.file_count;
+                    rows.push(StorageRow {
+                        label: (*label).to_owned(),
+                        path: names.join(", "),
+                        bytes: walked.bytes,
+                        file_count: walked.file_count,
+                    });
+                }
+            }
         }
     }
 
@@ -407,15 +507,37 @@ fn tool_storage(executable: &str, paths: &PathEnv) -> StorageReport {
             "Codex",
             paths.codex_home.as_deref(),
             [
-                ("Session transcripts", "sessions"),
-                ("Archived transcripts", "archived_sessions"),
+                Component::Directory {
+                    label: "Session transcripts",
+                    name: "sessions",
+                },
+                Component::Directory {
+                    label: "Archived transcripts",
+                    name: "archived_sessions",
+                },
+                Component::SqliteFiles {
+                    label: "Databases (SQLite)",
+                },
             ]
             .as_slice(),
         ),
         "opencode" => (
             "OpenCode",
             paths.opencode_data.as_deref(),
-            [("Session storage", "storage"), ("Logs", "log")].as_slice(),
+            [
+                Component::Directory {
+                    label: "Session storage",
+                    name: "storage",
+                },
+                Component::Directory {
+                    label: "Logs",
+                    name: "log",
+                },
+                Component::SqliteFiles {
+                    label: "Databases (SQLite)",
+                },
+            ]
+            .as_slice(),
         ),
         other => {
             return StorageReport::Absent {
@@ -438,11 +560,103 @@ fn tool_storage(executable: &str, paths: &PathEnv) -> StorageReport {
     measure_storage(root, components)
 }
 
+/// Parses `lsof -F pcn` output into pid/port pairs.
+///
+/// A `p` line starts a process record; the `n` lines that follow are its
+/// nodes, and only nodes ending in a parseable port count (`*` and other
+/// portless forms are skipped). Unparseable pids are skipped rather than
+/// guessed.
+fn parse_lsof_ports(raw: &str) -> Vec<ProcessPort> {
+    let mut ports = Vec::new();
+    let mut current_pid: Option<u32> = None;
+
+    for line in raw.lines() {
+        if let Some(pid) = line.strip_prefix('p') {
+            current_pid = pid.parse().ok();
+        } else if let Some(node) = line.strip_prefix('n') {
+            let Some(pid) = current_pid else {
+                continue;
+            };
+            let Some(port) = node.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()) else {
+                continue;
+            };
+            ports.push(ProcessPort { pid, port });
+        }
+    }
+
+    ports
+}
+
+/// Asks the platform which of these processes are listening on TCP.
+///
+/// One `lsof` invocation covers every pid. An empty answer is a real
+/// checked result — nothing is listening — so only a failure to run the
+/// tool at all is [`PortScan::Unavailable`], which is what Windows and
+/// lsof-less systems receive.
+fn scan_ports(pids: &[u32]) -> PortScan {
+    if pids.is_empty() {
+        return PortScan::Checked {
+            listening: Vec::new(),
+        };
+    }
+
+    let mut command = std::process::Command::new("lsof");
+    command.args(["-a", "-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"]);
+    for pid in pids {
+        command.arg("-p").arg(pid.to_string());
+    }
+
+    match command.output() {
+        Ok(output) => PortScan::Checked {
+            listening: parse_lsof_ports(&String::from_utf8_lossy(&output.stdout)),
+        },
+        Err(error) => PortScan::Unavailable {
+            reason: format!("Listening ports could not be inspected: {error}."),
+        },
+    }
+}
+
+/// The sorted, deduplicated ports one process is listening on.
+fn ports_for_pid(ports: &PortScan, pid: u32) -> Vec<u16> {
+    let PortScan::Checked { listening } = ports else {
+        return Vec::new();
+    };
+    let mut own: Vec<u16> = listening
+        .iter()
+        .filter(|entry| entry.pid == pid)
+        .map(|entry| entry.port)
+        .collect();
+    own.sort_unstable();
+    own.dedup();
+    own
+}
+
+/// Narrows a whole-read scan to one group's processes.
+fn group_ports(ports: &PortScan, group: &[RawProcess]) -> PortScan {
+    match ports {
+        PortScan::Checked { listening } => PortScan::Checked {
+            listening: listening
+                .iter()
+                .filter(|entry| group.iter().any(|process| process.pid == entry.pid))
+                .cloned()
+                .collect(),
+        },
+        PortScan::Unavailable { reason } => PortScan::Unavailable {
+            reason: reason.clone(),
+        },
+    }
+}
+
 /// Builds the whole read from a process snapshot and resolved roots.
+///
+/// The port scan is passed in rather than run here so the report assembly
+/// stays pure: tests inject a scan, production injects [`scan_ports`]'s
+/// answer for exactly the pids the groups selected.
 pub fn build_report(
     processes: &[RawProcess],
     paths: &PathEnv,
     self_pid: u32,
+    ports: PortScan,
     now_ms: u64,
 ) -> ProcessInsights {
     let mut groups = Vec::with_capacity(TRACKED_TOOLS.len() + 1);
@@ -456,8 +670,12 @@ pub fn build_report(
             .iter()
             .map(|process| process.memory_bytes)
             .sum(),
-        processes: app_processes.iter().map(summarize).collect(),
+        processes: app_processes
+            .iter()
+            .map(|process| summarize(process, &ports_for_pid(&ports, process.pid)))
+            .collect(),
         storage: agentgauge_storage(paths),
+        ports: group_ports(&ports, &app_processes),
     });
 
     for (executable, display_name) in TRACKED_TOOLS {
@@ -467,8 +685,12 @@ pub fn build_report(
             id: executable.to_owned(),
             display_name: display_name.to_owned(),
             total_memory_bytes: selected.iter().map(|process| process.memory_bytes).sum(),
-            processes: selected.iter().map(summarize).collect(),
+            processes: selected
+                .iter()
+                .map(|process| summarize(process, &ports_for_pid(&ports, process.pid)))
+                .collect(),
             storage: tool_storage(executable, paths),
+            ports: group_ports(&ports, &selected),
         });
     }
 
@@ -479,13 +701,14 @@ pub fn build_report(
 }
 
 /// One process summarized for the wire.
-fn summarize(process: &RawProcess) -> ProcessSummary {
+fn summarize(process: &RawProcess, listening_ports: &[u16]) -> ProcessSummary {
     ProcessSummary {
         pid: process.pid,
         name: process.name.clone(),
         command: display_command(&process.cmd),
         started_at: Some(process.started_at),
         memory_bytes: Some(process.memory_bytes),
+        listening_ports: listening_ports.to_vec(),
     }
 }
 
@@ -567,10 +790,26 @@ pub fn read_insights(app_data: Option<PathBuf>) -> ProcessInsights {
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
     let now = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
+    let self_pid = std::process::id();
+
+    let processes = snapshot_processes();
+    // Only the pids the groups will actually show are scanned: one `lsof`
+    // call for the tool processes and the app's own tree, never the whole
+    // table.
+    let mut scan_pids: Vec<u32> = select_agentgauge(&processes, self_pid)
+        .iter()
+        .map(|process| process.pid)
+        .collect();
+    for (executable, _) in TRACKED_TOOLS {
+        scan_pids.extend(select_tool(&processes, executable).iter().map(|p| p.pid));
+    }
+    let ports = scan_ports(&scan_pids);
+
     build_report(
-        &snapshot_processes(),
+        &processes,
         &resolve_paths(home, app_data),
-        std::process::id(),
+        self_pid,
+        ports,
         now.max(0) as u64,
     )
 }
@@ -792,7 +1031,18 @@ mod tests {
         fs::write(root.join("sessions").join("rollout.jsonl"), vec![0u8; 90])
             .expect("writes rollout");
 
-        let report = measure_storage(&root, &[("Sessions", "sessions")]);
+        let report = measure_storage(
+            &root,
+            &[
+                Component::Directory {
+                    label: "Sessions",
+                    name: "sessions",
+                },
+                Component::SqliteFiles {
+                    label: "Databases (SQLite)",
+                },
+            ],
+        );
         let StorageReport::Measured {
             total_bytes,
             total_files,
@@ -803,18 +1053,69 @@ mod tests {
         };
         assert_eq!(total_bytes, 100);
         assert_eq!(total_files, 2);
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].label, "Sessions");
         assert_eq!(rows[0].bytes, 90);
-        assert_eq!(rows[1].label, "Everything else");
+        assert_eq!(rows[1].label, "Databases (SQLite)");
         assert_eq!(rows[1].bytes, 10);
+        assert_eq!(rows[1].path, "state.sqlite");
+        assert_eq!(rows[2].label, "Everything else");
+        assert_eq!(rows[2].bytes, 0);
+    }
+
+    #[test]
+    fn a_database_row_counts_wal_and_shm_siblings_but_not_lookalikes() {
+        let root = temp_root("sqlite-siblings");
+        fs::write(root.join("opencode.db"), vec![0u8; 100]).expect("writes db");
+        fs::write(root.join("opencode.db-wal"), vec![0u8; 20]).expect("writes wal");
+        fs::write(root.join("opencode.db-shm"), vec![0u8; 5]).expect("writes shm");
+        fs::write(root.join("state_5.sqlite"), vec![0u8; 7]).expect("writes state");
+        fs::write(root.join("not-a-db.sqlitebackup"), vec![0u8; 1000]).expect("writes lookalike");
+
+        let report = measure_storage(
+            &root,
+            &[Component::SqliteFiles {
+                label: "Databases (SQLite)",
+            }],
+        );
+        let StorageReport::Measured { rows, .. } = report else {
+            panic!("expected a measured report");
+        };
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].bytes, 132);
+        assert_eq!(rows[0].file_count, 4);
+        assert!(rows[0].path.contains("opencode.db"));
+        assert!(rows[0].path.contains("state_5.sqlite"));
+        assert!(!rows[0].path.contains("sqlitebackup"));
+        assert_eq!(rows[1].label, "Everything else");
+        assert_eq!(rows[1].bytes, 1000);
+    }
+
+    #[test]
+    fn a_database_row_is_omitted_when_the_tool_stores_none() {
+        let root = temp_root("sqlite-none");
+        fs::write(root.join("history.jsonl"), vec![0u8; 5]).expect("writes history");
+        let report = measure_storage(
+            &root,
+            &[Component::SqliteFiles {
+                label: "Databases (SQLite)",
+            }],
+        );
+        let StorageReport::Measured { rows, .. } = report else {
+            panic!("expected a measured report");
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "Everything else");
     }
 
     #[test]
     fn an_absent_root_is_reported_absent_with_a_reason() {
         let report = measure_storage(
             &std::env::temp_dir().join("agentgauge-never-exists"),
-            &[("Sessions", "sessions")],
+            &[Component::Directory {
+                label: "Sessions",
+                name: "sessions",
+            }],
         );
         assert!(matches!(report, StorageReport::Absent { .. }));
     }
@@ -860,7 +1161,13 @@ mod tests {
     fn a_missing_component_is_omitted_rather_than_listed_as_zero() {
         let root = temp_root("partial");
         fs::write(root.join("history.jsonl"), vec![0u8; 5]).expect("writes history");
-        let report = measure_storage(&root, &[("Sessions", "sessions")]);
+        let report = measure_storage(
+            &root,
+            &[Component::Directory {
+                label: "Sessions",
+                name: "sessions",
+            }],
+        );
         let StorageReport::Measured { rows, .. } = report else {
             panic!("expected a measured report");
         };
@@ -883,6 +1190,9 @@ mod tests {
                 opencode_data: None,
             },
             10,
+            PortScan::Checked {
+                listening: Vec::new(),
+            },
             1_700_000_000_000,
         );
         let ids: Vec<&str> = insights.groups.iter().map(|g| g.id.as_str()).collect();
@@ -902,6 +1212,9 @@ mod tests {
                 opencode_data: None,
             },
             10,
+            PortScan::Checked {
+                listening: Vec::new(),
+            },
             0,
         );
         let codex = insights
@@ -933,6 +1246,9 @@ mod tests {
                 opencode_data: None,
             },
             10,
+            PortScan::Checked {
+                listening: Vec::new(),
+            },
             0,
         );
         assert_eq!(insights.groups[0].total_memory_bytes, 400);
@@ -955,10 +1271,29 @@ mod tests {
             command: Some("codex app-server".into()),
             started_at: Some(1_700_000_000),
             memory_bytes: Some(2048),
+            listening_ports: Vec::new(),
         };
         let value = serde_json::to_value(&summary).expect("serializes");
         assert_eq!(value["startedAt"], 1_700_000_000);
         assert_eq!(value["memoryBytes"], 2048);
+
+        let checked = serde_json::to_value(PortScan::Checked {
+            listening: vec![ProcessPort {
+                pid: 12966,
+                port: 49374,
+            }],
+        })
+        .expect("serializes");
+        assert_eq!(checked["state"], "checked");
+        assert_eq!(checked["listening"][0]["pid"], 12966);
+        assert_eq!(checked["listening"][0]["port"], 49374);
+
+        let unavailable = serde_json::to_value(PortScan::Unavailable {
+            reason: "lsof was not found.".into(),
+        })
+        .expect("serializes");
+        assert_eq!(unavailable["state"], "unavailable");
+        assert_eq!(unavailable["reason"], "lsof was not found.");
 
         let absent = serde_json::to_value(StorageReport::Absent {
             reason: "Not created yet.".into(),
@@ -975,6 +1310,88 @@ mod tests {
         .expect("serializes");
         assert_eq!(measured["state"], "measured");
         assert_eq!(measured["totalBytes"], 10);
+    }
+
+    // --- listening ports -------------------------------------------------
+
+    #[test]
+    fn lsof_field_output_parses_into_pid_port_pairs() {
+        let raw = "p12966\ncopencode\nf7\nn127.0.0.1:49374\np12964\ncopencode\nf12\nn[::1]:4096\n";
+        assert_eq!(
+            parse_lsof_ports(raw),
+            vec![
+                ProcessPort {
+                    pid: 12966,
+                    port: 49374
+                },
+                ProcessPort {
+                    pid: 12964,
+                    port: 4096
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn an_empty_lsof_answer_is_a_checked_scan_with_nothing_listening() {
+        assert_eq!(parse_lsof_ports(""), Vec::new());
+        assert_eq!(parse_lsof_ports("p11621\ncodex\n"), Vec::new());
+    }
+
+    #[test]
+    fn a_portless_node_line_is_skipped_rather_than_guessed() {
+        assert_eq!(parse_lsof_ports("p12966\nn*\n"), Vec::new());
+    }
+
+    #[test]
+    fn a_process_summary_carries_its_own_sorted_listening_ports() {
+        let me = RawProcess {
+            cmd: vec!["opencode".into(), "serve".into()],
+            ..process(12966, "opencode", Some("/opt/homebrew/bin/opencode"))
+        };
+        let insights = build_report(
+            &[me],
+            &PathEnv::default(),
+            12966,
+            PortScan::Checked {
+                listening: vec![
+                    ProcessPort {
+                        pid: 12966,
+                        port: 49375,
+                    },
+                    ProcessPort {
+                        pid: 12966,
+                        port: 49374,
+                    },
+                ],
+            },
+            0,
+        );
+        let summary = &insights.groups[0].processes[0];
+        assert_eq!(summary.listening_ports, [49374, 49375]);
+        match &insights.groups[0].ports {
+            PortScan::Checked { listening } => assert_eq!(listening.len(), 2),
+            PortScan::Unavailable { .. } => panic!("expected a checked scan"),
+        }
+    }
+
+    #[test]
+    fn a_port_scan_unavailability_is_carried_through_to_the_group() {
+        let me = process(10, "agentgauge", None);
+        let insights = build_report(
+            &[me],
+            &PathEnv::default(),
+            10,
+            PortScan::Unavailable {
+                reason: "lsof was not found.".into(),
+            },
+            0,
+        );
+        match &insights.groups[0].ports {
+            PortScan::Checked { .. } => panic!("expected an unavailable scan"),
+            PortScan::Unavailable { reason } => assert!(reason.contains("lsof")),
+        }
+        assert!(insights.groups[0].processes[0].listening_ports.is_empty());
     }
 
     #[test]
