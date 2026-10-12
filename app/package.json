@@ -22,7 +22,7 @@
     "widget:build": "./src-tauri/widget/build-widget.sh build",
     "widget:embed": "./src-tauri/widget/build-widget.sh embed",
     "widget:dev": "bun scripts/widget-dev.ts",
-    "build:mac": "tauri build --bundles app && ./src-tauri/widget/build-widget.sh all"
+    "build:mac": "tauri build --bundles app && ./src-tauri/widget/build-widget.sh all ./src-tauri/target/release/bundle/macos/AgentGauge.app"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0-beta.107",

@@ -9,8 +9,9 @@
 The desktop app is displayed as **AgentGauge**. Its Rust process is named
 `agentgauge`; the background poller currently runs inside the app process and
 is not a separately installed system daemon. The app identifier is
-`com.soumitrasaha.agentgauge`, and the widget snapshot directory remains
-stable for saved-state compatibility.
+`com.soumitrasaha.agentgauge`, and shared widget/kickoff data lives in
+`~/Library/Application Support/AgentGauge/`. Existing files are migrated from
+the previous product directory on first use.
 
 AgentGauge uses local harness interfaces such as app-server, CLI, ACP, SDK, or RPC for status and connected-plan discovery. For OpenCode-connected coding plans, it also calls documented provider coding-plan endpoints using credentials retrieved from OpenCode's local store. It does not perform sign-in or manage provider credentials.
 
@@ -43,10 +44,10 @@ See the [Product Requirements Document](docs/PRD.md) for the full scope, capabil
 - The app displays the reported five-hour and weekly windows and freshness/status information.
 - The app observes changes in the reported `resetsAt` value as the rollover signal.
 - Usage tabs cover every connected coding plan: Codex plus the OpenCode-connected Z.AI, MiniMax, and Kimi plans (Z.AI live-verified; MiniMax/Kimi decode from vendor-documented endpoints and degrade to explicit unavailable).
-- **Scheduled kickoff (opt-in, macOS):** per connection, the user can choose a harness-exposed model that also appears in the bundled price list, then choose an effort while stopped. The initial model is the lowest-ranked listed price; enabling resets effort to that model's lowest supported level and locks configuration until stopped. Price ranking is not a subscription-quota estimate and does not guarantee plan access. A scheduled "Hi" follows the latest reported reset without verifying rollover; it spends quota and cannot start or reset a window. A `launchd` LaunchAgent runs the same binary headless once a minute while the app is closed; the schedule file lives beside the widget snapshot in `~/Library/Application Support/AI Sub Stats/`.
+- **Scheduled kickoff (opt-in, macOS):** per connection, the user can choose a harness-exposed model that also appears in the bundled price list, then choose an effort while stopped. The initial model is the lowest-ranked listed price; enabling resets effort to that model's lowest supported level and locks configuration until stopped. Price ranking is not a subscription-quota estimate and does not guarantee plan access. A scheduled "Hi" follows the latest reported reset without verifying rollover; it spends quota and cannot start or reset a window. A `launchd` LaunchAgent runs the same binary headless once a minute while the app is closed; the schedule file lives beside the widget snapshot in `~/Library/Application Support/AgentGauge/`.
 - A manually initiated `sendPing` capability exists and consumes quota.
 - A read-only **Processes** screen shows the running processes, memory, and listening TCP ports of Codex and OpenCode, plus each one's on-disk data footprint with a breakdown — Codex's session transcripts, archived transcripts, and SQLite databases (`state_5`, `thread_history`, goals, logs, memories, queue), OpenCode's session storage, logs, and `opencode.db`. Ports are shown when the platform can report them (macOS/Linux via `lsof`); a stdio server such as `codex app-server` is reported as listening on nothing, which is the true answer, and platforms without an inspector say so. Groups with nothing running and unreadable or not-yet-created data directories say so instead of showing a zero. The screen cannot stop, signal, or delete anything — the capability has no write.
-- The macOS WidgetKit extension displays usage snapshots. The user adds it from the macOS widget gallery; the app cannot install it or check whether it was placed.
+- The macOS WidgetKit extension shows the selected provider's 5-hour and weekly quotas, with arrows to switch among providers that have a reading. The user adds it from the macOS widget gallery; WidgetCenter can report whether an AgentGauge widget is configured, but the app cannot install it or determine its placement location.
 
 The widget requires **macOS 14+ and Xcode 16+**. Build the macOS app and embed the extension with `bun run build:mac` from `app/`. See [`app/src-tauri/widget/README.md`](app/src-tauri/widget/README.md) before changing the extension or its build process.
 

@@ -1,59 +1,146 @@
 import Foundation
 
-/// The shared snapshot the host app writes and the widget reads.
-///
-/// This mirrors the JSON the Rust side emits in
-/// `modules/widget/mod.rs`. Both sides are hand-maintained, so `snapshotVersion`
-/// exists to fail loudly when one changes without the other: the widget refuses
-/// to render a snapshot whose version it does not understand rather than showing
-/// numbers that may no longer mean what they claim.
-struct Snapshot: Decodable {
-    /// Bumped whenever the wire shape changes. See `Snapshot.supportedVersion`.
-    static let supportedVersion = 1
+struct Snapshot: Codable {
+    static let supportedVersion = 2
 
     let version: Int
-    /// Unix seconds, written by the host app at read time.
+    let providers: [Provider]
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case providers
+    }
+
+    init(version: Int, providers: [Provider]) {
+        self.version = version
+        self.providers = providers
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try container.decode(Int.self, forKey: .version)
+        if version == Self.supportedVersion {
+            self.version = version
+            providers = try container.decode([Provider].self, forKey: .providers)
+            return
+        }
+        guard version == 1 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .version,
+                in: container,
+                debugDescription: "Unsupported widget snapshot version"
+            )
+        }
+
+        let previous = try LegacySnapshot(from: decoder)
+        var fiveHour: Provider.Quota?
+        var weekly: Provider.Quota?
+        for window in previous.windows {
+            let quota = Provider.Quota(
+                remainingPercent: window.remainingPercent,
+                resetsAt: window.resetsAt
+            )
+            switch window.kind {
+            case .fiveHour: fiveHour = quota
+            case .weekly: weekly = quota
+            case .other: break
+            }
+        }
+        self.version = Self.supportedVersion
+        providers = [
+            Provider(
+                provider: .codex,
+                displayName: "Codex",
+                generatedAt: previous.generatedAt,
+                plan: previous.plan,
+                freshness: previous.freshness,
+                reason: previous.reason,
+                fiveHour: fiveHour,
+                weekly: weekly
+            ),
+        ]
+    }
+
+    struct Provider: Codable, Identifiable {
+        let provider: ProviderKind
+        let displayName: String
+        let generatedAt: Double
+        let plan: String?
+        let freshness: String
+        let reason: String?
+        let fiveHour: Quota?
+        let weekly: Quota?
+
+        var id: ProviderKind { provider }
+        var isUnavailable: Bool { freshness == "unavailable" }
+
+        struct Quota: Codable {
+            let remainingPercent: Int
+            let resetsAt: Double?
+        }
+    }
+
+    enum ProviderKind: String, Codable, CaseIterable, Identifiable {
+        case codex
+        case zai
+        case minimax
+        case kimi
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .codex: "Codex"
+            case .zai: "Z.AI"
+            case .minimax: "MiniMax"
+            case .kimi: "Kimi"
+            }
+        }
+
+        var monogram: String {
+            switch self {
+            case .codex: "C"
+            case .zai: "Z"
+            case .minimax: "M"
+            case .kimi: "K"
+            }
+        }
+    }
+
+    var isUsable: Bool { version == Self.supportedVersion }
+
+    static func placeholder(now: Date = Date()) -> Self {
+        let provider = Provider(
+            provider: .codex,
+            displayName: "Codex",
+            generatedAt: now.timeIntervalSince1970,
+            plan: nil,
+            freshness: "unavailable",
+            reason: "Open AgentGauge to read usage.",
+            fiveHour: nil,
+            weekly: nil
+        )
+        return Self(version: supportedVersion, providers: [provider])
+    }
+}
+
+private struct LegacySnapshot: Decodable {
+    let version: Int
     let generatedAt: Double
     let plan: String?
-    /// One of `live`, `cached`, `stale`, `unavailable`.
     let freshness: String
-    /// Why the reading is unavailable. Present only when `freshness` is
-    /// `unavailable`.
     let reason: String?
-    let windows: [Window]
+    let windows: [LegacyWindow]
+}
 
-    struct Window: Decodable {
-        /// Which window this is, stated explicitly by the host app.
-        ///
-        /// Not inferred from `label`: the app's labels are short and
-        /// provider-derived (`"5h"`, `"weekly"`), and matching on that text
-        /// would let a cosmetic rename silently swap a 5-hour countdown for a
-        /// weekly one.
-        let kind: Kind
-        let label: String
-        /// Already expressed as *remaining*, matching the app's progress bars.
-        /// The widget renders this number directly so it cannot be inverted.
-        let remainingPercent: Int
-        /// Unix seconds, or `nil` when the provider gave no reset time.
-        let resetsAt: Double?
-    }
+private struct LegacyWindow: Decodable {
+    let kind: Kind
+    let remainingPercent: Int
+    let resetsAt: Double?
 
     enum Kind: String, Decodable {
         case fiveHour
         case weekly
         case other
     }
-
-    var isUsable: Bool { version == Self.supportedVersion }
-
-    var isUnavailable: Bool { freshness == "unavailable" }
-
-    var fiveHour: Window? { windows.first { $0.kind == .fiveHour } }
-
-    var weekly: Window? { windows.first { $0.kind == .weekly } }
-
-    /// Windows the host app reported but did not name. Rendered after the two
-    /// known ones rather than dropped, so a provider that adds a window does not
-    /// make it invisible.
-    var other: [Window] { windows.filter { $0.kind == .other } }
 }

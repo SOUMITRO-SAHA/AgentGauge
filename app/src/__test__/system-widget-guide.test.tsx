@@ -30,6 +30,7 @@ it("reserves the widget guidance shape while system support is checked", async (
               extensionBundled: true,
               extensionPresent: true,
               snapshotWritten: true,
+              configured: null,
               menuBarAvailable: true,
               setup: [
                 { title: "Open the gallery", detail: "Choose AgentGauge." },

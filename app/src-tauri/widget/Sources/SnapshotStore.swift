@@ -1,50 +1,156 @@
+import Darwin
 import Foundation
+import os
 
-/// Reads the snapshot the host app writes.
-///
-/// The file lives in the user's `Application Support` directory rather than in
-/// an App Group container. Both processes run as the same user, and both are
-/// unsigned by App Sandbox (see `AIStatsWidget.entitlements`), so a plain path
-/// works without the developer-portal App Group registration that a sandboxed
-/// build would require.
 enum SnapshotStore {
-    /// Must match `SNAPSHOT_RELATIVE_PATH` in `modules/widget/mod.rs` in the
-    /// Rust backend.
-    static let relativePath = "Library/Application Support/AI Sub Stats/widget-snapshot.json"
+#if DEBUG
+    static let relativePath = "Library/Application Support/AgentGauge/widget-snapshot-dev.json"
+    private static let previousRelativePath = "Library/Application Support/AI Sub Stats/widget-snapshot-dev.json"
+#else
+    static let relativePath = "Library/Application Support/AgentGauge/widget-snapshot.json"
+    private static let previousRelativePath = "Library/Application Support/AI Sub Stats/widget-snapshot.json"
+#endif
+
+    fileprivate static let logger = Logger(
+        subsystem: "com.soumitrasaha.agentgauge.widget",
+        category: "snapshot"
+    )
+
+    private static var accountHomeDirectoryURL: URL {
+        guard let account = getpwuid(getuid()), let directory = account.pointee.pw_dir else {
+            logger.error("Could not resolve the account home directory for widget storage.")
+            return FileManager.default.homeDirectoryForCurrentUser
+        }
+        return URL(fileURLWithPath: String(cString: directory), isDirectory: true)
+    }
+
+    static var directoryURL: URL {
+        accountHomeDirectoryURL
+            .appendingPathComponent(relativePath)
+            .deletingLastPathComponent()
+    }
 
     static var fileURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(relativePath)
+        directoryURL.appendingPathComponent(URL(fileURLWithPath: relativePath).lastPathComponent)
     }
 
-    /// Reads the snapshot, or `nil` when it is absent, unreadable, or written
-    /// by a version this widget does not understand.
-    ///
-    /// Returning `nil` for all three cases is deliberate: the widget renders a
-    /// single "no reading yet" state rather than guessing at partial data.
+    static var previousDirectoryURL: URL {
+        accountHomeDirectoryURL
+            .appendingPathComponent(previousRelativePath)
+            .deletingLastPathComponent()
+    }
+
     static func read() -> Snapshot? {
-        guard let data = try? Data(contentsOf: fileURL) else { return nil }
-        guard let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) else {
+        if let snapshot = decode(fileURL) {
+            return snapshot
+        }
+        guard !FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        let previousURL = previousDirectoryURL.appendingPathComponent(
+            URL(fileURLWithPath: previousRelativePath).lastPathComponent
+        )
+        guard let snapshot = decode(previousURL) else { return nil }
+        persistMigration(snapshot)
+        return snapshot
+    }
+
+    private static func decode(_ url: URL) -> Snapshot? {
+        guard let data = try? Data(contentsOf: url),
+              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data),
+              snapshot.isUsable else {
             return nil
         }
-        return snapshot.isUsable ? snapshot : nil
+        return snapshot
     }
 
-    /// A placeholder shown in the widget gallery, before any real data exists.
-    ///
-    /// It carries plausible numbers on purpose — the gallery has no access to the
-    /// host app — but it is only ever used as a redacted stand-in, never as a
-    /// real reading.
-    static func placeholder() -> Snapshot {
-        Snapshot(
-            version: Snapshot.supportedVersion,
-            generatedAt: 0,
-            plan: "Team",
-            freshness: "live",
-            reason: nil,
-            windows: [
-                .init(kind: .fiveHour, label: "5h", remainingPercent: 88, resetsAt: nil),
-                .init(kind: .weekly, label: "weekly", remainingPercent: 46, resetsAt: nil),
-            ]
+    private static func persistMigration(_ snapshot: Snapshot) {
+        do {
+            let data = try JSONEncoder().encode(snapshot)
+            copyForward(data, to: fileURL)
+        } catch {
+            logger.error("Could not migrate the previous widget snapshot to AgentGauge storage.")
+        }
+    }
+
+    static func copyForward(_ data: Data, to destination: URL) {
+        let directory = destination.deletingLastPathComponent()
+        let temporaryURL = directory.appendingPathComponent(
+            ".\(destination.lastPathComponent)-\(UUID().uuidString).migration"
         )
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            defer { try? FileManager.default.removeItem(at: temporaryURL) }
+            try data.write(to: temporaryURL, options: .atomic)
+            try FileManager.default.linkItem(at: temporaryURL, to: destination)
+        } catch {
+            if !FileManager.default.fileExists(atPath: destination.path) {
+                logger.error("Could not migrate previous data to AgentGauge storage.")
+            }
+        }
+    }
+}
+
+enum ProviderSelectionStore {
+#if DEBUG
+    private static let fileName = "widget-provider-selection-dev.txt"
+#else
+    private static let fileName = "widget-provider-selection.txt"
+#endif
+
+    private static var fileURL: URL {
+        SnapshotStore.directoryURL.appendingPathComponent(fileName)
+    }
+
+    static func selectedProvider(in snapshot: Snapshot) -> Snapshot.Provider? {
+        let selected = storedSelection()
+        return snapshot.providers.first { $0.provider.rawValue == selected }
+            ?? snapshot.providers.first
+    }
+
+    private static func storedSelection() -> String? {
+        if let current = try? String(contentsOf: fileURL, encoding: .utf8) {
+            return current.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard let previous = try? Data(contentsOf: previousFileURL),
+              let selected = String(data: previous, encoding: .utf8) else {
+            return nil
+        }
+        SnapshotStore.copyForward(previous, to: fileURL)
+        return selected.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static var previousFileURL: URL {
+        SnapshotStore.previousDirectoryURL.appendingPathComponent(fileName)
+    }
+
+    static func advance(by offset: Int) throws {
+        guard let snapshot = SnapshotStore.read(), !snapshot.providers.isEmpty else {
+            throw ProviderSelectionError.noReading
+        }
+        let current = selectedProvider(in: snapshot) ?? snapshot.providers[0]
+        let currentIndex = snapshot.providers.firstIndex { $0.provider == current.provider } ?? 0
+        guard let nextIndex = ProviderCycler.nextIndex(
+            currentIndex: currentIndex,
+            offset: offset,
+            count: snapshot.providers.count
+        ) else {
+            return
+        }
+        try FileManager.default.createDirectory(
+            at: SnapshotStore.directoryURL,
+            withIntermediateDirectories: true
+        )
+        try Data(snapshot.providers[nextIndex].provider.rawValue.utf8)
+            .write(to: fileURL, options: .atomic)
+    }
+}
+
+enum ProviderSelectionError: Error, LocalizedError {
+    case noReading
+
+    var errorDescription: String? {
+        "No provider reading is available to switch to."
     }
 }

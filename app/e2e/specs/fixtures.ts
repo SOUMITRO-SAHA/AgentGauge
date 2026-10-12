@@ -645,6 +645,7 @@ export interface DispatchFixtures {
    */
   readonly widgetEmbedded: boolean;
   readonly widgetSupported: boolean;
+  readonly widgetConfigured?: boolean;
   readonly automationRunning: boolean;
   /**
    * Per-sub running overrides for the automation monitors, layered over
@@ -1040,6 +1041,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               extensionBundled: true,
               extensionPresent: data.widgetEmbedded,
               snapshotWritten: data.widgetEmbedded,
+              configured: data.widgetConfigured ?? true,
               menuBarAvailable: data.widgetSupported,
               reason: data.widgetSupported
                 ? null
@@ -1463,7 +1465,9 @@ export async function onboardingVisible(): Promise<void> {
 }
 
 /** Onboarding dismissed, dashboard showing live data. */
-export async function dashboardLive(): Promise<void> {
+export async function dashboardLive(options: {
+  readonly widgetConfigured?: boolean;
+} = {}): Promise<void> {
   await boot({
     visible: false,
     usage: liveSnapshot(),
@@ -1471,6 +1475,7 @@ export async function dashboardLive(): Promise<void> {
     version: "codex-cli 0.159.0",
     widgetEmbedded: true,
     widgetSupported: true,
+    widgetConfigured: options.widgetConfigured ?? true,
     automationRunning: true,
     codexLocalUsage: codexLocalUsage(),
   });

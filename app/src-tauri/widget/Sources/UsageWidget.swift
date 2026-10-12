@@ -1,35 +1,21 @@
-import AppKit
 import SwiftUI
 import WidgetKit
 
-/// The widget itself.
-///
-/// ## Families
-///
-/// Only the `system*` families are used. The `accessory*` families
-/// (`accessoryCircular`, `accessoryRectangular`, `accessoryInline`) are marked
-/// `@available(macOS, unavailable)` in the macOS SDK — they exist for iOS Lock
-/// Screen and watchOS, not for the Mac. Verified against
-/// `WidgetKit.swiftmodule/arm64e-apple-macos.swiftinterface` in the macOS 27
-/// SDK.
-///
-/// So on macOS the choices are:
-/// - `.systemSmall` / `.systemMedium` — desktop and Notification Center
-/// - `.systemLarge` — desktop, when the user wants room for both windows in full
-///
-/// A menu-bar *Control* (`ControlWidgetButton`, macOS 26+) would be the way to
-/// sit in the menu bar, but a Control is an action surface rather than a passive
-/// readout, so it is deliberately not used here.
-///
-/// Every family shows the 5-hour window and the weekly limit. A widget that hid
-/// one of them at small sizes would be worse than one that is merely denser.
+#if DEBUG
+private let widgetKind = "AIStatsUsageWidgetDev"
+private let widgetDisplayName = "AgentGauge Dev"
+#else
+private let widgetKind = "AIStatsUsageWidget"
+private let widgetDisplayName = "AgentGauge"
+#endif
+
 struct UsageWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "AIStatsUsageWidget", provider: UsageTimelineProvider()) { entry in
+        StaticConfiguration(kind: widgetKind, provider: UsageTimelineProvider()) { entry in
             UsageWidgetView(entry: entry)
         }
-        .configurationDisplayName("AgentGauge")
-        .description("Your Codex 5-hour window and weekly limit.")
+        .configurationDisplayName(widgetDisplayName)
+        .description("Switch providers and check 5-hour and weekly quota.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
@@ -38,260 +24,220 @@ struct UsageWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let entry: UsageEntry
 
+    private var canSwitchProvider: Bool {
+        (entry.snapshot?.providers.count ?? 0) > 1
+    }
+
     var body: some View {
-        content
-            // Required from macOS 14 onward. Without it the widget renders as a
-            // bare, transparent rectangle.
-            .containerBackground(for: .widget) {
-                Color(nsColor: .windowBackgroundColor)
-            }
-            .widgetURL(URL(string: "agentgauge://usage"))
+        VStack(alignment: .leading, spacing: family == .systemSmall ? 8 : 10) {
+            header
+            quotaRow("5-hour", quota: entry.provider?.fiveHour)
+            quotaRow("Weekly", quota: entry.provider?.weekly)
+        }
+        .containerBackground(for: .widget) {
+            Color(nsColor: .windowBackgroundColor)
+        }
+        .widgetURL(URL(string: "agentgauge://usage"))
     }
 
-    @ViewBuilder
-    private var content: some View {
-        if let snapshot = entry.snapshot {
-            switch family {
-            case .systemSmall:
-                smallBody(snapshot)
-            case .systemLarge:
-                largeBody(snapshot)
-            default:
-                mediumBody(snapshot)
+    private var header: some View {
+        HStack(spacing: 7) {
+            if let provider = entry.provider {
+                ZStack(alignment: .bottomTrailing) {
+                    Text(provider.provider.monogram)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 22, height: 22)
+                        .background(Color.accentColor.opacity(0.12), in: Circle())
+                    Circle()
+                        .fill(freshnessColor(provider.freshness))
+                        .frame(width: 6, height: 6)
+                        .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1))
+                }
+                .accessibilityLabel(
+                    "\(provider.displayName), \(provider.freshness), updated \(ageLabel(provider.generatedAt))"
+                )
+                Text(provider.displayName)
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            } else {
+                Image(systemName: "gauge.with.dots.needle.67percent")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text("AgentGauge")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .lineLimit(1)
             }
-        } else {
-            missingBody
+
+            Spacer(minLength: 2)
+
+            HStack(spacing: 3) {
+                switchButton("chevron.left", offset: -1, label: "Previous provider")
+                switchButton("chevron.right", offset: 1, label: "Next provider")
+            }
         }
     }
 
-    // MARK: - Families
-
-    /// The smallest desktop size. Both windows, stacked tightly.
-    private func smallBody(_ snapshot: Snapshot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            header(snapshot)
-            if let fiveHour = snapshot.fiveHour {
-                compactRow(fiveHour, title: "5-hour")
-            }
-            if let weekly = snapshot.weekly {
-                compactRow(weekly, title: "Weekly")
-            }
-            ForEach(snapshot.other, id: \.label) { window in
-                compactRow(window, title: window.label)
-            }
-            missingWindowsNotice(snapshot)
-        }
-    }
-
-    /// The default desktop size. Room for a reset countdown per window.
-    private func mediumBody(_ snapshot: Snapshot) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header(snapshot)
-            if let fiveHour = snapshot.fiveHour {
-                detailedRow(fiveHour, "5-hour window")
-            }
-            if let weekly = snapshot.weekly {
-                detailedRow(weekly, "Weekly limit")
-            }
-            ForEach(snapshot.other, id: \.label) { window in
-                detailedRow(window, window.label)
-            }
-            missingWindowsNotice(snapshot)
-        }
-    }
-
-    /// The large desktop size: the same two windows, given more room.
-    private func largeBody(_ snapshot: Snapshot) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header(snapshot)
-            if let fiveHour = snapshot.fiveHour {
-                detailedRow(fiveHour, "5-hour window")
-            }
-            if let weekly = snapshot.weekly {
-                detailedRow(weekly, "Weekly limit")
-            }
-            ForEach(snapshot.other, id: \.label) { window in
-                detailedRow(window, window.label)
-            }
-            missingWindowsNotice(snapshot)
-            Spacer(minLength: 0)
-            footer(snapshot)
-        }
-    }
-
-    // MARK: - Pieces
-
-    private func header(_ snapshot: Snapshot) -> some View {
-        HStack(spacing: 5) {
-            Text("Codex")
-                .font(.caption2)
-                .fontWeight(.semibold)
+    private func switchButton(_ symbol: String, offset: Int, label: String) -> some View {
+        Button(intent: SwitchProviderIntent(offset: offset)) {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.secondary)
-            if let plan = snapshot.plan {
-                Text(plan)
-                    .font(.caption2)
+                .frame(width: 23, height: 23)
+                .background(Color.primary.opacity(0.06), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSwitchProvider)
+        .accessibilityLabel(label)
+    }
+
+    private func quotaRow(_ title: String, quota: Snapshot.Provider.Quota?) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title.uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                if let quota {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text("\(quota.remainingPercent)%")
+                            .font(.system(.title3, design: .rounded, weight: .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(quotaColor(quota.remainingPercent))
+                        Text("left")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("—")
+                        .font(.system(.title3, design: .rounded, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            quotaBar(quota)
+
+            HStack(spacing: 4) {
+                Image(systemName: quota == nil ? "minus.circle" : "arrow.clockwise")
+                    .font(.system(size: 8, weight: .medium))
+                Text(resetDescription(quota))
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .lineLimit(1)
                     .foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 0)
-            freshnessDot(snapshot)
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, family == .systemSmall ? 7 : 9)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
-    /// Only rendered at large size, where there is room without crowding.
-    private func footer(_ snapshot: Snapshot) -> some View {
-        HStack(spacing: 4) {
-            Text(snapshot.isUnavailable ? "Unavailable" : freshnessLabel(snapshot))
-            Text("·")
-            Text("updated \(Self.ageLabel(snapshot.generatedAt, now: entry.date))")
-        }
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-    }
-
-    /// Shown only when the reading exists but carried no windows at all, so the
-    /// widget says why rather than showing an empty frame.
-    @ViewBuilder
-    private func missingWindowsNotice(_ snapshot: Snapshot) -> some View {
-        if snapshot.fiveHour == nil && snapshot.weekly == nil {
-            Text(unavailableLabel(snapshot))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    /// Label and inline bar, with no countdown. Used at the small size.
-    private func compactRow(_ window: Snapshot.Window, title: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Text(title)
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-                Spacer(minLength: 2)
-                Text("\(window.remainingPercent)%")
-                    .font(.caption2)
-                    .monospacedDigit()
-                    .foregroundStyle(tone(window.remainingPercent).color)
-            }
-            bar(window.remainingPercent)
-        }
-    }
-
-    private func detailedRow(_ window: Snapshot.Window, _ title: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                Spacer(minLength: 4)
-                Text("\(window.remainingPercent)% left")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(tone(window.remainingPercent).color)
-            }
-            bar(window.remainingPercent)
-            Text(countdown(window.resetsAt))
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func bar(_ percent: Int) -> some View {
-        // The incoming percentage is clamped before it reaches the width. A
-        // provider reporting 101 or -3 must not push the row outside the widget
-        // or ask for a negative-length capsule.
-        let clamped = min(100, max(0, percent))
-        return GeometryReader { geometry in
+    private func quotaBar(_ quota: Snapshot.Provider.Quota?) -> some View {
+        GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
-                Capsule()
-                    .fill(tone(percent).color)
-                    .frame(width: geometry.size.width * CGFloat(clamped) / 100)
+                Capsule().fill(Color.primary.opacity(0.08))
+                if let quota {
+                    Capsule()
+                        .fill(quotaColor(quota.remainingPercent))
+                        .frame(width: geometry.size.width * CGFloat(min(100, max(0, quota.remainingPercent))) / 100)
+                }
             }
         }
         .frame(height: 5)
+        .accessibilityHidden(true)
     }
 
-    private func freshnessDot(_ snapshot: Snapshot) -> some View {
-        Circle()
-            .fill(snapshot.isUnavailable ? Color.orange : Color.green)
-            .frame(width: 5, height: 5)
-            .accessibilityLabel(snapshot.isUnavailable ? "Unavailable" : freshnessLabel(snapshot))
+    private func resetDescription(_ quota: Snapshot.Provider.Quota?) -> String {
+        guard let quota else {
+            return entry.provider?.isUnavailable == true ? "Usage unavailable" : "No reading yet"
+        }
+        guard let resetsAt = quota.resetsAt else { return "Reset time unavailable" }
+
+        let seconds = resetsAt - entry.date.timeIntervalSince1970
+        guard seconds > 0 else { return "Resets now" }
+
+        let minutes = Int(seconds / 60)
+        let days = minutes / 1440
+        let hours = (minutes % 1440) / 60
+        let remainder = minutes % 60
+        if days > 0 { return "Resets in \(days)d \(hours)h" }
+        if hours > 0 { return "Resets in \(hours)h \(remainder)m" }
+        return "Resets in \(remainder)m"
     }
 
-    private var missingBody: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("AgentGauge")
-                .font(.caption2)
-                .fontWeight(.semibold)
-            Text("Open the app to read usage")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+    private func ageLabel(_ generatedAt: Double) -> String {
+        let minutes = max(0, Int((entry.date.timeIntervalSince1970 - generatedAt) / 60))
+        if minutes < 1 { return "just now" }
+        if minutes < 60 { return "\(minutes)m ago" }
+        return "\(minutes / 60)h ago"
+    }
+
+    private func freshnessColor(_ freshness: String) -> Color {
+        switch freshness {
+        case "live": .green
+        case "cached": .blue
+        default: .orange
         }
     }
 
-    // MARK: - Formatting
-
-    private func unavailableLabel(_ snapshot: Snapshot) -> String {
-        snapshot.reason ?? "Usage unavailable"
-    }
-
-    private func freshnessLabel(_ snapshot: Snapshot) -> String {
-        snapshot.freshness.capitalized
-    }
-
-    /// "Resets in 4h 58m".
-    ///
-    /// Past the reset time this reads "Resets now" rather than a negative
-    /// duration, which would be the same fabrication as showing `0%`: the number
-    /// would look like data while meaning nothing.
-    private func countdown(_ resetsAt: Double?) -> String {
-        guard let resetsAt else { return "Reset time unknown" }
-        let remaining = resetsAt - Date().timeIntervalSince1970
-        guard remaining > 0 else { return "Resets now" }
-
-        let totalMinutes = Int(remaining / 60)
-        let days = totalMinutes / 1440
-        let hours = (totalMinutes % 1440) / 60
-        let minutes = totalMinutes % 60
-
-        if days > 0 {
-            return "Resets in \(days)d \(hours)h"
-        } else if hours > 0 {
-            return "Resets in \(hours)h \(minutes)m"
-        } else {
-            return "Resets in \(minutes)m"
-        }
-    }
-
-    /// Mirrors `toneFor()` in `src/lib/usage.ts`, which works in *used* percent:
-    /// critical at 90% used, warning at 75%. Expressed here in *remaining*
-    /// percent so the two surfaces cannot disagree about when a window is low.
-    private func tone(_ remaining: Int) -> (color: Color, name: String) {
+    private func quotaColor(_ remaining: Int) -> Color {
         switch remaining {
-        case 26...:
-            (Color.green, "healthy")
-        case 11...25:
-            (Color.orange, "warning")
-        default:
-            (Color.red, "critical")
+        case 26...: .green
+        case 11...25: .orange
+        default: .red
         }
-    }
-
-    private static func ageLabel(_ generatedAt: Double, now: Date) -> String {
-        let age = now.timeIntervalSince1970 - generatedAt
-        // `generatedAt` is 0 in the gallery placeholder, where there is no real
-        // reading and therefore no honest age to report.
-        guard age > 0, age < 3600 else { return "recently" }
-        let minutes = Int(age / 60)
-        return minutes < 1 ? "just now" : "\(minutes)m ago"
     }
 }
 
-/// `@main` must be the bundle, so a second widget can be added later without
-/// changing this file.
+private enum WidgetPreviewFixtures {
+    static let now = Date()
+
+    static func entry(
+        provider: Snapshot.ProviderKind,
+        freshness: String,
+        fiveHour: Int?,
+        weekly: Int?
+    ) -> UsageEntry {
+        let providerSnapshot = Snapshot.Provider(
+            provider: provider,
+            displayName: provider.displayName,
+            generatedAt: now.addingTimeInterval(freshness == "stale" ? -420 : 0).timeIntervalSince1970,
+            plan: nil,
+            freshness: freshness,
+            reason: freshness == "unavailable" ? "No reading is available." : nil,
+            fiveHour: fiveHour.map {
+                .init(remainingPercent: $0, resetsAt: now.addingTimeInterval(17_760).timeIntervalSince1970)
+            },
+            weekly: weekly.map {
+                .init(remainingPercent: $0, resetsAt: now.addingTimeInterval(345_600).timeIntervalSince1970)
+            }
+        )
+        let snapshot = Snapshot(version: Snapshot.supportedVersion, providers: [providerSnapshot])
+        return UsageEntry(date: now, snapshot: snapshot, provider: providerSnapshot)
+    }
+}
+
+#Preview("Small · Codex", as: .systemSmall) {
+    UsageWidget()
+} timeline: {
+    WidgetPreviewFixtures.entry(provider: .codex, freshness: "live", fiveHour: 88, weekly: 46)
+}
+
+#Preview("Medium · Z.AI", as: .systemMedium) {
+    UsageWidget()
+} timeline: {
+    WidgetPreviewFixtures.entry(provider: .zai, freshness: "stale", fiveHour: 51, weekly: 42)
+}
+
+#Preview("Large · no reading", as: .systemLarge) {
+    UsageWidget()
+} timeline: {
+    WidgetPreviewFixtures.entry(provider: .kimi, freshness: "unavailable", fiveHour: nil, weekly: nil)
+}
+
 @main
 struct AIStatsWidgetBundle: WidgetBundle {
     var body: some Widget {

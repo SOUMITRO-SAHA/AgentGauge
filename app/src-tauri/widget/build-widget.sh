@@ -40,7 +40,8 @@ WIDGET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$WIDGET_DIR/AIStatsWidget.xcodeproj"
 SCHEME="AIStatsWidget"
 CONFIGURATION="${AGENTGAUGE_WIDGET_CONFIGURATION:-Release}"
-DERIVED="$WIDGET_DIR/build"
+DERIVED="$WIDGET_DIR/build/$CONFIGURATION"
+STATUS_READER_NAME="AgentGaugeWidgetStatus"
 
 # Empty means ad-hoc.
 SIGN_IDENTITY="${AGENTGAUGE_SIGN_IDENTITY:--}"
@@ -55,7 +56,15 @@ build_appex() {
   # a silent skip.
   command -v xcodebuild >/dev/null || die "xcodebuild not found. Install Xcode; the macOS widget cannot be built without it."
 
-  rm -rf "$DERIVED"
+  mkdir -p "$DERIVED"
+  xcrun swiftc \
+    -parse-as-library \
+    "$WIDGET_DIR/Sources/ProviderCycler.swift" \
+    "$WIDGET_DIR/Tests/ProviderCyclerTests.swift" \
+    -o "$DERIVED/ProviderCyclerTests"
+  "$DERIVED/ProviderCyclerTests"
+  bash "$WIDGET_DIR/Tests/WidgetStoragePathTests.sh"
+
   xcodebuild \
     -project "$PROJECT" \
     -scheme "$SCHEME" \
@@ -68,6 +77,16 @@ build_appex() {
   local appex
   appex="$(find "$DERIVED/Build/Products" -maxdepth 2 -name "$SCHEME.appex" | head -1)"
   [ -n "$appex" ] || die "build reported success but no .appex was produced"
+  bash "$WIDGET_DIR/Tests/WidgetEntitlementTests.sh" "$appex"
+
+  log "Building $STATUS_READER_NAME"
+  xcrun swiftc \
+    -parse-as-library \
+    -O \
+    -target "$(uname -m)-apple-macosx14.0" \
+    "$WIDGET_DIR/WidgetStatusReader.swift" \
+    -framework WidgetKit \
+    -o "$DERIVED/$STATUS_READER_NAME"
 
   # The two properties CodexBar#1095 identified as the difference between a
   # working extension and one that silently exits. Checked here so a future edit
@@ -92,19 +111,28 @@ embed_into() {
   local appex="${1:-}"
   appex="$(find "$DERIVED/Build/Products" -maxdepth 2 -name "$SCHEME.appex" | head -1)"
   [ -n "$appex" ] || die "no built .appex found; run 'build' first"
+  local status_reader="$DERIVED/$STATUS_READER_NAME"
+  [ -x "$status_reader" ] || die "no built $STATUS_READER_NAME found; run 'build' first"
 
   log "Embedding into $(basename "$app")"
   mkdir -p "$app/Contents/PlugIns"
+  mkdir -p "$app/Contents/MacOS"
   rm -rf "$app/Contents/PlugIns/$SCHEME.appex"
   cp -R "$appex" "$app/Contents/PlugIns/$SCHEME.appex"
+  cp "$status_reader" "$app/Contents/MacOS/$STATUS_READER_NAME"
 
   # Order matters: the extension first, then the host. Signing the host last
   # seals the nested signature, and `--deep` is avoided on the inner bundle so
   # its own signature is not rewritten in a way that breaks verification.
   log "Signing extension (${SIGN_IDENTITY})"
   codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
+    --entitlements "$WIDGET_DIR/Resources/AIStatsWidget.entitlements" \
     "$app/Contents/PlugIns/$SCHEME.appex" 2>/dev/null \
     || die "failed to sign the widget extension"
+  bash "$WIDGET_DIR/Tests/WidgetEntitlementTests.sh" "$app/Contents/PlugIns/$SCHEME.appex"
+  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
+    "$app/Contents/MacOS/$STATUS_READER_NAME" 2>/dev/null \
+    || die "failed to sign the widget status reader"
 
   log "Signing host bundle"
   codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$app" 2>/dev/null \
@@ -117,6 +145,11 @@ embed_into() {
   # Nudge LaunchServices so the widget shows up without a rescan or a logout.
   local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
   [ -x "$lsregister" ] && "$lsregister" -f "$app" 2>/dev/null || true
+
+  if [ -x "$app/Contents/MacOS/$STATUS_READER_NAME" ]; then
+    "$app/Contents/MacOS/$STATUS_READER_NAME" --reload \
+      || log "WidgetKit did not accept the timeline refresh request; it may update on its schedule"
+  fi
 
   log "Done: $app/Contents/PlugIns/$SCHEME.appex"
 }

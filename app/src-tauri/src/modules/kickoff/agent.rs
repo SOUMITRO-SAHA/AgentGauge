@@ -17,12 +17,19 @@ use super::KickoffSchedule;
 use crate::shared::error::{Error, ErrorKind};
 
 /// The launchd label, namespaced under the app's identifier.
+#[cfg(debug_assertions)]
+pub const AGENT_LABEL: &str = "com.soumitrasaha.agentgauge.widgetdev.kickoff";
+#[cfg(not(debug_assertions))]
 pub const AGENT_LABEL: &str = "com.soumitrasaha.agentgauge.kickoff";
 
 /// How often launchd wakes the worker.
 const START_INTERVAL_SECS: u64 = 60;
 
 /// The plist's path, relative to `$HOME`.
+#[cfg(debug_assertions)]
+const AGENT_RELATIVE_PATH: &str =
+    "Library/LaunchAgents/com.soumitrasaha.agentgauge.widgetdev.kickoff.plist";
+#[cfg(not(debug_assertions))]
 const AGENT_RELATIVE_PATH: &str = "Library/LaunchAgents/com.soumitrasaha.agentgauge.kickoff.plist";
 
 fn agent_relative_path() -> &'static str {
@@ -313,8 +320,8 @@ mod tests {
         // Both files live beside each other by contract, composed from the one
         // shared directory constant rather than restating it.
         let home = std::ffi::OsString::from("/Users/dev");
-        let schedule = crate::shared::legacy_shared::legacy_dir(&home).join(SCHEDULE_FILE_NAME);
-        let snapshot = crate::shared::legacy_shared::legacy_dir(&home)
+        let schedule = crate::shared::app_support::app_support_dir(&home).join(SCHEDULE_FILE_NAME);
+        let snapshot = crate::shared::app_support::app_support_dir(&home)
             .join(crate::modules::widget::SNAPSHOT_FILE_NAME);
         assert_eq!(schedule.parent(), snapshot.parent());
     }
@@ -322,5 +329,18 @@ mod tests {
     #[test]
     fn the_plist_path_carries_the_label() {
         assert!(AGENT_RELATIVE_PATH.contains(AGENT_LABEL));
+    }
+
+    #[test]
+    fn the_debug_scheduler_does_not_share_the_release_scheduler_identity() {
+        if cfg!(debug_assertions) {
+            assert_ne!(AGENT_LABEL, "com.soumitrasaha.agentgauge.kickoff");
+            assert_ne!(
+                AGENT_RELATIVE_PATH,
+                "Library/LaunchAgents/com.soumitrasaha.agentgauge.kickoff.plist"
+            );
+        } else {
+            assert_eq!(AGENT_LABEL, "com.soumitrasaha.agentgauge.kickoff");
+        }
     }
 }

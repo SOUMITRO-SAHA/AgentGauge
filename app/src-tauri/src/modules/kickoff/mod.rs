@@ -48,12 +48,12 @@ pub const KICK_DELAY_MS: i64 = 60_000;
 /// How long to wait after a failed attempt before trying again.
 pub const RETRY_MS: i64 = 5 * 60 * 1000;
 
-/// The shared schedule's file name inside the legacy shared directory.
+/// The shared schedule's file name inside AgentGauge's application-support directory.
 ///
-/// The same legacy directory the widget snapshot uses, for the same reason:
+/// The same directory the widget snapshot uses, for the same reason:
 /// the desktop app and a second process (the worker) must agree on a path
 /// without either depending on the other, and the directory itself is the
-/// shared contract in `shared::legacy_shared`.
+/// shared contract in `shared::app_support`.
 pub const SCHEDULE_FILE_NAME: &str = "kickoff-schedule.json";
 
 /// Bumped when the schedule shape changes. An unrecognised version is treated
@@ -230,9 +230,26 @@ impl KickoffStore {
     /// rather than pretending to be configured.
     pub fn from_env() -> Option<Self> {
         let home = std::env::var_os("HOME")?;
-        Some(Self {
-            path: crate::shared::legacy_shared::legacy_dir(&home).join(SCHEDULE_FILE_NAME),
-        })
+        #[cfg(debug_assertions)]
+        if let Some(dir) = std::env::var_os("AGENTGAUGE_DATA_DIR") {
+            return Some(Self {
+                path: PathBuf::from(dir).join(SCHEDULE_FILE_NAME),
+            });
+        }
+        let filename = if cfg!(debug_assertions) {
+            "kickoff-dev.json"
+        } else {
+            SCHEDULE_FILE_NAME
+        };
+        let current = crate::shared::app_support::app_support_dir(&home).join(filename);
+        let previous = crate::shared::app_support::previous_app_support_dir(&home).join(filename);
+        if let Err(error) = crate::shared::app_support::migrate_file(&previous, &current) {
+            log::warn!("could not migrate the previous kickoff schedule: {error}");
+            if !current.exists() && previous.is_file() {
+                return Some(Self { path: previous });
+            }
+        }
+        Some(Self { path: current })
     }
 
     /// Builds a store at an explicit path. For tests.

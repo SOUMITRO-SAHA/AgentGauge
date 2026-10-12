@@ -1,8 +1,9 @@
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { CheckCircle, WarningCircle } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
 
-import { systemWidgetAtom } from "~/atoms";
+import { systemWidgetAtom, widgetSetupRequestedAtom } from "~/atoms";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
 import { Skeleton } from "~/components/ui/skeleton";
 
@@ -11,7 +12,7 @@ import type { SystemWidgetStatus } from "~/lib/ipc";
 /**
  * The system's own widget, and how to add it on this machine.
  *
- * ## Why a guide and not a button
+ * ## Placement stays with macOS
  *
  * The previous version of this panel opened a frameless, always-on-top window
  * from inside the app. That is not how macOS widgets work: a widget is an
@@ -19,23 +20,52 @@ import type { SystemWidgetStatus } from "~/lib/ipc";
  * its position, size, and refresh schedule. It also floats over whatever the user
  * is working in, which is exactly the problem this replaces.
  *
- * So the app cannot install the widget and must not imply that it did. There is
- * no "Set up widget" affordance here — only what is true about this build, and
- * the system's own procedure for this macOS release.
+ * The sidebar's setup action navigates here and highlights these steps. The app
+ * cannot add the widget or open the gallery on the user's behalf.
  *
  * ## What this cannot tell you
  *
- * macOS exposes no API for asking whether a user has placed an app's widget, so
- * this never claims the widget is on their desktop. `extensionPresent` means the
- * extension is inside this build's bundle — a fact about the build, not a claim
- * about the user's screen.
+ * WidgetCenter reports configured widget kinds, but not their exact location.
+ * `extensionPresent` remains a separate fact about this build, and a failed
+ * system query remains unknown rather than meaning the widget is absent.
  */
 export function SystemWidgetGuide() {
   const widget = useAtomValue(systemWidgetAtom);
   const refreshWidget = useAtomRefresh(systemWidgetAtom);
+  const setupRequested = useAtomValue(widgetSetupRequestedAtom);
+  const setSetupRequested = useAtomSet(widgetSetupRequestedAtom);
+  const guideRef = useRef<HTMLElement | null>(null);
+  const requestConsumed = useRef(false);
+  const [highlighted, setHighlighted] = useState(false);
+
+  useEffect(() => {
+    if (!setupRequested) {
+      requestConsumed.current = false;
+      return;
+    }
+    if (requestConsumed.current) return;
+
+    requestConsumed.current = true;
+    guideRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    guideRef.current?.focus({ preventScroll: true });
+    setHighlighted(true);
+    setSetupRequested(false);
+  }, [setupRequested, setSetupRequested]);
+
+  useEffect(() => {
+    if (!highlighted) return;
+    const timeout = window.setTimeout(() => setHighlighted(false), 2500);
+    return () => window.clearTimeout(timeout);
+  }, [highlighted]);
 
   return (
-    <section className={PANEL} data-testid="widget-panel">
+    <section
+      ref={guideRef}
+      tabIndex={-1}
+      data-testid="widget-panel"
+      data-highlighted={highlighted}
+      className={`${PANEL} transition-colors duration-300 ${highlighted ? "ring-2 ring-brand-teal" : ""}`}
+    >
       <PanelHeader
         title="System widget"
         testId="refresh-widget"
@@ -154,20 +184,48 @@ function StatusLine({ status }: { status: SystemWidgetStatus }) {
     );
   }
 
+  if (status.configured === true) {
+    return (
+      <p
+        data-testid="widget-status"
+        data-state="configured"
+        className="flex items-start gap-2 text-sm text-muted-foreground"
+      >
+        <CheckCircle
+          aria-hidden="true"
+          className="mt-0.5 size-4 shrink-0 text-[var(--ok)]"
+        />
+        <span>AgentGauge is configured as a system widget on this Mac.</span>
+      </p>
+    );
+  }
+
+  if (status.configured === null) {
+    return (
+      <p
+        data-testid="widget-status"
+        data-state="unknown"
+        className="flex items-start gap-2 text-sm text-muted-foreground"
+      >
+        <WarningCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+        <span>
+          The app could not check whether AgentGauge is configured. Refresh to
+          check again.
+        </span>
+      </p>
+    );
+  }
+
   return (
     <p
       data-testid="widget-status"
-      data-state="ready"
+      data-state="not-configured"
       className="flex items-start gap-2 text-sm text-muted-foreground"
     >
-      <CheckCircle
-        aria-hidden="true"
-        className="mt-0.5 size-4 shrink-0 text-[var(--ok)]"
-      />
+      <WarningCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       <span>
-        {status.snapshotWritten
-          ? `Ready to add on macOS ${status.osVersion ?? status.minimumVersion}.`
-          : "Ready to add. It will fill in once the app has read a usage window."}
+        AgentGauge is not configured as a system widget. Use the steps below to
+        add it.
       </span>
     </p>
   );

@@ -3,17 +3,15 @@
     "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!--
-	  The App Sandbox is deliberately OFF.
-
-	  The widget and the host app are two separate processes, and the only
-	  reliable way to share a snapshot between them without a registered App
-	  Group is a plain file in the user's home directory. Sandboxing would
-	  block that read.
-
-	  An App Group (`group.<team>.com.soumitrasaha.agentgauge`) is the production
-	  answer, but it has to be registered on the developer portal first and
-	  then signed with a real Team ID. See widget/README.md.
-	-->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+	<array>
+		<string>/Library/Application Support/AgentGauge/</string>
+	</array>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+	<array>
+		<string>/Library/Application Support/AI Sub Stats/</string>
+	</array>
 </dict>
 </plist>

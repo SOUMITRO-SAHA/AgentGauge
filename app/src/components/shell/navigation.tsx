@@ -19,10 +19,12 @@
  * presentation identically.
  */
 
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { CaretRight } from "@phosphor-icons/react";
+import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
+import { useEffect } from "react";
+import { CaretRight, PlusCircle } from "@phosphor-icons/react";
 
-import { routeAtom } from "~/atoms";
+import { routeAtom, systemWidgetAtom, widgetSetupRequestedAtom } from "~/atoms";
 import { Button } from "~/components/ui/button";
 import {
   Sidebar,
@@ -41,6 +43,7 @@ import { useIsMobile } from "~/hooks/use-mobile";
 import { DEV_TEST_SCREEN_ENABLED } from "~/lib/dev-test-screen";
 import { routesNeedingNavigation, type Route } from "~/lib/navigation";
 import { cn } from "~/lib/utils";
+import { shouldOfferWidgetSetup } from "~/lib/widget-setup";
 
 export function Navigation({
   onNavigate,
@@ -53,6 +56,12 @@ export function Navigation({
   // settles before asserting, so the one-frame flip is accepted in exchange
   // for reusing the library's own breakpoint instead of a second one.
   const isMobile = useIsMobile();
+  const refreshWidget = useAtomRefresh(systemWidgetAtom);
+
+  useEffect(() => {
+    window.addEventListener("focus", refreshWidget);
+    return () => window.removeEventListener("focus", refreshWidget);
+  }, [refreshWidget]);
 
   return isMobile ? (
     <FloatingTabs onNavigate={onNavigate} />
@@ -107,8 +116,15 @@ function SidebarNav({
   readonly onNavigate: (route: Route) => void;
 }) {
   const route = useAtomValue(routeAtom);
+  const widget = useAtomValue(systemWidgetAtom);
   const navigate = useNavigate(onNavigate);
+  const setWidgetSetupRequested = useAtomSet(widgetSetupRequestedAtom);
   const { toggleSidebar } = useSidebar();
+  const shouldShowWidgetSetup = AsyncResult.match(widget, {
+    onInitial: () => false,
+    onFailure: () => false,
+    onSuccess: (result) => shouldOfferWidgetSetup(result.value),
+  });
 
   return (
     <Sidebar
@@ -139,6 +155,32 @@ function SidebarNav({
       </SidebarHeader>
 
       <SidebarContent>
+        {shouldShowWidgetSetup && (
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    aria-label="Set up system widget"
+                    data-testid="nav-widget-setup"
+                    tooltip="Set up the system widget"
+                    onClick={() => {
+                      setWidgetSetupRequested(true);
+                      navigate("settings");
+                    }}
+                    className="bg-brand-teal font-semibold text-brand-ink hover:bg-brand-teal/90 hover:text-brand-ink focus-visible:ring-brand-teal"
+                  >
+                    <PlusCircle weight="fill" aria-hidden="true" />
+                    <span className="group-data-[collapsible=icon]:hidden">
+                      Set up widget
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
         <SidebarGroup>
           <SidebarGroupLabel>Destinations</SidebarGroupLabel>
           <SidebarGroupContent>

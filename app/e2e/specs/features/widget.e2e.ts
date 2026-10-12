@@ -41,12 +41,12 @@ describe("system widget", () => {
   });
 
   // Fixture-embedded build: the guide must show the system's own procedure
-  // (`data-state="ready"` is what `extension_present: true` renders as).
+  // (`data-state="configured"` comes from WidgetCenter's current configuration query).
   it("guides a user through the gallery when the build embeds the widget", async () => {
     await gotoView("settings");
     const status = $('[data-testid="widget-status"]');
     await expectDisplayed('[data-testid="widget-status"]');
-    await expect(status).toHaveAttribute("data-state", "ready");
+    await expect(status).toHaveAttribute("data-state", "configured");
     expect(await $('[data-testid="widget-loading-skeleton"]').isExisting()).toBe(
       false,
     );
@@ -56,12 +56,12 @@ describe("system widget", () => {
     );
   });
 
-  it("offers no install control, because macOS owns widget placement", async () => {
+  it("hides setup once configured and never offers an install control", async () => {
     await gotoView("settings");
     // The old affordance opened a floating always-on-top window. A control that
     // implies the app can install a widget is the regression to catch.
     expect(await $('[data-testid="widget-toggle"]').isExisting()).toBe(false);
-    expect(await $('[data-testid="widget-setup"]').isExisting()).toBe(false);
+    expect(await $('[data-testid="nav-widget-setup"]').isExisting()).toBe(false);
   });
 
   it("tells the user what to do about a missing extension", async () => {
@@ -87,7 +87,7 @@ describe("widget guidance without a usage reading", () => {
     await gotoView("settings");
     await expect($('[data-testid="widget-status"]')).toHaveAttribute(
       "data-state",
-      "ready",
+      "configured",
     );
     await expectDisplayed('[data-testid="widget-setup-steps"]');
   });

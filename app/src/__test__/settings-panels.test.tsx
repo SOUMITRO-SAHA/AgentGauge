@@ -43,6 +43,7 @@ const SYSTEM_WIDGET_RESPONSE = {
     extensionBundled: false,
     extensionPresent: false,
     snapshotWritten: false,
+    configured: null,
     menuBarAvailable: false,
     setup: [],
     reason: null,

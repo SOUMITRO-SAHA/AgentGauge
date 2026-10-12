@@ -506,6 +506,7 @@ export const SystemWidgetStatus = Schema.Struct({
   extensionBundled: Schema.Boolean,
   extensionPresent: Schema.Boolean,
   snapshotWritten: Schema.Boolean,
+  configured: Schema.NullOr(Schema.Boolean),
   menuBarAvailable: Schema.Boolean,
   setup: Schema.Array(
     Schema.Struct({ title: Schema.String, detail: Schema.String }),

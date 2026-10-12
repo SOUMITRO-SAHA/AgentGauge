@@ -60,6 +60,7 @@ describe("SystemWidgetStatus", () => {
     extensionBundled: true,
     extensionPresent: true,
     snapshotWritten: true,
+    configured: true,
     menuBarAvailable: true,
     setup: [{ title: "Open the widget gallery", detail: "Right-click the desktop." }],
     reason: null,

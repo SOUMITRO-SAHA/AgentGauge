@@ -23,7 +23,7 @@ use crate::modules::opencode::OpenCodeCatalog;
 use crate::modules::process_insights;
 use crate::modules::providers::{ProviderRegistry, PING_PROMPT};
 use crate::modules::settings::SettingsStore;
-use crate::modules::widget::{now_secs, SnapshotStore, SystemWidgetStatus, WidgetSnapshot};
+use crate::modules::widget::{now_secs, SnapshotStore, SystemWidgetStatus};
 use crate::shared::domain::{CodingSubscription, ProviderKind, UsageSnapshot};
 use crate::shared::error::{Error, ErrorKind};
 use crate::shared::protocol::{AppRequest, AppResponse, PROTOCOL_VERSION};
@@ -409,27 +409,21 @@ fn read_all(state: &AppState) -> Vec<UsageSnapshot> {
         .collect()
 }
 
-/// Publishes the Codex reading for the system widget to read.
+/// Publishes current provider quota readings for the system widget to read.
 ///
 /// Called as a side effect of every usage read rather than on a renderer command,
 /// so the widget cannot drift out of sync with what the app is showing: there is
 /// no sequence in which the UI is fresh and the widget is stale.
 ///
-/// Only the Codex snapshot is published. The widget's contract names the 5-hour
-/// and weekly windows specifically, so publishing another provider's windows
-/// under those labels would be a fabrication.
+/// The widget's contract names the 5-hour and weekly windows specifically, so
+/// other windows are discarded and each quota remains paired with its provider.
 fn publish_snapshot(state: &AppState, snapshots: &[UsageSnapshot]) {
     let Some(store) = state.widget_snapshots.as_ref() else {
         return;
     };
     let now = now_secs();
 
-    let snapshot = match snapshots.iter().find(|s| s.provider == ProviderKind::Codex) {
-        Some(codex) => WidgetSnapshot::from_usage(codex, now),
-        None => WidgetSnapshot::unavailable("No reading available.", now),
-    };
-
-    if let Err(error) = store.write(&snapshot) {
+    if let Err(error) = store.publish(snapshots, now) {
         // A widget that cannot be written must not break the reading the user
         // actually asked for, so this is reported and not propagated.
         log::warn!("could not publish widget snapshot: {}", error.message);
