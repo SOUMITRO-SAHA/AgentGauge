@@ -316,6 +316,58 @@ export const ModelUsage = Schema.Struct({
 });
 export type ModelUsage = typeof ModelUsage.Type;
 
+/**
+ * One model's usage as read from the user's own local harness logs.
+ *
+ * The token split is per-response fact, not a total: `cachedInput` is part of
+ * `input`, `reasoning` is part of `output`. `costUsd` is null when the price
+ * list cannot cover the model — never 0 for an unpriced model.
+ */
+export const LocalModelUsage = Schema.Struct({
+  id: Schema.String,
+  displayName: Schema.String,
+  input: Schema.Number,
+  cachedInput: Schema.Number,
+  cacheWrite: Schema.Number,
+  output: Schema.Number,
+  reasoning: Schema.Number,
+  responses: Schema.Number,
+  costUsd: Schema.NullOr(Schema.Number),
+});
+export type LocalModelUsage = typeof LocalModelUsage.Type;
+
+/** One calendar day of local activity, ISO `YYYY-MM-DD` in UTC. */
+export const LocalDayUsage = Schema.Struct({
+  day: Schema.String,
+  tokens: Schema.Number,
+});
+export type LocalDayUsage = typeof LocalDayUsage.Type;
+
+/**
+ * What the app read from the user's own local logs.
+ *
+ * Separate from the provider's account totals on purpose: different source,
+ * different coverage window, different failure counters. `filesUnreadable`
+ * and `filesCompressed` name the logs whose tokens are *not* in these totals,
+ * so the view can say what is missing rather than imply completeness.
+ */
+export const LocalUsage = Schema.Struct({
+  models: Schema.Array(LocalModelUsage),
+  days: Schema.Array(LocalDayUsage),
+  /** API-equivalent cost of every priced model. Exact: the logs carry a real
+   * per-response split, so no blended average is involved. */
+  costUsd: Schema.Number,
+  /** Tokens whose model the price list does not cover. */
+  unpricedTokens: Schema.Number,
+  sessions: Schema.Number,
+  filesScanned: Schema.Number,
+  filesUnreadable: Schema.Number,
+  filesCompressed: Schema.Number,
+  firstDay: Schema.NullOr(Schema.String),
+  lastDay: Schema.NullOr(Schema.String),
+});
+export type LocalUsage = typeof LocalUsage.Type;
+
 export const AccountUsage = Schema.Struct({
   fetchedAt: Schema.Number,
   summary: Schema.Struct({
@@ -337,6 +389,13 @@ export const AccountUsage = Schema.Struct({
    * provider totals only — a real answer, not a failed read.
    */
   models: Schema.Array(ModelUsage),
+  /**
+   * The local harness logs' own reading, when the provider has a local
+   * record to read. Null means absent — no Codex home, or one with no
+   * rollouts — which the view reports differently from a scan that found
+   * nothing to price.
+   */
+  local: Schema.NullOr(LocalUsage),
   /**
    * Days the reported window covers, when the provider reports a bounded span
    * rather than the account's lifetime. `null` means lifetime, so the cards

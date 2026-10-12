@@ -14,7 +14,12 @@ import { createElement } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { statsTabAtom } from "~/atoms";
-import { ModelMixBlock, StatsView, tokenTooltipFormatter } from "~/components/views/stats-view";
+import {
+  LocalLogPanel,
+  ModelMixBlock,
+  StatsView,
+  tokenTooltipFormatter,
+} from "~/components/views/stats-view";
 import type { PriceList } from "~/lib/pricing";
 
 type Request = { readonly type: string; readonly provider?: string };
@@ -86,6 +91,55 @@ function codexAccountUsage() {
     windowDays: null,
     dailyUsageBuckets: [{ startDate: "2026-10-07", tokens: 2300 }],
     models: [],
+    local: {
+      models: [
+        {
+          id: "gpt-5.5",
+          displayName: "GPT-5.5",
+          input: 132_064_094,
+          cachedInput: 125_855_104,
+          cacheWrite: 0,
+          output: 616_260,
+          reasoning: 400_000,
+          responses: 1146,
+          costUsd: 112.46,
+        },
+        {
+          id: "gpt-6-luna",
+          displayName: "GPT-6 Luna",
+          input: 137_116_712,
+          cachedInput: 133_943_168,
+          cacheWrite: 0,
+          output: 780_596,
+          reasoning: 300_000,
+          responses: 1080,
+          costUsd: 2.05,
+        },
+        {
+          id: "gpt-5.5-preview",
+          displayName: "gpt-5.5-preview",
+          input: 1_000_000,
+          cachedInput: 900_000,
+          cacheWrite: 0,
+          output: 100_000,
+          reasoning: 0,
+          responses: 10,
+          costUsd: null,
+        },
+      ],
+      days: [
+        { day: "2026-09-04", tokens: 120_000_000 },
+        { day: "2026-09-24", tokens: 180_000_000 },
+      ],
+      costUsd: 114.51,
+      unpricedTokens: 1_100_000,
+      sessions: 168,
+      filesScanned: 168,
+      filesUnreadable: 0,
+      filesCompressed: 0,
+      firstDay: "2026-09-04",
+      lastDay: "2026-09-24",
+    },
   };
 }
 
@@ -119,6 +173,7 @@ function zaiAccountUsage() {
         requests: null,
       },
     ],
+    local: null,
   };
 }
 
@@ -146,7 +201,10 @@ function subscriptionsReply() {
   };
 }
 
-function installDispatch(overrides?: { readonly zaiUsage?: unknown }): void {
+function installDispatch(overrides?: {
+  readonly zaiUsage?: unknown;
+  readonly codexUsage?: unknown;
+}): void {
   (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
     dispatch: ({ request }: { request: Request }) => {
       switch (request.type) {
@@ -158,7 +216,7 @@ function installDispatch(overrides?: { readonly zaiUsage?: unknown }): void {
             usage:
               request.provider === "zai"
                 ? (overrides?.zaiUsage ?? zaiAccountUsage())
-                : codexAccountUsage(),
+                : (overrides?.codexUsage ?? codexAccountUsage()),
           };
         case "readUsageFor":
           return {
@@ -588,4 +646,89 @@ it("leaves the model mix off a tab whose provider reports no models", async () =
 
   expect(await screen.findByTestId("stats-account-analytics")).toBeTruthy();
   expect(screen.queryByTestId("stats-model-mix")).toBeNull();
+});
+
+it("shows Codex's local model mix with exact costs and cache efficiency", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const codexTab = await screen.findByTestId("stats-tab-codex");
+  fireEvent.mouseDown(codexTab);
+  fireEvent.click(codexTab);
+
+  expect(await screen.findByTestId("stats-local-logs")).toBeTruthy();
+
+  // Exact tier: the figure arrives priced from the backend's own split, so it
+  // is the sum of the per-model costs with no blended assumption in between.
+  // The 112.46 + 2.05 total renders as whole dollars above $100.
+  const cost = screen.getByTestId("stats-local-cost");
+  expect(cost.textContent ?? "").toContain("$115");
+
+  // The cache number is the story: 96% of prompt tokens were cache reads.
+  const cache = screen.getByTestId("stats-local-cache");
+  expect(cache.textContent ?? "").toContain("96%");
+
+  const gpt55 = screen.getByTestId("stats-local-model-gpt-5.5");
+  expect(within(gpt55).getByText("GPT-5.5")).toBeTruthy();
+  expect(within(gpt55).getByText("98% of est. cost")).toBeTruthy();
+  const luna = screen.getByTestId("stats-local-model-gpt-6-luna");
+  expect(within(luna).getByText("2% of est. cost")).toBeTruthy();
+  // Token share barely tracks cost share — the two lenses disagree, which is
+  // the whole point of showing both.
+  expect(within(luna).getByText("51% of tokens · 137.9M")).toBeTruthy();
+
+  // Provenance: which logs, how far back, and that it is not a bill.
+  const source = screen.getByTestId("stats-local-source");
+  expect(source.textContent ?? "").toContain("168");
+  expect(source.textContent ?? "").toContain("2026-09-04");
+  expect(source.textContent ?? "").toContain("2026-09-24");
+  expect(source.textContent ?? "").toContain("not a bill");
+});
+
+it("keeps unpriced local models visible as tokens, never as $0", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const codexTab = await screen.findByTestId("stats-tab-codex");
+  fireEvent.mouseDown(codexTab);
+  fireEvent.click(codexTab);
+
+  const unpriced = await screen.findByTestId("stats-local-model-gpt-5.5-preview");
+  expect(within(unpriced).getByText("No reference price")).toBeTruthy();
+
+  const note = screen.getByTestId("stats-local-unpriced");
+  expect(note.textContent ?? "").toContain("1.1M");
+});
+
+it("names the logs it could not read instead of implying completeness", () => {
+  // Rendered directly: the account-usage atom is session-retained, so a second
+  // fixture cannot reach it through a dispatcher.
+  render(
+    createElement(LocalLogPanel, {
+      usage: {
+        ...codexAccountUsage().local,
+        filesUnreadable: 2,
+        filesCompressed: 1,
+      },
+    }),
+  );
+
+  const gaps = screen.getByTestId("stats-local-gaps");
+  const text = gaps.textContent ?? "";
+  expect(text).toContain("2 unreadable");
+  expect(text).toContain("1 compressed");
+});
+
+it("leaves the local panel off a tab with no local record", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  fireEvent.mouseDown(screen.getByTestId("stats-tab-zai"));
+  fireEvent.click(screen.getByTestId("stats-tab-zai"));
+
+  expect(await screen.findByTestId("stats-model-mix")).toBeTruthy();
+  expect(screen.queryByTestId("stats-local-logs")).toBeNull();
 });

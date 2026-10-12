@@ -166,6 +166,187 @@ function StatsTabBody({ tab }: { readonly tab: UsageTab }) {
 const TOKEN_HISTORY_PROVIDERS: readonly Ipc.ProviderKind[] = ["codex", "zai"];
 
 /** The Codex tab: token activity, with the window reading below. */
+/**
+ * The local log reading: what Codex's own rollout files say, priced exactly.
+ *
+ * This is the Codex tab's answer to the two questions the provider's account
+ * read cannot answer — which model carried the work, and what it would have
+ * cost. The figures are Tier A: the logs record a real per-response token
+ * split, so nothing here is blended or assumed.
+ *
+ * The source line is not decoration. These numbers are read off the user's own
+ * machine over a window the provider never states, so the panel names the log
+ * count, the span, anything it could not read, and that none of it is a bill.
+ */
+export function LocalLogPanel({ usage }: { readonly usage: Ipc.LocalUsage }) {
+  const promptTokens = usage.models.reduce((sum, model) => sum + model.input, 0);
+  const cachedTokens = usage.models.reduce(
+    (sum, model) => sum + model.cachedInput,
+    0,
+  );
+  const cacheShare = promptTokens > 0 ? cachedTokens / promptTokens : null;
+  const totalTokens = usage.models.reduce(
+    (sum, model) => sum + model.input + model.output,
+    0,
+  );
+  const pricedCost = usage.models.reduce(
+    (sum, model) => sum + (model.costUsd ?? 0),
+    0,
+  );
+  const coverage =
+    usage.firstDay !== null && usage.lastDay !== null
+      ? `${usage.firstDay} → ${usage.lastDay}`
+      : null;
+
+  return (
+    <div
+      className="flex flex-col gap-4 border-t border-border/70 pt-4"
+      data-testid="stats-local-logs"
+    >
+      <div className="flex flex-col gap-1">
+        <h3 className="font-display text-sm font-medium text-foreground">
+          Local log reading
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          Read from Codex's own session logs on this machine — per-model tokens
+          and what they would have cost at API prices.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div
+          className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
+          data-testid="stats-local-cost"
+        >
+          <span className="text-xs text-muted-foreground">
+            If you had paid per token
+          </span>
+          <span className="text-xl font-semibold tabular text-foreground">
+            ≈ {formatUsd(usage.costUsd)}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {formatCompactCount(totalTokens)} tokens ·{" "}
+            {usage.sessions} sessions
+          </span>
+        </div>
+        <div
+          className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
+          data-testid="stats-local-cache"
+        >
+          <span className="text-xs text-muted-foreground">Prompt cache</span>
+          <span className="text-xl font-semibold tabular text-foreground">
+            {cacheShare === null
+              ? "—"
+              : `${Math.round(cacheShare * 100)}%`}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {cacheShare === null
+              ? "No prompt tokens in these logs"
+              : `of ${formatCompactCount(promptTokens)} prompt tokens were cache reads`}
+          </span>
+        </div>
+      </div>
+      <div className="flex flex-col gap-3">
+        {usage.models.map((model) => (
+          <LocalModelRow
+            key={model.id}
+            model={model}
+            totalTokens={totalTokens}
+            pricedTotal={pricedCost}
+          />
+        ))}
+      </div>
+      {usage.unpricedTokens > 0 ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="stats-local-unpriced"
+        >
+          {formatCompactCount(usage.unpricedTokens)} tokens ran on models the
+          price list does not carry; they are counted, not priced.
+        </p>
+      ) : null}
+      {usage.filesUnreadable > 0 || usage.filesCompressed > 0 ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="stats-local-gaps"
+        >
+          {[
+            usage.filesUnreadable > 0
+              ? `${usage.filesUnreadable} unreadable`
+              : null,
+            usage.filesCompressed > 0
+              ? `${usage.filesCompressed} compressed`
+              : null,
+          ]
+            .filter((part) => part !== null)
+            .join(" · ")}{" "}
+          log(s) are not in these totals.
+        </p>
+      ) : null}
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="stats-local-source"
+      >
+        {usage.sessions} Codex session logs on this machine
+        {coverage !== null ? ` · ${coverage}` : ""} · exact per-response rates ·
+        not a bill.
+      </p>
+    </div>
+  );
+}
+
+/** One model's row in the local reading: token share against exact cost share. */
+function LocalModelRow({
+  model,
+  totalTokens,
+  pricedTotal,
+}: {
+  readonly model: Ipc.LocalModelUsage;
+  readonly totalTokens: number;
+  readonly pricedTotal: number;
+}) {
+  const tokens = model.input + model.output;
+  const tokenSharePct =
+    totalTokens > 0 ? Math.round((tokens / totalTokens) * 100) : 0;
+  const costSharePct =
+    model.costUsd !== null && pricedTotal > 0
+      ? Math.round((model.costUsd / pricedTotal) * 100)
+      : null;
+
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
+      data-testid={`stats-local-model-${model.id}`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-sm font-medium text-foreground">
+          {model.displayName}
+        </span>
+        <span className="text-sm font-semibold tabular text-foreground">
+          {model.costUsd !== null
+            ? `≈ ${formatUsd(model.costUsd)}`
+            : "No reference price"}
+        </span>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <ShareBar
+          label="Tokens"
+          widthPercent={tokenSharePct}
+          caption={`${tokenSharePct}% of tokens · ${formatCompactCount(tokens)}`}
+          barClassName="bg-chart-1"
+        />
+        {costSharePct !== null ? (
+          <ShareBar
+            label="Est. cost"
+            widthPercent={costSharePct}
+            caption={`${costSharePct}% of est. cost`}
+            barClassName="bg-chart-2"
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function CodexActivity() {
   const usage = useAtomValue(accountUsageForAtom("codex"));
   const refresh = useAtomRefresh(accountUsageForAtom("codex"));
@@ -187,7 +368,12 @@ function CodexActivity() {
       {AsyncResult.match(usage, {
         onInitial: () => <AnalyticsLoadingSkeleton />,
         onSuccess: (result) => (
-          <AnalyticsContent usage={result.value} refreshing={result.waiting} />
+          <>
+            <AnalyticsContent usage={result.value} refreshing={result.waiting} />
+            {result.value.local !== null ? (
+              <LocalLogPanel usage={result.value.local} />
+            ) : null}
+          </>
         ),
         onFailure: () => (
           <p
