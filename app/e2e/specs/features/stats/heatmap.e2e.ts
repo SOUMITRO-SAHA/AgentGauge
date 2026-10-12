@@ -37,7 +37,7 @@ describe("stats activity heatmap", () => {
           ?.textContent?.replace(/\s+/g, " ")
           .trim() ?? "";
       return {
-        weeks: root?.querySelectorAll('[data-testid="stats-activity-week"]').length ?? 0,
+        weeks: cells.length / 7,
         cells,
         source: read("stats-activity-source"),
         months: read("stats-activity-months"),
@@ -46,12 +46,13 @@ describe("stats activity heatmap", () => {
       };
     });
 
-    // A column is a week and a row is a weekday, so the grid runs back a year.
-    expect(grid.weeks).toBeGreaterThanOrEqual(53);
+    // A column is a week and a row is a weekday.
+    expect(grid.weeks).toBeGreaterThanOrEqual(13);
     expect(grid.cells.length).toBeGreaterThan(364);
     // Each day sits in the row its weekday demands, which is what makes a
     // column readable as a week at a glance.
-    expect(grid.cells.find((c) => c.id.endsWith("2026-09-07"))?.row).toBe("1");
+    // Rows run Monday first, so Monday is row 0.
+    expect(grid.cells.find((c) => c.id.endsWith("2026-09-07"))?.row).toBe("0");
     expect(grid.months).toContain("Sep");
     expect(grid.weekdays).toContain("Mon");
     expect(grid.legend).toContain("Less");

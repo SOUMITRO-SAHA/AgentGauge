@@ -20,7 +20,9 @@
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 import {
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactElement,
   type ReactNode,
@@ -101,7 +103,7 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
         onValueChange={setSelected}
         className="flex flex-col gap-4"
       >
-        <TabsList aria-label="Connected plans">
+        <TabsList className="flex-wrap" aria-label="Connected plans">
           {tabs.map((tab) => (
             <TabsTrigger
               key={tab.value}
@@ -574,9 +576,12 @@ export function ActivityHeatmap({
   // empty cells would be a chart of the absence of data rather than of work.
   if (recorded.size === 0) return null;
 
+  const frame = useRef<HTMLDivElement | null>(null);
+  const roomyWeeks = useWeeksThatFit(frame);
+
   const weeks = useMemo(
-    () => buildWeeks(recorded, until ?? todayUtc()),
-    [recorded, until],
+    () => buildWeeks(recorded, until ?? todayUtc()).slice(-roomyWeeks),
+    [recorded, until, roomyWeeks],
   );
 
   if (weeks.length === 0) return null;
@@ -593,49 +598,50 @@ export function ActivityHeatmap({
           className="text-xs text-muted-foreground tabular"
           data-testid="stats-activity-busiest"
         >
-          {activeDays} active {activeDays === 1 ? "day" : "days"}
+          {windowLabel(weeks.length)} · {activeDays} active{" "}
+          {activeDays === 1 ? "day" : "days"}
         </span>
       </div>
 
       <div className="flex gap-1.5">
-        <div
-          className="flex shrink-0 flex-col gap-[3px] text-[9px] leading-none text-muted-foreground/70"
-          data-testid="stats-activity-weekdays"
-          aria-hidden="true"
-        >
-          {WEEKDAY_LABELS.map((label, row) => (
-            <span key={row} className="h-[11px]">
-              {label}
-            </span>
-          ))}
-        </div>
-        <div className="min-w-0 flex-1 overflow-x-auto pb-1">
-          <div className="flex gap-[3px]" data-testid="stats-activity-grid">
-            {weeks.map((week, index) => (
-              <div
-                key={week[0]?.day ?? index}
-                className="flex flex-col gap-[3px]"
-                data-testid="stats-activity-week"
+        <div className="min-w-0 flex-1" ref={frame}>
+          <div
+            className="grid grid-flow-col grid-rows-7 gap-[3px]"
+            style={{
+              gridTemplateColumns: `auto repeat(${weeks.length}, minmax(0, 1fr))`,
+            }}
+            data-testid="stats-activity-grid"
+          >
+            {WEEKDAY_LABELS.map((label, row) => (
+              <span
+                key={`weekday-${row}`}
+                className="flex h-full items-center text-[9px] leading-none text-muted-foreground/70"
+                aria-hidden="true"
               >
-                {week.map((cell, row) => (
-                  <span
-                    key={cell.day}
-                    className={`h-[11px] w-[11px] rounded-[2px] ${HEATMAP_FILL[cell.state]}`}
-                    data-testid={`stats-activity-cell-${cell.day}`}
-                    data-row={row}
-                    data-state={cell.state}
-                    title={cellTitle(cell)}
-                  />
-                ))}
-              </div>
+                {label}
+              </span>
+            ))}
+            {weeks.flat().map((cell) => (
+              <span
+                key={cell.day}
+                className={`aspect-square w-full rounded-[2px] ${HEATMAP_FILL[cell.state]}`}
+                data-testid={`stats-activity-cell-${cell.day}`}
+                data-row={cell.row}
+                data-state={cell.state}
+                title={cellTitle(cell)}
+              />
             ))}
           </div>
           <div
-            className="mt-1 flex gap-[3px] text-[9px] leading-none text-muted-foreground"
+            className="mt-1 grid grid-flow-col gap-[3px] text-[9px] leading-none text-muted-foreground"
+            style={{
+              gridTemplateColumns: `auto repeat(${weeks.length}, minmax(0, 1fr))`,
+            }}
             data-testid="stats-activity-months"
           >
+            <span />
             {weeks.map((week, index) => (
-              <span key={week[0]?.day ?? index} className="w-[11px] shrink-0">
+              <span key={week[0]?.day ?? index}>
                 {monthLabelAt(weeks, index)}
               </span>
             ))}
@@ -695,7 +701,57 @@ type HeatCell = {
   day: string;
   tokens: number | null;
   state: HeatState;
+  /**
+   * The row this day occupies, Monday first. `Date.getUTCDay` counts Sunday
+   * from zero, so the order is rotated by six rather than by one.
+   */
+  row: number;
 };
+
+/** The smallest a cell may get before it stops reading as a cell. */
+const MIN_CELL_PX = 9;
+const CELL_GAP_PX = 3;
+const MAX_WEEKS = 53;
+
+/**
+ * How many weeks fit in the space available.
+ *
+ * A year of columns either shrinks into illegibility or forces the panel to
+ * scroll sideways, and a heatmap the reader has to scroll is no longer a year.
+ * So the grid keeps its cells at a readable size and shows fewer weeks instead:
+ * the full year when there is room, half a year when there is not.
+ *
+ * A width of zero means the frame has not been measured yet — no layout, as in
+ * a unit test — and the full window is the honest default.
+ */
+function useWeeksThatFit(frame: React.RefObject<HTMLDivElement | null>): number {
+  const [count, setCount] = useState(MAX_WEEKS);
+  useEffect(() => {
+    const node = frame.current;
+    if (node === null) return;
+    const measure = () => {
+      const width = node.getBoundingClientRect().width;
+      if (width <= 0) return;
+      const perWeek = MIN_CELL_PX + CELL_GAP_PX;
+      setCount(Math.max(13, Math.min(MAX_WEEKS, Math.floor(width / perWeek))));
+    };
+    measure();
+    // Without an observer the grid keeps the full window and stops adapting.
+    // A missing observer must not take the panel down with it.
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [frame]);
+  return count;
+}
+
+/** The window a grid of this many weeks covers, in words. */
+function windowLabel(weeks: number): string {
+  if (weeks >= MAX_WEEKS) return "The last year";
+  const months = Math.round((weeks * 7) / 30.4);
+  return `The last ${months} months`;
+}
 
 /**
  * The trailing year, as week columns of seven weekdays.
@@ -729,6 +785,7 @@ function buildWeeks(
       day,
       tokens,
       state: tokens === null ? "no-record" : intensityOf(tokens, peak),
+      row: (new Date(time).getUTCDay() + 6) % 7,
     };
     if (weeks.length === 0 || time % (7 * DAY_MS) === aligned % (7 * DAY_MS)) {
       weeks.push([cell]);

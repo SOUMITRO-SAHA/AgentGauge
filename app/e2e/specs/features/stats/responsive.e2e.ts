@@ -1,4 +1,4 @@
-import { expect } from "@wdio/globals";
+import { browser, expect } from "@wdio/globals";
 
 import {
   clickDisplayed,
@@ -102,19 +102,24 @@ describe("responsive stats", () => {
 
     assertFits(await overflowReport(), "narrow local reading");
 
-    // The activity grid must shrink with the panel rather than scroll inside
-    // it. A heatmap the reader has to scroll sideways stops being a year.
+    // The activity grid shrinks with the panel rather than scrolling inside it,
+    // so a narrow window shows fewer weeks at a readable cell size instead of
+    // a full year the reader has to pan across.
     const grid = await browser.execute(() => {
       const node = document.querySelector('[data-testid="stats-activity-grid"]');
-      const scroller = node?.parentElement;
+      const cells = node?.querySelectorAll("[data-testid^='stats-activity-cell-']");
+      const first = cells?.[0]?.getBoundingClientRect();
       return {
         gridWidth: node?.getBoundingClientRect().width ?? 0,
-        scrollWidth: scroller?.scrollWidth ?? 0,
-        clientWidth: scroller?.clientWidth ?? 0,
+        weeks: (cells?.length ?? 0) / 7,
+        cellPx: first?.width ?? 0,
       };
     });
-    expect(grid.scrollWidth).toBeLessThanOrEqual(grid.clientWidth + 1);
     expect(grid.gridWidth).toBeGreaterThan(0);
+    expect(grid.weeks).toBeGreaterThan(0);
+    expect(grid.weeks).toBeLessThan(53);
+    // Cells stay big enough to read rather than shrinking into a grey smear.
+    expect(grid.cellPx).toBeGreaterThanOrEqual(8);
   });
 
   it("fits a narrow window on the overview and the provider tabs", async () => {
@@ -142,5 +147,22 @@ describe("responsive stats", () => {
     await browser.pause(400);
 
     assertFits(await overflowReport(), "wide local reading");
+
+    // Responsive means the grid *uses* the room it is given rather than
+    // sitting at a fixed width: it fills its frame, and its cells stay big
+    // enough to read. How many weeks that buys depends on the panel, and the
+    // caption says so.
+    const grid = await browser.execute(() => {
+      const node = document.querySelector('[data-testid="stats-activity-grid"]');
+      const frame = node?.parentElement;
+      const cell = node?.querySelector("[data-testid^='stats-activity-cell-']");
+      return {
+        gridWidth: node?.getBoundingClientRect().width ?? 0,
+        frameWidth: frame?.getBoundingClientRect().width ?? 0,
+        cellPx: cell?.getBoundingClientRect().width ?? 0,
+      };
+    });
+    expect(grid.cellPx).toBeGreaterThanOrEqual(8);
+    expect(grid.gridWidth).toBeGreaterThan(grid.frameWidth * 0.9);
   });
 });
