@@ -572,10 +572,6 @@ export function ActivityHeatmap({
     [days],
   );
 
-  // No day records at all means the source reported nothing, and a year of
-  // empty cells would be a chart of the absence of data rather than of work.
-  if (recorded.size === 0) return null;
-
   const frame = useRef<HTMLDivElement | null>(null);
   const roomyWeeks = useWeeksThatFit(frame);
 
@@ -584,7 +580,13 @@ export function ActivityHeatmap({
     [recorded, until, roomyWeeks],
   );
 
-  if (weeks.length === 0) return null;
+  // Every hook above runs before this. An early return in the middle of them
+  // changes how many hooks the component called once the first read lands, and
+  // React tears the whole block down when it does.
+  //
+  // No day records at all means the source reported nothing, and a year of
+  // empty cells would be a chart of the absence of data rather than of work.
+  if (recorded.size === 0 || weeks.length === 0) return null;
 
   const activeDays = weeks
     .flat()
@@ -616,6 +618,7 @@ export function ActivityHeatmap({
               <span
                 key={`weekday-${row}`}
                 className="flex h-full items-center text-[9px] leading-none text-muted-foreground/70"
+                data-weekday={label === "" ? undefined : label}
                 aria-hidden="true"
               >
                 {label}

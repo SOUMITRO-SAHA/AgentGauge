@@ -41,14 +41,20 @@ describe("stats activity heatmap", () => {
         cells,
         source: read("stats-activity-source"),
         months: read("stats-activity-months"),
-        weekdays: read("stats-activity-weekdays"),
+        weekdays: Array.from(
+          document.querySelectorAll("[data-weekday]"),
+        )
+          .map((node) => node.getAttribute("data-weekday") ?? "")
+          .join(" "),
         legend: read("stats-activity-legend"),
       };
     });
 
-    // A column is a week and a row is a weekday.
+    // A column is a week and a row is a weekday. The window follows the panel
+    // rather than forcing a full year that would have to scroll.
     expect(grid.weeks).toBeGreaterThanOrEqual(13);
-    expect(grid.cells.length).toBeGreaterThan(364);
+    expect(grid.weeks).toBeLessThanOrEqual(53);
+    expect(grid.cells.length).toBe(grid.weeks * 7);
     // Each day sits in the row its weekday demands, which is what makes a
     // column readable as a week at a glance.
     // Rows run Monday first, so Monday is row 0.
