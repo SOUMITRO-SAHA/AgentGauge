@@ -1610,6 +1610,60 @@ export function zaiAccountUsageWithWeek() {
 }
 
 /** Z.AI connected, reporting a week of daily activity. */
+/**
+ * A trailing year of activity with the shape real usage has: nothing at all
+ * before the window opens, weekends quiet, and the recent weeks dense.
+ *
+ * Deterministic on purpose — a seeded wave rather than a random draw, so the
+ * grid looks the same in every run and a screenshot of it means something.
+ * Without this the grid renders three lonely cells and says nothing about how
+ * it reads at a year's worth of data.
+ */
+export function heatmapYearDays(): Array<{ day: string; tokens: number }> {
+  const days: Array<{ day: string; tokens: number }> = [];
+  const end = Date.UTC(2026, 9, 7);
+  for (let back = 364; back >= 0; back -= 1) {
+    const time = end - back * 86_400_000;
+    const date = new Date(time);
+    const day = date.toISOString().slice(0, 10);
+    // The first eight weeks predate the logs entirely.
+    if (back > 308) {
+      days.push({ day, tokens: 0 });
+      continue;
+    }
+    const weekday = date.getUTCDay();
+    if (weekday === 0 || weekday === 6) {
+      days.push({ day, tokens: 0 });
+      continue;
+    }
+    const recent = back < 42;
+    const base = recent ? 42_000_000 : 6_000_000;
+    const wave = ((back * 7919) % 13) / 12;
+    days.push({ day, tokens: Math.round(base * (0.35 + wave)) });
+  }
+  return days;
+}
+
+/** Codex reporting a full year, for the heatmap's own spec. */
+export async function dashboardWithHeatmapYear(): Promise<void> {
+  const local = codexLocalUsage();
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+    codexLocalUsage: {
+      ...local,
+      days: heatmapYearDays(),
+      firstDay: heatmapYearDays()[56]?.day ?? local.firstDay,
+      lastDay: heatmapYearDays().at(-1)?.day ?? local.lastDay,
+    },
+  });
+}
+
 export async function dashboardWithZaiWeek(): Promise<void> {
   await boot({
     visible: false,

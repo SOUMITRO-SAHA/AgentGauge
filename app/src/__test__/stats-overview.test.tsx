@@ -13,6 +13,7 @@ import { createElement } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import {
+  ActivityHeatmap,
   LocalLogPanel,
   StatsView,
 } from "~/components/views/stats-view";
@@ -442,4 +443,62 @@ it("shows no leaderboard when the source records no working directory", () => {
   );
 
   expect(screen.queryByTestId("stats-projects")).toBeNull();
+});
+
+it("lays activity out as week columns the way a contribution graph does", () => {
+  render(
+    createElement(ActivityHeatmap, {
+      days: [
+        { day: "2026-09-23", tokens: 100 },
+        { day: "2026-10-05", tokens: 400 },
+        { day: "2026-10-06", tokens: 0 },
+      ],
+      until: "2026-10-07",
+    }),
+  );
+
+  // A column is a week and a row is a weekday, so every day in the grid sits
+  // in the row its weekday demands. That alignment is the whole shape of the
+  // view: a wrapping row of days cannot show a rhythm.
+  const grid = screen.getByTestId("stats-activity-grid");
+  for (const day of ["2026-09-23", "2026-10-05", "2026-10-06"]) {
+    const cell = within(grid).getByTestId(`stats-activity-cell-${day}`);
+    const weekday = new Date(`${day}T00:00:00Z`).getUTCDay();
+    expect(cell.dataset.row).toBe(String(weekday));
+  }
+
+  // The grid runs back a year from the end, which is what makes the recent
+  // activity readable against the quiet before it.
+  const weeks = within(grid).getAllByTestId("stats-activity-week");
+  expect(weeks.length).toBeGreaterThanOrEqual(53);
+  expect(weeks.length).toBeLessThanOrEqual(54);
+
+  // Month labels, so a column of weeks is findable in time.
+  const months = screen.getByTestId("stats-activity-months").textContent ?? "";
+  expect(months).toContain("Oct");
+  expect(months).toContain("Sep");
+});
+
+it("still separates a day with no record from a day that recorded nothing", () => {
+  render(
+    createElement(ActivityHeatmap, {
+      days: [
+        { day: "2026-10-05", tokens: 400 },
+        { day: "2026-10-06", tokens: 0 },
+      ],
+      until: "2026-10-07",
+    }),
+  );
+
+  // A gap in the logs and a day you did not work mean opposite things. The
+  // contribution-graph look does not erase that.
+  expect(
+    screen.getByTestId("stats-activity-cell-2026-10-06").dataset.state,
+  ).toBe("empty");
+  expect(
+    screen.getByTestId("stats-activity-cell-2026-09-30").dataset.state,
+  ).toBe("no-record");
+  expect(screen.getByTestId("stats-activity-cell-2026-10-05").dataset.state).toBe(
+    "peak",
+  );
 });

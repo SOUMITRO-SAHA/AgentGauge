@@ -501,9 +501,7 @@ export function LocalLogPanel({
       />
       <ActivityHeatmap
         days={usage.days}
-        firstDay={usage.firstDay}
-        lastDay={usage.lastDay}
-        source={`${usage.sessions} local logs, shaded by tokens. A gap is a day with no record, not a day with none.`}
+        source={`The last year, shaded by tokens. ${coverageSentence(usage.firstDay, usage.lastDay, `${usage.sessions} local logs`)}. A gap is a day with no record, not a day with none.`}
       />
       {usage.unpricedTokens > 0 ? (
         <p
@@ -559,73 +557,226 @@ export function LocalLogPanel({
  */
 export function ActivityHeatmap({
   days,
-  firstDay,
-  lastDay,
-  source = "Every day the logs cover, shaded by tokens. A gap is a day with no record, not a day with none.",
+  source = "The last year, shaded by tokens. A gap is a day with no record, not a day with none.",
+  until,
 }: {
   readonly days: readonly { readonly day: string; readonly tokens: number | null }[];
-  readonly firstDay: string | null;
-  readonly lastDay: string | null;
   readonly source?: string;
+  /** The last day drawn. Defaults to today; pinned by tests. */
+  readonly until?: string;
 }) {
-  const span = useMemo(() => {
-    if (days.length === 0 || firstDay === null || lastDay === null) return [];
-    const recorded = new Map(days.map((day) => [day.day, day.tokens]));
-    const first = Date.parse(`${firstDay}T00:00:00Z`);
-    const last = Date.parse(`${lastDay}T00:00:00Z`);
-    if (!Number.isFinite(first) || !Number.isFinite(last) || last < first) {
-      return [];
-    }
-    const cells: Array<{ day: string; tokens: number | null }> = [];
-    for (let time = first; time <= last; time += 86_400_000) {
-      const day = new Date(time).toISOString().slice(0, 10);
-      cells.push({ day, tokens: recorded.get(day) ?? null });
-    }
-    return cells;
-  }, [days, firstDay, lastDay]);
-
-  if (span.length === 0) return null;
-
-  const peak = span.reduce(
-    (best, cell) => (cell.tokens !== null && cell.tokens > best ? cell.tokens : best),
-    0,
+  const recorded = useMemo(
+    () => new Map(days.map((day) => [day.day, day.tokens])),
+    [days],
   );
-  const activeDays = span.filter((cell) => (cell.tokens ?? 0) > 0).length;
+
+  // No day records at all means the source reported nothing, and a year of
+  // empty cells would be a chart of the absence of data rather than of work.
+  if (recorded.size === 0) return null;
+
+  const weeks = useMemo(
+    () => buildWeeks(recorded, until ?? todayUtc()),
+    [recorded, until],
+  );
+
+  if (weeks.length === 0) return null;
+
+  const activeDays = weeks
+    .flat()
+    .filter((cell) => (cell.tokens ?? 0) > 0).length;
 
   return (
     <div className="flex flex-col gap-2" data-testid="stats-activity-heatmap">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h4 className="text-xs font-medium text-foreground">When you worked</h4>
         <span
-          className="text-xs text-muted-foreground"
+          className="text-xs text-muted-foreground tabular"
           data-testid="stats-activity-busiest"
         >
-          {firstDay} → {lastDay} · {activeDays} active{" "}
-          {activeDays === 1 ? "day" : "days"}
+          {activeDays} active {activeDays === 1 ? "day" : "days"}
         </span>
       </div>
-      <div className="flex flex-wrap gap-[3px]">
-        {span.map((cell) => {
-          const state = cell.tokens === null ? "no-record" : intensityOf(cell.tokens, peak);
-          return (
-            <span
-              key={cell.day}
-              className={`h-3 w-3 rounded-[2px] ${HEATMAP_FILL[state]}`}
-              data-testid={`stats-activity-cell-${cell.day}`}
-              data-state={state}
-              title={`${cell.day}: ${cell.tokens === null ? "no record" : `${formatCompactCount(cell.tokens)} tokens`}`}
-            />
-          );
-        })}
+
+      <div className="flex gap-1.5">
+        <div
+          className="flex shrink-0 flex-col gap-[3px] text-[9px] leading-none text-muted-foreground/70"
+          data-testid="stats-activity-weekdays"
+          aria-hidden="true"
+        >
+          {WEEKDAY_LABELS.map((label, row) => (
+            <span key={row} className="h-[11px]">
+              {label}
+            </span>
+          ))}
+        </div>
+        <div className="min-w-0 flex-1 overflow-x-auto pb-1">
+          <div className="flex gap-[3px]" data-testid="stats-activity-grid">
+            {weeks.map((week, index) => (
+              <div
+                key={week[0]?.day ?? index}
+                className="flex flex-col gap-[3px]"
+                data-testid="stats-activity-week"
+              >
+                {week.map((cell, row) => (
+                  <span
+                    key={cell.day}
+                    className={`h-[11px] w-[11px] rounded-[2px] ${HEATMAP_FILL[cell.state]}`}
+                    data-testid={`stats-activity-cell-${cell.day}`}
+                    data-row={row}
+                    data-state={cell.state}
+                    title={cellTitle(cell)}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+          <div
+            className="mt-1 flex gap-[3px] text-[9px] leading-none text-muted-foreground"
+            data-testid="stats-activity-months"
+          >
+            {weeks.map((week, index) => (
+              <span key={week[0]?.day ?? index} className="w-[11px] shrink-0">
+                {monthLabelAt(weeks, index)}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
-      <p
-        className="text-xs text-muted-foreground"
-        data-testid="stats-activity-source"
-      >
-        {source}
-      </p>
+
+      <div className="flex items-center justify-between gap-2">
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="stats-activity-source"
+        >
+          {source}
+        </p>
+        <div
+          className="flex shrink-0 items-center gap-1 text-[9px] text-muted-foreground"
+          data-testid="stats-activity-legend"
+        >
+          <span>Less</span>
+          {(["empty", "low", "mid", "high", "peak"] as const).map((state) => (
+            <span
+              key={state}
+              className={`h-[9px] w-[9px] rounded-[2px] ${HEATMAP_FILL[state]}`}
+            />
+          ))}
+          <span>More</span>
+        </div>
+      </div>
     </div>
   );
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * What the source actually covers, in words.
+ *
+ * The grid runs back a year, so the span it draws is wider than the span the
+ * data covers. Saying so is what keeps a mostly-empty grid from reading as a
+ * year of inactivity.
+ */
+function coverageSentence(
+  firstDay: string | null,
+  lastDay: string | null,
+  what: string,
+): string {
+  if (firstDay === null || lastDay === null) return `${what}, span unknown`;
+  return `${what}, covering ${firstDay} → ${lastDay}`;
+}
+
+/** Today as an ISO date, the grid's right edge unless a caller says otherwise. */
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+type HeatCell = {
+  day: string;
+  tokens: number | null;
+  state: HeatState;
+};
+
+/**
+ * The trailing year, as week columns of seven weekdays.
+ *
+ * Each cell's row is its weekday, which is what makes a column readable as a
+ * week at a glance. The window runs back 52 weeks from the end and starts on
+ * the Sunday before that, so the first column is partial rather than shifted —
+ * a grid whose rows drift by a day is a grid nobody can read.
+ *
+ * Days outside the source's coverage stay `no-record` instead of being drawn
+ * as zeroes. The contribution-graph convention treats them alike, but "the
+ * logs do not cover this day" and "you did not work this day" are different
+ * facts and the grid keeps both.
+ */
+function buildWeeks(
+  recorded: ReadonlyMap<string, number | null>,
+  until: string,
+): HeatCell[][] {
+  const end = Date.parse(`${until}T00:00:00Z`);
+  if (!Number.isFinite(end)) return [];
+  const start = end - 364 * DAY_MS;
+  // Back up to the Sunday that opens the week containing `start`.
+  const aligned = start - new Date(start).getUTCDay() * DAY_MS;
+  const peak = peakOf(recorded);
+
+  const weeks: HeatCell[][] = [];
+  for (let time = aligned; time <= end; time += DAY_MS) {
+    const day = new Date(time).toISOString().slice(0, 10);
+    const tokens = recorded.get(day) ?? null;
+    const cell: HeatCell = {
+      day,
+      tokens,
+      state: tokens === null ? "no-record" : intensityOf(tokens, peak),
+    };
+    if (weeks.length === 0 || time % (7 * DAY_MS) === aligned % (7 * DAY_MS)) {
+      weeks.push([cell]);
+    } else {
+      weeks[weeks.length - 1].push(cell);
+    }
+  }
+  return weeks;
+}
+
+/** The busiest recorded day, which is the top of the shade scale. */
+function peakOf(recorded: ReadonlyMap<string, number | null>): number {
+  let peak = 0;
+  for (const tokens of recorded.values()) {
+    if (tokens !== null && tokens > peak) peak = tokens;
+  }
+  return peak;
+}
+
+/** The month to print above a column, or an empty string to leave it blank. */
+function monthLabelAt(weeks: readonly HeatCell[][], index: number): string {
+  const week = weeks[index];
+  if (week === undefined || week.length === 0) return "";
+  const month = week[0].day.slice(0, 7);
+  const previous = weeks[index - 1]?.[0]?.day.slice(0, 7);
+  if (previous === month) return "";
+  return MONTH_NAMES[Number(month.slice(5, 7)) - 1] ?? "";
+}
+
+const MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+/** What a cell says on hover, which is where the gap distinction surfaces. */
+function cellTitle(cell: HeatCell): string {
+  if (cell.tokens === null) return `${cell.day}: no record`;
+  return `${cell.day}: ${formatCompactCount(cell.tokens)} tokens`;
 }
 
 /**
@@ -645,12 +796,13 @@ function intensityOf(tokens: number, peak: number): HeatState {
   if (tokens <= 0) return "empty";
   if (peak <= 0) return "low";
   const share = tokens / peak;
-  if (share >= 0.6) return "peak";
-  if (share >= 0.25) return "high";
+  if (share >= 0.75) return "peak";
+  if (share >= 0.45) return "high";
+  if (share >= 0.2) return "mid";
   return "low";
 }
 
-type HeatState = "no-record" | "empty" | "low" | "high" | "peak";
+type HeatState = "no-record" | "empty" | "low" | "mid" | "high" | "peak";
 
 /**
  * Heatmap fills, from theme tokens only.
@@ -658,13 +810,27 @@ type HeatState = "no-record" | "empty" | "low" | "high" | "peak";
  * `accent-glass` marks a day with no record: the same chrome the share bars
  * sit on, so a gap reads as absence rather than as another shade of activity.
  */
+/**
+ * Cell fills, from theme tokens only.
+ *
+ * Four activity shades over a quiet base, the way a contribution graph reads:
+ * the eye compares a day's colour against its neighbours, not against an
+ * absolute number. `no-record` sits one step *below* the quiet base, so a day
+ * missing from the logs reads as a hole in the grid rather than as another
+ * quiet day. That distinction is the one thing this block refuses to flatten.
+ */
 const HEATMAP_FILL: Record<HeatState, string> = {
-  "no-record": "border border-border/60 bg-accent-glass",
-  empty: "bg-accent-glass",
+  "no-record": "bg-muted/45",
+  empty: "bg-muted",
   low: "bg-chart-1/25",
-  high: "bg-chart-1/55",
+  mid: "bg-chart-1/45",
+  high: "bg-chart-1/70",
   peak: "bg-chart-1",
 };
+
+/** Weekday labels, in the grid's row order. Every other row stays blank so the
+ * labels align with the cells without crowding the block. */
+const WEEKDAY_LABELS = ["Mon", "", "Wed", "", "Fri", "", ""] as const;
 
 /** One model's row in the local reading: token share against exact cost share. */
 function LocalModelRow({
@@ -916,13 +1082,13 @@ function PlanAnalytics({
               result.value.dailyUsageBuckets.length > 0 ? (
               <ActivityHeatmap
                 days={reportedDays(result.value)}
-                firstDay={result.value.dailyUsageBuckets[0]?.startDate ?? null}
-                lastDay={
+                source={`The last year, shaded by tokens. ${coverageSentence(
+                  result.value.dailyUsageBuckets[0]?.startDate ?? null,
                   result.value.dailyUsageBuckets[
                     result.value.dailyUsageBuckets.length - 1
-                  ]?.startDate ?? null
-                }
-                source={`${label}'s own ${result.value.windowDays ?? "reported"} days, shaded by tokens.`}
+                  ]?.startDate ?? null,
+                  `${label}'s own ${result.value.windowDays ?? "reported"} days`,
+                )}.`}
               />
             ) : null}
             {result.value.models.length > 0 ? (
