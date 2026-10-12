@@ -262,6 +262,36 @@ pub struct LocalPricing {
     pub unpriced_tokens: u64,
 }
 
+/// The bundled price list, parsed. `None` when it cannot be parsed at all,
+/// which leaves every model unpriced rather than pricing against nothing.
+pub fn bundled_price_catalog() -> Option<serde_json::Value> {
+    serde_json::from_str(include_str!("../../../public/price_list.json")).ok()
+}
+
+/// The pure rule, with the catalog already read.
+pub fn price_local_model_with_catalog(
+    model: &mut LocalModelUsage,
+    provider_id: &str,
+    catalog: &serde_json::Value,
+) -> bool {
+    if let Some(name) = listed_model_entry(catalog, provider_id, &model.id)
+        .and_then(|entry| entry.get("name"))
+        .and_then(serde_json::Value::as_str)
+    {
+        model.display_name = name.to_string();
+    }
+    match local_model_cost(catalog, provider_id, model) {
+        Some(cost) => {
+            model.cost_usd = Some(cost);
+            true
+        }
+        None => {
+            model.cost_usd = None;
+            false
+        }
+    }
+}
+
 /// Prices local usage rows against the bundled price list.
 ///
 /// This is the exact tier the provider API cannot offer: the logs carry a real
@@ -269,10 +299,13 @@ pub struct LocalPricing {
 /// completion are each charged their own rate — no blended average and no
 /// assumed input share.
 ///
-/// A rate the list omits falls back to the input rate for the classes it
-/// always covers (prompt), and only makes a model unpriced when the model
-/// actually used a class with no rate at all (cache writes, on a model that
-/// lists no write rate).
+/// A rate the catalog does not separate falls back to the input rate — the
+/// closest published rate for the same class of prompt token. This was found
+/// against real data rather than assumed: OpenCode records 145k cache-write
+/// tokens for GLM-5.3-Flash, a model the catalog prices at input/output/cache-read
+/// but not cache-write, and dropping those rows priced 62% of that model's
+/// volume at nothing. A model is unpriced only when the catalog cannot price
+/// its ordinary prompt or output tokens at all.
 pub fn price_local_models(models: &mut [LocalModelUsage], provider_id: &str) -> LocalPricing {
     price_local_models_with_catalog(
         models,
@@ -296,21 +329,10 @@ pub fn price_local_models_with_catalog(
     let mut total_cost_usd = 0.0;
     let mut unpriced_tokens = 0;
     for model in models.iter_mut() {
-        if let Some(name) = listed_model_entry(&catalog, provider_id, &model.id)
-            .and_then(|entry| entry.get("name"))
-            .and_then(serde_json::Value::as_str)
-        {
-            model.display_name = name.to_string();
-        }
-        match local_model_cost(&catalog, provider_id, model) {
-            Some(cost) => {
-                model.cost_usd = Some(cost);
-                total_cost_usd += cost;
-            }
-            None => {
-                model.cost_usd = None;
-                unpriced_tokens += model.total_tokens();
-            }
+        if price_local_model_with_catalog(model, provider_id, &catalog) {
+            total_cost_usd += model.cost_usd.unwrap_or_default();
+        } else {
+            unpriced_tokens += model.total_tokens();
         }
     }
     LocalPricing {
@@ -334,15 +356,12 @@ fn local_model_cost(
 
     let input = rate("input")?;
     let output = rate("output")?;
-    // Prompt cache reads are billed as prompt; a catalog that separates them
-    // only ever lowers the rate, so the specific one is preferred and the
-    // input rate is the honest floor.
+    // Cache reads and cache writes are prompt tokens the vendor does not
+    // always price separately. Prefer the specific rate — a catalog that
+    // separates them only ever lowers the charge — and fall back to the input
+    // rate, which overstates a write rather than dropping the tokens.
     let cache_read = rate("cache_read").unwrap_or(input);
-    let cache_write = match (rate("cache_write"), model.cache_write) {
-        (Some(rate), _) => rate,
-        (None, 0) => 0.0,
-        (None, _) => return None,
-    };
+    let cache_write = rate("cache_write").unwrap_or(input);
 
     let cost = (model.fresh_input() as f64 * input
         + model.cached_input as f64 * cache_read
@@ -1044,14 +1063,31 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_rate_for_tokens_that_ran_makes_the_model_unpriced() {
-        // GPT-5.5 lists no cache-write rate. Pricing its cache writes at the
-        // input rate would understate the bill, so the whole model stays
-        // unpriced instead.
+    fn a_write_rate_the_catalog_omits_charges_prompt_at_the_input_rate() {
+        // GPT-5.5 lists no cache-write rate. Charging writes at the input rate
+        // overstates them slightly; dropping the model's whole volume because
+        // of a missing rate understates far more (see the real-data note on
+        // `price_local_models`).
         let mut model = local_model("gpt-5.5");
-        model.cache_write = 1000;
+        model.cache_write = 1_000_000_000;
         let mut models = vec![model];
         let priced = price_local_models_with_catalog(&mut models, "openai", SPLIT_CATALOG);
+
+        // fresh 600M × $5 + cached 400M × $0.5 + writes 1B × $5 + output
+        // 200M × $30 = $14,200.
+        assert!((models[0].cost_usd.expect("priced") - 14_200.0).abs() < 0.001);
+        assert!((priced.total_cost_usd - 14_200.0).abs() < 0.001);
+        assert_eq!(priced.unpriced_tokens, 0);
+    }
+
+    #[test]
+    fn a_model_the_catalog_cannot_price_at_all_stays_unpriced() {
+        // No input and no output rate: there is nothing to fall back from.
+        let catalog = r#"{"providers":{"zai-coding-plan":{"models":{
+            "glm-mystery":{"name":"GLM Mystery"}
+        }}}}"#;
+        let mut models = vec![local_model("glm-mystery")];
+        let priced = price_local_models_with_catalog(&mut models, "zai-coding-plan", catalog);
 
         assert!(models[0].cost_usd.is_none());
         assert_eq!(priced.unpriced_tokens, 1_200_000_000);

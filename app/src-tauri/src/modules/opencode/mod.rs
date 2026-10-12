@@ -17,6 +17,10 @@
 //! If OpenCode is not installed, every call fails with `ProviderMissing` and
 //! the UI says so — Codex usage is unaffected.
 
+mod db;
+
+pub(crate) use db::local_usage_for;
+
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;

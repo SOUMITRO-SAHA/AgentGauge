@@ -6,12 +6,14 @@
 
 pub(crate) mod protocol;
 
+use crate::modules::opencode;
 use crate::modules::providers::coding_plan::{self, PlanSpec};
 use crate::modules::providers::kimi::protocol::{
     decode_auth_failure, decode_usages, is_auth_refusal, USAGES_PATH,
 };
+use crate::shared::clock::{Clock, SystemClock};
 use crate::shared::domain::{
-    AccountUsage, KickoffModelInfo, PlanKind, ProviderKind, UsageSnapshot,
+    AccountUsage, AccountUsageSummary, KickoffModelInfo, PlanKind, ProviderKind, UsageSnapshot,
 };
 use crate::shared::error::Error;
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
@@ -59,11 +61,20 @@ impl Provider for KimiProvider {
         })
     }
 
+    /// Kimi publishes no token history of its own, so the only account
+    /// analytics available are the sessions OpenCode recorded locally. With
+    /// none, this stays the "unsupported" answer rather than an empty panel.
     fn read_account_usage(&self) -> Result<AccountUsage, Error> {
-        Err(coding_plan::unsupported(
-            ProviderKind::Kimi,
-            "account activity",
-        ))
+        opencode::local_usage_for(&FAMILY)
+            .map(|local| AccountUsage {
+                fetched_at: Clock::now_ms(&SystemClock),
+                summary: AccountUsageSummary::default(),
+                daily_usage_buckets: Vec::new(),
+                models: Vec::new(),
+                local: Some(local),
+                window_days: None,
+            })
+            .ok_or_else(|| coding_plan::unsupported(ProviderKind::Kimi, "account activity"))
     }
 
     fn account(&self) -> Result<Option<PlanKind>, Error> {
