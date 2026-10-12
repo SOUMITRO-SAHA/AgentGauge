@@ -12,7 +12,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { createElement } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { StatsView } from "~/components/views/stats-view";
+import {
+  LocalLogPanel,
+  StatsView,
+} from "~/components/views/stats-view";
 
 type Request = { readonly type: string; readonly provider?: string };
 
@@ -302,4 +305,54 @@ it("opens a plan's own tab from the overview's tab strip", async () => {
   fireEvent.click(tab);
 
   expect(await screen.findByTestId("stats-plan-analytics")).toBeTruthy();
+});
+
+it("draws the activity heatmap over the span the logs actually cover", () => {
+  render(
+    createElement(LocalLogPanel, {
+      usage: {
+        ...codexAccountUsage().local,
+        days: [
+          { day: "2026-09-22", tokens: 100 },
+          { day: "2026-09-23", tokens: 0 },
+          // A gap: no record at all for the 24th.
+          { day: "2026-09-25", tokens: 400 },
+        ],
+        firstDay: "2026-09-22",
+        lastDay: "2026-09-26",
+      },
+      source: "Codex",
+    }),
+  );
+
+  const heatmap = screen.getByTestId("stats-local-heatmap");
+  // The grid spans the coverage, and says which span it is.
+  expect(heatmap.textContent ?? "").toContain("2026-09-22");
+  expect(heatmap.textContent ?? "").toContain("2026-09-26");
+  // A day with no record is a gap, distinct from a day with no tokens.
+  expect(screen.getByTestId("stats-heatmap-cell-2026-09-24")).toBeTruthy();
+  expect(screen.getByTestId("stats-heatmap-cell-2026-09-24").dataset.state).toBe(
+    "no-record",
+  );
+  // A day that recorded zero tokens is not a day with no record: the two are
+  // drawn differently, so a missing log never reads as an idle one.
+  expect(screen.getByTestId("stats-heatmap-cell-2026-09-23").dataset.state).toBe(
+    "empty",
+  );
+  // The busiest day in range is the top of the scale.
+  expect(screen.getByTestId("stats-heatmap-cell-2026-09-25").dataset.state).toBe(
+    "peak",
+  );
+  expect(screen.getByTestId("stats-heatmap-busiest")).toBeTruthy();
+});
+
+it("leaves the heatmap out when the logs have no day records", () => {
+  render(
+    createElement(LocalLogPanel, {
+      usage: { ...codexAccountUsage().local, days: [] },
+      source: "Codex",
+    }),
+  );
+
+  expect(screen.queryByTestId("stats-local-heatmap")).toBeNull();
 });

@@ -456,4 +456,42 @@ describe("stats", () => {
     expect(overview.totalExists).toBe(false);
     expect(overview.note).toContain("summed");
   });
+  it("draws the activity heatmap over the span the logs cover", async () => {
+    await dashboardLive();
+    await gotoView("stats");
+
+    await clickDisplayed('[data-testid="stats-tab-codex"]');
+    await expectDisplayed('[data-testid="stats-local-heatmap"]');
+
+    const heatmap = await browser.execute(() => {
+      const root = document.querySelector('[data-testid="stats-local-heatmap"]');
+      const cells = Array.from(
+        root?.querySelectorAll("[data-testid^='stats-heatmap-cell-']") ?? [],
+      ).map((cell) => ({
+        id: cell.getAttribute("data-testid") ?? "",
+        state: cell.getAttribute("data-state") ?? "",
+      }));
+      return {
+        label:
+          root
+            ?.querySelector('[data-testid="stats-heatmap-busiest"]')
+            ?.textContent?.replace(/\s+/g, " ") ?? "",
+        cells,
+      };
+    });
+
+    // The grid covers the log span, labels it, and distinguishes a day with
+    // no record from a day that recorded nothing.
+    expect(heatmap.label).toContain("2026-09-04");
+    expect(heatmap.label).toContain("2026-09-24");
+    expect(heatmap.cells.length).toBe(21);
+    const gap = heatmap.cells.find((cell) =>
+      cell.id.endsWith("2026-09-06"),
+    );
+    expect(gap?.state).toBe("no-record");
+    const recorded = heatmap.cells.find((cell) =>
+      cell.id.endsWith("2026-09-04"),
+    );
+    expect(recorded?.state).toBe("peak");
+  });
 });

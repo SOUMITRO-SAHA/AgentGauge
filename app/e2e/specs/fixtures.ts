@@ -342,7 +342,6 @@ export function subscription(overrides: Record<string, unknown> = {}) {
 /** A process-insights group, as the `processInsights` reply would carry it. */
 export function processGroup(id: string, overrides: Record<string, unknown> = {}) {
   const displayNames: Record<string, string> = {
-    agentgauge: "AgentGauge",
     codex: "Codex",
     opencode: "OpenCode",
   };
@@ -377,52 +376,21 @@ export function processSummary(overrides: Record<string, unknown> = {}) {
 function emptyProcessInsights() {
   return {
     fetchedAt: Date.now(),
-    groups: [processGroup("agentgauge"), processGroup("codex"), processGroup("opencode")],
+    groups: [processGroup("codex"), processGroup("opencode")],
   };
 }
 
 /**
- * A full process-insights reply: the app with two processes (itself and a
- * webview helper), Codex with one process and measured storage, OpenCode
- * idle with its data directory absent. Every explicit state the screen can
- * render, in one report.
+ * A full process-insights reply: Codex with one process and measured
+ * storage, OpenCode idle with its data directory absent. Every explicit
+ * state the screen can render, in one report. There is deliberately no
+ * AgentGauge group — the screen reports the toolchain's cost, not the
+ * app's own.
  */
 export function processInsightsReport() {
   return {
     fetchedAt: Date.now(),
     groups: [
-      processGroup("agentgauge", {
-        processes: [
-          processSummary({
-            pid: 1000,
-            name: "agentgauge",
-            command:
-              "/Applications/AgentGauge.app/Contents/MacOS/agentgauge",
-            memoryBytes: 300_000_000,
-          }),
-          processSummary({
-            pid: 1001,
-            name: "com.apple.WebKit.WebContent",
-            command: null,
-            memoryBytes: 132_000_000,
-          }),
-        ],
-        totalMemoryBytes: 432_000_000,
-        storage: {
-          state: "measured",
-          totalBytes: 3_000,
-          totalFiles: 4,
-          rows: [
-            { label: "App data", path: "/app-data", bytes: 2_000, fileCount: 3 },
-            {
-              label: "Widget & schedule data",
-              path: "/shared",
-              bytes: 1_000,
-              fileCount: 1,
-            },
-          ],
-        },
-      }),
       processGroup("codex", {
         processes: [processSummary({ pid: 4242 })],
         totalMemoryBytes: 432_000_000,
@@ -1182,7 +1150,7 @@ type UiNudge =
   | "refresh-usage"
   | "refresh-automation"
   | "refresh-widget"
-  | "refresh-processes-agentgauge";
+  | "refresh-processes-codex";
 
 export async function settle(nudge: UiNudge): Promise<void> {
   const target = await firstDisplayed(`[data-testid="${nudge}"]`);
@@ -1323,7 +1291,7 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
           { view: "home", control: "refresh-provider" },
           { view: "home", control: "refresh-usage" },
           { view: "automation", control: "refresh-automation" },
-          { view: "processes", control: "refresh-processes-agentgauge" },
+          { view: "processes", control: "refresh-processes-codex" },
           { view: "settings", control: "refresh-widget" },
         ]),
   ] as ReadonlyArray<{
@@ -1511,6 +1479,8 @@ export function codexLocalUsage() {
     ],
     days: [
       { day: "2026-09-04", tokens: 120000000 },
+      // 2026-09-05 is deliberately absent: a day with no record.
+      { day: "2026-09-07", tokens: 0 },
       { day: "2026-09-24", tokens: 180000000 },
     ],
     costUsd: 114.51,

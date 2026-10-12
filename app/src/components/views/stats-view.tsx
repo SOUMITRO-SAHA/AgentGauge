@@ -20,6 +20,7 @@
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 import {
+  useMemo,
   useState,
   type ReactElement,
   type ReactNode,
@@ -494,6 +495,11 @@ export function LocalLogPanel({
           />
         ))}
       </div>
+      <ActivityHeatmap
+        days={usage.days}
+        firstDay={usage.firstDay}
+        lastDay={usage.lastDay}
+      />
       {usage.unpricedTokens > 0 ? (
         <p
           className="text-xs text-muted-foreground"
@@ -532,6 +538,112 @@ export function LocalLogPanel({
     </div>
   );
 }
+
+/**
+ * The activity heatmap: one cell per day the logs cover.
+ *
+ * It answers a question the totals cannot — *when* the work happens. The
+ * span is the data's own coverage rather than a calendar's, because a year of
+ * cells around three weeks of logs would be mostly invented emptiness.
+ *
+ * Two distinctions the drawing keeps. A day with **no record** is a gap, and a
+ * day with **zero tokens** is a recorded zero; collapsing them would make a
+ * missing log look like an idle one. Intensity is relative to the busiest day
+ * in range, so the grid reads the same whether the span is three weeks or a
+ * year.
+ */
+export function ActivityHeatmap({
+  days,
+  firstDay,
+  lastDay,
+}: {
+  readonly days: readonly Ipc.LocalDayUsage[];
+  readonly firstDay: string | null;
+  readonly lastDay: string | null;
+}) {
+  const span = useMemo(() => {
+    if (days.length === 0 || firstDay === null || lastDay === null) return [];
+    const recorded = new Map(days.map((day) => [day.day, day.tokens]));
+    const first = Date.parse(`${firstDay}T00:00:00Z`);
+    const last = Date.parse(`${lastDay}T00:00:00Z`);
+    if (!Number.isFinite(first) || !Number.isFinite(last) || last < first) {
+      return [];
+    }
+    const cells: Array<{ day: string; tokens: number | null }> = [];
+    for (let time = first; time <= last; time += 86_400_000) {
+      const day = new Date(time).toISOString().slice(0, 10);
+      cells.push({ day, tokens: recorded.get(day) ?? null });
+    }
+    return cells;
+  }, [days, firstDay, lastDay]);
+
+  if (span.length === 0) return null;
+
+  const peak = span.reduce(
+    (best, cell) => (cell.tokens !== null && cell.tokens > best ? cell.tokens : best),
+    0,
+  );
+  const activeDays = span.filter((cell) => (cell.tokens ?? 0) > 0).length;
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="stats-local-heatmap">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="text-xs font-medium text-foreground">When you worked</h4>
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid="stats-heatmap-busiest"
+        >
+          {firstDay} → {lastDay} · {activeDays} active{" "}
+          {activeDays === 1 ? "day" : "days"}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-[3px]">
+        {span.map((cell) => {
+          const state = cell.tokens === null ? "no-record" : intensityOf(cell.tokens, peak);
+          return (
+            <span
+              key={cell.day}
+              className={`h-3 w-3 rounded-[2px] ${HEATMAP_FILL[state]}`}
+              data-testid={`stats-heatmap-cell-${cell.day}`}
+              data-state={state}
+              title={`${cell.day}: ${cell.tokens === null ? "no record" : `${formatCompactCount(cell.tokens)} tokens`}`}
+            />
+          );
+        })}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Every day the logs cover, shaded by tokens. A gap is a day with no
+        record, not a day with none.
+      </p>
+    </div>
+  );
+}
+
+/** A day's shade, relative to the busiest day in range. */
+function intensityOf(tokens: number, peak: number): HeatState {
+  if (tokens <= 0) return "empty";
+  if (peak <= 0) return "low";
+  const share = tokens / peak;
+  if (share >= 0.6) return "peak";
+  if (share >= 0.25) return "high";
+  return "low";
+}
+
+type HeatState = "no-record" | "empty" | "low" | "high" | "peak";
+
+/**
+ * Heatmap fills, from theme tokens only.
+ *
+ * `accent-glass` marks a day with no record: the same chrome the share bars
+ * sit on, so a gap reads as absence rather than as another shade of activity.
+ */
+const HEATMAP_FILL: Record<HeatState, string> = {
+  "no-record": "border border-border/60 bg-accent-glass",
+  empty: "bg-accent-glass",
+  low: "bg-chart-1/25",
+  high: "bg-chart-1/55",
+  peak: "bg-chart-1",
+};
 
 /** One model's row in the local reading: token share against exact cost share. */
 function LocalModelRow({
