@@ -13,7 +13,8 @@ after(() => {
 
 describe("Stats All plans", () => {
   it("shows each plan's own figures without visiting unrelated destinations", async () => {
-    await statsWithZaiAnalytics();
+    const initialRoute = await statsWithZaiAnalytics();
+    expect(initialRoute).toBe("home");
 
     await expectDisplayed('[data-testid="stats-all-plans"]');
     await expectDisplayed('[data-testid="stats-plan-row-codex"]');

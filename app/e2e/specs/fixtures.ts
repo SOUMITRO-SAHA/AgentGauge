@@ -1290,7 +1290,7 @@ export async function dispatchCalls(): Promise<Array<Record<string, unknown>>> {
 export async function boot(
   fixtures: DispatchFixtures,
   options: BootOptions = {},
-): Promise<void> {
+): Promise<E2EView | null> {
   // The gate and the route are seeded on disk BEFORE the app launches, so the
   // mount-time read answers what the fixtures need — no post-hoc fixing.
   //
@@ -1316,6 +1316,8 @@ export async function boot(
     if (!(await loading.isExisting())) break;
     await browser.pause(500);
   }
+
+  const initialRoute = await activeRoute();
 
   await installDispatch(fixtures);
 
@@ -1375,6 +1377,23 @@ export async function boot(
   }
 
   await waitForSurface(fixtures);
+  return initialRoute;
+}
+
+async function activeRoute(): Promise<E2EView | null> {
+  return browser.execute(() => {
+    const active = document.querySelector<HTMLElement>(
+      '[data-testid^="nav-"][aria-current="page"]',
+    );
+    const route = active?.dataset.testid?.slice(4);
+    return route === "home" ||
+      route === "automation" ||
+      route === "stats" ||
+      route === "processes" ||
+      route === "settings"
+      ? route
+      : null;
+  });
 }
 /** Waits for either surface to have rendered. */
 async function waitForAnySurface(): Promise<void> {
@@ -1693,9 +1712,9 @@ export async function dashboardWithZaiAnalytics(): Promise<void> {
   await boot(zaiAnalyticsFixture());
 }
 
-export async function statsWithZaiAnalytics(): Promise<void> {
-  await boot(zaiAnalyticsFixture(), {
-    initialRoute: "stats",
+export async function statsWithZaiAnalytics(): Promise<E2EView | null> {
+  return boot(zaiAnalyticsFixture(), {
+    initialRoute: "home",
     nudges: [{ view: "stats", control: "stats-reload" }],
     finalRoute: "stats",
   });
