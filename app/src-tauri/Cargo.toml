@@ -34,6 +34,10 @@ tauri-plugin-opener = "2"
 tauri-plugin-http = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The durable store behind every persisted module. `bundled` compiles SQLite
+# from source, so no system library is needed on any platform; the connection
+# is owned by the backend (client -> server -> db), never the renderer.
+rusqlite = { version = "0.40", features = ["bundled"] }
 # Process facts (pid, parent, RSS, start time) for the read-only Processes
 # screen. `system` only: the default feature set (disks, networks, components,
 # users, gpu) is disabled so none of it is compiled. Approved by the user.

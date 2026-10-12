@@ -6,22 +6,27 @@
 //! change to the route set never needs a protocol change and a stale value from
 //! an older build simply fails the renderer's own validation on read.
 //!
-//! State lives in the OS application-data directory, never in the renderer:
-//! the same rule as onboarding, for the same reason — webview storage is not
-//! the app's and does not survive a cleared webview data directory.
+//! State lives in the shared SQLite database, never in the renderer or in a
+//! hand-rolled file: the same rule as onboarding, for the same reasons —
+//! webview storage is not the app's, and the database gives the write
+//! durability and the one-time import of a pre-database `settings.json`.
 
-use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::shared::database::Database;
 use crate::shared::error::Error;
+
+/// The document key this store owns inside the shared database.
+const KEY: &str = "uiState";
 
 /// A renderer preference set.
 ///
-/// Every field is optional: a missing file, a missing field, and "the user
-/// never chose" are the same state. Adding a field later defaults old files
-/// rather than invalidating them.
+/// Every field is optional: a missing document, a missing field, and "the user
+/// never chose" are the same state. Adding a field later defaults old
+/// documents rather than invalidating them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiState {
@@ -37,13 +42,13 @@ pub struct UiState {
 /// Largest accepted [`UiState::last_route`].
 ///
 /// Routes are short fixed words; anything longer is not a route and must not
-/// turn the file into a dumping ground.
+/// turn the store into a dumping ground.
 const MAX_ROUTE_LEN: usize = 64;
 
 impl UiState {
     /// Rejects a route value no renderer could have meant.
     ///
-    /// The renderer re-validates on read as well — this bound is for the file,
+    /// The renderer re-validates on read as well — this bound is for storage,
     /// so a compromised renderer cannot persist unbounded strings.
     pub fn with_last_route(mut self, route: Option<String>) -> Self {
         self.last_route =
@@ -55,139 +60,143 @@ impl UiState {
 /// Reads and writes the renderer preferences.
 #[derive(Clone)]
 pub struct SettingsStore {
-    path: PathBuf,
+    db: Arc<Database>,
+    legacy: Option<PathBuf>,
 }
 
 impl SettingsStore {
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
+    pub fn new(db: Arc<Database>) -> Self {
+        Self { db, legacy: None }
     }
 
-    /// A store rooted in the OS application-data directory.
-    pub fn in_app_dir(app_data: &std::path::Path) -> Self {
-        Self::new(app_data.join("settings.json"))
+    /// Names the pre-database file to import on first sight, when one exists.
+    pub fn with_legacy(mut self, path: Option<PathBuf>) -> Self {
+        self.legacy = path;
+        self
     }
 
     /// Reads the persisted state, defaulting to nothing chosen.
     ///
-    /// A missing file is the normal first-run case, and an unreadable or
+    /// A missing document is the normal first-run case, and an unreadable or
     /// corrupt one is treated the same way: a preference must never be able to
     /// block the app from launching.
     pub fn load(&self) -> UiState {
-        let Ok(raw) = fs::read_to_string(&self.path) else {
-            return UiState::default();
-        };
-
-        let Ok(parsed) = serde_json::from_str::<UiState>(&raw) else {
-            return UiState::default();
-        };
-
-        parsed
-    }
-
-    /// Persists the state, creating the parent directory if needed.
-    ///
-    /// Written through a sibling temp file and renamed, so a reader — the next
-    /// launch — never sees a half-written file, matching the widget snapshot.
-    pub fn save(&self, state: &UiState) -> Result<(), Error> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
-                Error::storage(format!("Could not create the app data directory: {err}"))
-            })?;
+        if let Err(error) = self.db.import_doc(KEY, self.legacy.as_deref()) {
+            eprintln!(
+                "agentgauge: could not import saved preferences: {}",
+                error.message
+            );
         }
 
-        let encoded = serde_json::to_string_pretty(state)
-            .map_err(|err| Error::storage(format!("Settings could not be encoded: {err}")))?;
+        let Ok(raw) = self.db.read_doc(KEY) else {
+            return UiState::default();
+        };
 
-        let temp = Self::temp_path(&self.path);
-        fs::write(&temp, encoded)
-            .map_err(|err| Error::storage(format!("Settings could not be saved: {err}")))?;
-        fs::rename(&temp, &self.path).map_err(|err| {
-            let _ = fs::remove_file(&temp);
-            Error::storage(format!("Settings could not be saved: {err}"))
-        })
+        raw.as_deref()
+            .and_then(|raw| serde_json::from_str::<UiState>(raw).ok())
+            .unwrap_or_default()
     }
 
-    fn temp_path(path: &std::path::Path) -> PathBuf {
-        path.with_extension("json.tmp")
+    /// Persists the state.
+    ///
+    /// A failed write is reported, because a preference lost silently is a
+    /// preference that lies about having been kept.
+    pub fn save(&self, state: &UiState) -> Result<(), Error> {
+        let encoded = serde_json::to_string(state)
+            .map_err(|err| Error::storage(format!("Settings could not be encoded: {err}")))?;
+        self.db.write_doc(KEY, &encoded)?;
+        if let Err(error) = self.db.consume_doc(self.legacy.as_deref()) {
+            eprintln!(
+                "agentgauge: could not retire the old preferences store: {}",
+                error.message
+            );
+        }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
-    fn temp_path(name: &str) -> PathBuf {
+    fn store(name: &str) -> (SettingsStore, PathBuf) {
         let dir = std::env::temp_dir().join(format!("agentgauge-settings-{name}"));
         let _ = fs::remove_dir_all(&dir);
-        dir.join("nested").join("settings.json")
+        fs::create_dir_all(&dir).expect("creates dir");
+        let db = Database::open(&dir.join("agentgauge.db")).expect("opens");
+        let legacy = dir.join("settings.json");
+        (
+            SettingsStore::new(Arc::new(db)).with_legacy(Some(legacy.clone())),
+            legacy,
+        )
     }
 
     #[test]
-    fn a_missing_file_starts_with_nothing_chosen() {
-        let store = SettingsStore::new(temp_path("missing"));
+    fn a_missing_document_starts_with_nothing_chosen() {
+        let (store, _) = store("missing");
         assert_eq!(store.load(), UiState { last_route: None });
     }
 
     #[test]
     fn a_chosen_route_survives_a_round_trip() {
-        let path = temp_path("round-trip");
-        let store = SettingsStore::new(path.clone());
+        let (store, _) = store("round-trip");
 
         store
             .save(&UiState::default().with_last_route(Some("stats".into())))
             .expect("saves");
 
         assert_eq!(
-            SettingsStore::new(path).load(),
+            store.load(),
             UiState::default().with_last_route(Some("stats".into())),
         );
     }
 
     #[test]
-    fn the_file_is_json_the_way_the_renderer_wrote_it() {
+    fn the_stored_document_stays_in_the_wire_shape() {
         // The field name is part of the wire contract with the renderer, so it
         // is pinned here in camelCase, not Rust case.
-        let path = temp_path("wire-shape");
-        SettingsStore::new(path.clone())
+        let (store, _) = store("wire-shape");
+        store
             .save(&UiState::default().with_last_route(Some("home".into())))
             .expect("saves");
 
-        let raw = fs::read_to_string(path).expect("reads");
-        assert_eq!(
-            raw.trim(),
-            "{\n  \"lastRoute\": \"home\"\n}",
-            "settings.json must stay in the wire shape"
-        );
+        let raw = store.db.read_doc(KEY).expect("reads").expect("present");
+        assert_eq!(raw, r#"{"lastRoute":"home"}"#);
     }
 
     #[test]
-    fn an_older_file_with_a_removed_field_still_parses() {
-        let path = temp_path("old-settings");
-        std::fs::create_dir_all(path.parent().unwrap()).expect("dir");
-        std::fs::write(&path, r#"{"lastRoute":"stats","analyticsEnabled":false}"#).expect("write");
+    fn an_older_document_with_a_removed_field_still_parses() {
+        let (store, _) = store("old-settings");
+        store
+            .db
+            .write_doc(KEY, r#"{"lastRoute":"stats","analyticsEnabled":false}"#)
+            .expect("seeds");
 
-        let state = SettingsStore::new(path).load();
+        let state = store.load();
 
         assert_eq!(state.last_route.as_deref(), Some("stats"));
     }
 
     #[test]
-    fn a_corrupt_file_falls_back_to_nothing_chosen() {
-        let path = temp_path("corrupt");
-        std::fs::create_dir_all(path.parent().unwrap()).expect("dir");
-        std::fs::write(&path, "{ not json").expect("writes");
+    fn a_pre_database_file_is_imported_once() {
+        let (store, legacy) = store("upgrade");
+        fs::write(&legacy, r#"{"lastRoute":"automation"}"#).expect("seeds");
 
-        assert_eq!(SettingsStore::new(path).load(), UiState::default());
+        assert_eq!(store.load().last_route.as_deref(), Some("automation"));
+        assert!(!legacy.exists(), "the import must consume the file");
+        assert_eq!(store.load().last_route.as_deref(), Some("automation"));
     }
 
     #[test]
-    fn creates_missing_parent_directories() {
-        // temp_path nests two levels that do not exist yet.
-        let store = SettingsStore::new(temp_path("mkdir"));
+    fn a_corrupt_document_falls_back_to_nothing_chosen() {
+        let (store, _) = store("corrupt");
         store
-            .save(&UiState::default())
-            .expect("creates parents and saves");
+            .db
+            .write_doc(KEY, "{ not json")
+            .expect("seeds a corrupt document");
+
+        assert_eq!(store.load(), UiState::default());
     }
 
     #[test]
@@ -210,15 +219,23 @@ mod tests {
     }
 
     #[test]
-    fn a_save_into_a_blocked_path_is_reported_not_swallowed() {
-        let dir = std::env::temp_dir().join("agentgauge-settings-blocked");
+    fn a_failed_save_is_reported_not_swallowed() {
+        let dir = std::env::temp_dir().join("agentgauge-settings-readonly");
         let _ = fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
-        // A directory where the file must go makes every write fail.
-        let path = dir.join("settings.json");
-        std::fs::create_dir_all(&path).expect("blocker");
+        fs::create_dir_all(&dir).expect("creates dir");
+        let path = dir.join("agentgauge.db");
+        {
+            let db = Database::open(&path).expect("creates the schema");
+            db.write_doc(KEY, r#"{"lastRoute":null}"#).expect("seeds");
+        }
+        let conn = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .expect("opens read-only");
+        let store = SettingsStore::new(Arc::new(Database::from_connection(conn).expect("wraps")));
 
-        let result = SettingsStore::new(path).save(&UiState::default());
+        let result = store.save(&UiState::default());
         assert!(result.is_err(), "a failed save must be reported");
     }
 }

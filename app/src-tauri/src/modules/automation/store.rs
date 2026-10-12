@@ -1,7 +1,7 @@
 //! Persisted automation choices and observed rollover state.
 //!
 //! Starting a sub's rollover monitor is a *choice*: it is written here the
-//! moment it is made, and the runner re-reads this file at every launch, so a
+//! moment it is made, and the runner re-reads this store at every launch, so a
 //! sub the user enabled is running again before the first frame renders — the
 //! Start button is an instruction, not a per-session ritual.
 //!
@@ -10,19 +10,24 @@
 //! check) instead of blanks. Volatile schedule fields (`nextPollAt`) are never
 //! persisted; they are recomputed the moment the monitor resumes.
 //!
-//! Durability contract, the same one the settings and kickoff stores keep:
-//! versioned (an unrecognised version is not trusted), atomic (sibling temp
-//! file + rename, so a reader never sees a half-written store), and
-//! corrupt-safe (a file that cannot be understood defaults to all-off rather
-//! than being guessed at).
+//! Durability contract, the same one the other stores keep: versioned (an
+//! unrecognised version is not trusted), transactional (a per-record update is
+//! one atomic read-modify-write, so a poll tick and a user's toggle can never
+//! lose each other's write), and corrupt-safe (a store that cannot be
+//! understood defaults to all-off rather than being guessed at). A
+//! pre-database `automation.json` is imported once, like every other store.
 
-use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::shared::database::Database;
 use crate::shared::domain::ProviderKind;
 use crate::shared::error::Error;
+
+/// The document key this store owns inside the shared database.
+const KEY: &str = "automation";
 
 /// Bumped when the record shape changes. An unrecognised version is treated as
 /// no store rather than as a store that may not mean what it says.
@@ -89,69 +94,40 @@ impl AutomationConfig {
 }
 
 /// Reads and writes the persisted automation config.
+#[derive(Clone)]
 pub struct AutomationStore {
-    path: PathBuf,
+    db: Arc<Database>,
+    legacy: Option<PathBuf>,
 }
 
 impl AutomationStore {
-    /// Builds a store at an explicit path — the app-data directory's
-    /// `automation.json` in production.
-    pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+    /// Builds a store over the shared database.
+    pub fn new(db: Arc<Database>) -> Self {
+        Self { db, legacy: None }
     }
 
-    /// Builds a store at an explicit path. For tests.
-    #[cfg(test)]
-    pub fn at(path: impl Into<PathBuf>) -> Self {
-        Self::new(path)
-    }
-
-    #[cfg(test)]
-    pub fn path(&self) -> &std::path::Path {
-        &self.path
+    /// Names the pre-database file to import on first sight, when one exists.
+    pub fn with_legacy(mut self, path: Option<PathBuf>) -> Self {
+        self.legacy = path;
+        self
     }
 
     /// Reads the config, defaulting to all-opted-out.
     ///
-    /// A missing file is the normal first-run case; a corrupt file or an
-    /// unrecognised version is treated the same way, because a config that
+    /// A missing document is the normal first-run case; a corrupt document or
+    /// an unrecognised version is treated the same way, because a config that
     /// cannot be understood must never be guessed at.
     pub fn load(&self) -> AutomationConfig {
-        let Ok(raw) = fs::read_to_string(&self.path) else {
-            return AutomationConfig::default_with_all_kinds();
-        };
-        let Ok(parsed) = serde_json::from_str::<AutomationConfig>(&raw) else {
-            return AutomationConfig::default_with_all_kinds();
-        };
-        if parsed.version != AUTOMATION_CONFIG_VERSION {
-            return AutomationConfig::default_with_all_kinds();
+        if let Err(error) = self.db.import_doc(KEY, self.legacy.as_deref()) {
+            eprintln!(
+                "agentgauge: could not import automation choices: {}",
+                error.message
+            );
         }
-        parsed
+        self.decode(self.db.read_doc(KEY).ok().flatten())
     }
 
-    /// Persists the config atomically, so a concurrent reader (the runner
-    /// persisting after a poll while the renderer toggles a switch) never
-    /// observes a half-written file.
-    pub fn save(&self, config: &AutomationConfig) -> Result<(), Error> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
-                Error::storage(format!("Could not create the automation directory: {err}"))
-            })?;
-        }
-
-        let encoded = serde_json::to_string_pretty(config)
-            .map_err(|err| Error::storage(format!("The config could not be encoded: {err}")))?;
-
-        let temp = self.path.with_extension("json.tmp");
-        fs::write(&temp, encoded)
-            .map_err(|err| Error::storage(format!("The config could not be saved: {err}")))?;
-        fs::rename(&temp, &self.path).map_err(|err| {
-            let _ = fs::remove_file(&temp);
-            Error::storage(format!("The config could not be saved: {err}"))
-        })
-    }
-
-    /// The record for `kind`, inserting the default when the file has never
+    /// The record for `kind`, inserting the default when the store has never
     /// mentioned it.
     pub fn record(&self, kind: ProviderKind) -> AutomationRecord {
         self.load()
@@ -162,26 +138,51 @@ impl AutomationStore {
     }
 
     /// Applies `change` to one record and persists the result.
+    ///
+    /// The read, the change, and the write are one database operation, so a
+    /// poll tick persisting an observed reset cannot interleave with the
+    /// renderer toggling a switch and lose either write.
     pub fn update(
         &self,
         kind: ProviderKind,
         change: impl FnOnce(AutomationRecord) -> AutomationRecord,
     ) -> Result<AutomationRecord, Error> {
-        let mut config = self.load();
-        let updated = match config.records.iter_mut().find(|r| r.kind == kind) {
-            Some(record) => {
-                *record = change(record.clone());
-                record.clone()
-            }
-            None => {
-                let record = change(AutomationRecord::new(kind));
-                config.records.push(record.clone());
-                record
-            }
-        };
-        config.version = AUTOMATION_CONFIG_VERSION;
-        self.save(&config)?;
+        let updated = self.db.update_doc(KEY, |stored| {
+            let mut config = self.decode(stored);
+            let updated = match config.records.iter_mut().find(|r| r.kind == kind) {
+                Some(record) => {
+                    *record = change(record.clone());
+                    record.clone()
+                }
+                None => {
+                    let record = change(AutomationRecord::new(kind));
+                    config.records.push(record.clone());
+                    record
+                }
+            };
+            config.version = AUTOMATION_CONFIG_VERSION;
+            let encoded = serde_json::to_string(&config).map_err(|err| {
+                Error::storage(format!("The automation config could not be encoded: {err}"))
+            })?;
+            Ok((updated, encoded))
+        })?;
+        if let Err(error) = self.db.consume_doc(self.legacy.as_deref()) {
+            eprintln!(
+                "agentgauge: could not retire the old automation store: {}",
+                error.message
+            );
+        }
         Ok(updated)
+    }
+
+    /// Decodes a stored document, defaulting to all-off when it cannot be
+    /// understood — including an unrecognised version.
+    fn decode(&self, stored: Option<String>) -> AutomationConfig {
+        stored
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<AutomationConfig>(raw).ok())
+            .filter(|config| config.version == AUTOMATION_CONFIG_VERSION)
+            .unwrap_or_else(AutomationConfig::default_with_all_kinds)
     }
 }
 
@@ -189,15 +190,39 @@ impl AutomationStore {
 mod tests {
     use super::*;
 
-    fn temp_store(name: &str) -> AutomationStore {
+    fn store(name: &str) -> (AutomationStore, PathBuf) {
         let dir = std::env::temp_dir().join(format!("agentgauge-automation-{name}"));
-        let _ = fs::remove_dir_all(&dir);
-        AutomationStore::at(dir.join("nested").join("automation.json"))
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("creates dir");
+        let db = Database::open(&dir.join("agentgauge.db")).expect("opens");
+        let legacy = dir.join("automation.json");
+        (
+            AutomationStore::new(Arc::new(db)).with_legacy(Some(legacy.clone())),
+            legacy,
+        )
+    }
+
+    fn readonly_store(name: &str) -> AutomationStore {
+        let dir = std::env::temp_dir().join(format!("agentgauge-automation-readonly-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("creates dir");
+        let path = dir.join("agentgauge.db");
+        {
+            let db = Database::open(&path).expect("creates the schema");
+            db.write_doc(KEY, r#"{"version":1,"records":[]}"#)
+                .expect("seeds");
+        }
+        let conn = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .expect("opens read-only");
+        AutomationStore::new(Arc::new(Database::from_connection(conn).expect("wraps")))
     }
 
     #[test]
-    fn a_missing_file_starts_all_opted_out() {
-        let store = temp_store("missing");
+    fn a_missing_document_starts_all_opted_out() {
+        let (store, _) = store("missing");
         let config = store.load();
         assert_eq!(config.records.len(), 4);
         assert!(config.records.iter().all(|record| !record.enabled));
@@ -205,7 +230,7 @@ mod tests {
 
     #[test]
     fn the_choice_survives_a_round_trip_in_the_wire_shape() {
-        let store = temp_store("round-trip");
+        let (store, _) = store("round-trip");
         store
             .update(ProviderKind::Zai, |mut record| {
                 record.enabled = true;
@@ -214,9 +239,13 @@ mod tests {
             })
             .expect("saves");
 
-        let raw = fs::read_to_string(store.path()).expect("reads");
+        let raw = store
+            .db
+            .read_doc(KEY)
+            .expect("reads")
+            .expect("the document exists");
         assert!(
-            raw.contains("\"enabled\": true"),
+            raw.contains("\"enabled\":true"),
             "wire must be camelCase: {raw}"
         );
         assert!(
@@ -230,14 +259,15 @@ mod tests {
     }
 
     #[test]
-    fn update_inserts_a_record_the_file_never_had() {
-        let store = temp_store("upsert");
-        std::fs::create_dir_all(store.path().parent().unwrap()).expect("dir");
-        std::fs::write(
-            store.path(),
-            r#"{"version":1,"records":[{"kind":"codex","enabled":false,"observedResetsAt":null,"rolledOver":false,"rolledOverAt":null,"lastPolledAt":null}]}"#,
-        )
-        .expect("seed");
+    fn update_inserts_a_record_the_store_never_had() {
+        let (store, _) = store("upsert");
+        store
+            .db
+            .write_doc(
+                KEY,
+                r#"{"version":1,"records":[{"kind":"codex","enabled":false,"observedResetsAt":null,"rolledOver":false,"rolledOverAt":null,"lastPolledAt":null}]}"#,
+            )
+            .expect("seed");
 
         store
             .update(ProviderKind::Kimi, |mut record| {
@@ -251,34 +281,46 @@ mod tests {
     }
 
     #[test]
-    fn a_corrupt_file_falls_back_to_opted_out() {
-        let store = temp_store("corrupt");
-        std::fs::create_dir_all(store.path().parent().unwrap()).expect("dir");
-        std::fs::write(store.path(), "{ not json").expect("write");
+    fn a_pre_database_file_is_imported_once() {
+        let (store, legacy) = store("upgrade");
+        std::fs::write(
+            &legacy,
+            r#"{"version":1,"records":[{"kind":"codex","enabled":true,"observedResetsAt":null,"rolledOver":false,"rolledOverAt":null,"lastPolledAt":null}]}"#,
+        )
+        .expect("seeds");
+
+        assert!(store.record(ProviderKind::Codex).enabled);
+        assert!(!legacy.exists(), "the import must consume the file");
+        assert!(store.record(ProviderKind::Codex).enabled);
+    }
+
+    #[test]
+    fn a_corrupt_document_falls_back_to_opted_out() {
+        let (store, _) = store("corrupt");
+        store
+            .db
+            .write_doc(KEY, "{ not json")
+            .expect("seeds a corrupt document");
         assert!(!store.load().records.iter().any(|r| r.enabled));
     }
 
     #[test]
     fn an_unrecognised_version_is_not_trusted() {
-        let store = temp_store("version");
-        std::fs::create_dir_all(store.path().parent().unwrap()).expect("dir");
-        std::fs::write(
-            store.path(),
-            r#"{"version":99,"records":[{"kind":"codex","enabled":true,"observedResetsAt":null,"rolledOver":false,"rolledOverAt":null,"lastPolledAt":null}]}"#,
-        )
-        .expect("write");
+        let (store, _) = store("version");
+        store
+            .db
+            .write_doc(
+                KEY,
+                r#"{"version":99,"records":[{"kind":"codex","enabled":true,"observedResetsAt":null,"rolledOver":false,"rolledOverAt":null,"lastPolledAt":null}]}"#,
+            )
+            .expect("writes");
         assert!(!store.record(ProviderKind::Codex).enabled);
     }
 
     #[test]
     fn a_failed_save_is_reported_not_swallowed() {
-        let dir = std::env::temp_dir().join("agentgauge-automation-blocked");
-        let _ = fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("dir");
-        let blocker = dir.join("automation.json");
-        std::fs::create_dir_all(&blocker).expect("blocker");
-
-        let result = AutomationStore::at(blocker).update(ProviderKind::Codex, |r| r);
+        let store = readonly_store("blocked");
+        let result = AutomationStore::update(&store, ProviderKind::Codex, |r| r);
         assert!(result.is_err(), "a failed save must be reported");
     }
 }

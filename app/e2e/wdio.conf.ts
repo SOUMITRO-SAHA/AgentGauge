@@ -1,5 +1,8 @@
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+
+import { E2E_DATA_DIR } from "./data-dir.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,6 +31,7 @@ export const config: WebdriverIO.Config = {
     [
       path.join(here, "specs", "capabilities.e2e.ts"),
       path.join(here, "specs", "features", "onboarding.e2e.ts"),
+      path.join(here, "specs", "features", "persistence.e2e.ts"),
       path.join(here, "specs", "features", "dashboard.e2e.ts"),
       path.join(here, "specs", "features", "usage-tabs.e2e.ts"),
       path.join(here, "specs", "features", "kickoff.e2e.ts"),
@@ -58,6 +62,14 @@ export const config: WebdriverIO.Config = {
   framework: "mocha",
   reporters: ["spec"],
 
+  onPrepare() {
+    // A pristine sandbox per run: the app boots into an empty data directory,
+    // so each run's first boot is a genuine first run. The fixtures then seed
+    // the gate per spec through the same legacy-import path a real install
+    // upgrades through.
+    fs.rmSync(E2E_DATA_DIR, { recursive: true, force: true });
+  },
+
   services: [
     [
       "@wdio/tauri-service",
@@ -68,6 +80,9 @@ export const config: WebdriverIO.Config = {
         // on macOS without a paid CrabNebula key, and needs no external driver
         // on Windows/Linux either.
         driverProvider: "embedded",
+        // Redirect the app's data directory into the sandbox. The service
+        // merges these into the spawned process's environment.
+        env: { AGENTGAUGE_DATA_DIR: E2E_DATA_DIR },
       },
     ],
   ],

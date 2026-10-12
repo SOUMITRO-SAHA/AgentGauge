@@ -21,6 +21,7 @@ use modules::onboarding::OnboardingStore;
 use modules::providers::ProviderRegistry;
 use modules::settings::SettingsStore;
 use modules::widget::SnapshotStore;
+use shared::database::Database;
 
 /// Surfaces for the integration tests in `tests/`.
 ///
@@ -32,6 +33,25 @@ pub mod testkit {
     pub use crate::modules::providers::codex::protocol::decode_rate_limits;
     pub use crate::modules::providers::codex::transport::AppServer;
     pub use crate::shared::domain::ProviderKind;
+}
+
+/// Where the durable stores live.
+///
+/// Defaults to the OS application-data directory for the app's identifier.
+/// A debug build honours `AGENTGAUGE_DATA_DIR` instead, which gives the e2e
+/// suite a disposable sandbox: the harness seeds and resets that directory
+/// freely, and the user's real profile is never touched by a test run.
+/// Release builds ignore the variable — production storage is never
+/// redirectable by the environment.
+fn resolve_data_dir(app: &tauri::App) -> Option<std::path::PathBuf> {
+    #[cfg(debug_assertions)]
+    if let Some(dir) = std::env::var_os("AGENTGAUGE_DATA_DIR") {
+        if !dir.is_empty() {
+            return Some(std::path::PathBuf::from(dir));
+        }
+    }
+
+    app.path().app_data_dir().ok()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -61,41 +81,47 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
         .setup(move |app| {
-            // The app-data directory is resolved here, once, and handed to the
-            // module that owns persistence. No module reaches for a global.
-            let onboarding = match app.path().app_data_dir() {
-                Ok(dir) => OnboardingStore::in_app_dir(&dir),
-                // Without a writable app-data directory onboarding simply does
-                // not persist; the app still runs.
-                Err(_) => OnboardingStore::new(
-                    std::env::temp_dir()
-                        .join("agentgauge")
-                        .join("onboarding.json"),
-                ),
+            // Where every durable store lives: the app-data directory,
+            // resolved once here and handed to the modules that own
+            // persistence. No module reaches for a global. Debug builds may
+            // redirect it (the e2e harness runs against a sandbox so a test
+            // run can never touch the real profile); release builds ignore
+            // the variable.
+            let data_dir = resolve_data_dir(app);
+
+            // One database behind every persisted store. Without a usable
+            // data directory the app degrades to an in-memory database — it
+            // still runs; persistence simply does not outlive the process,
+            // the same contract the old throwaway-directory fallback kept.
+            let database = match data_dir
+                .as_deref()
+                .map(|dir| Database::open(&dir.join("agentgauge.db")))
+            {
+                Some(Ok(db)) => Arc::new(db),
+                other => {
+                    if let Some(Err(error)) = other {
+                        eprintln!(
+                            "agentgauge: falling back to in-memory storage: {}",
+                            error.message
+                        );
+                    }
+                    Arc::new(Database::open_in_memory().expect("an in-memory database"))
+                }
             };
 
-            // Same rule for preferences: degrade to a throwaway directory
-            // rather than fail to launch.
-            let settings = match app.path().app_data_dir() {
-                Ok(dir) => SettingsStore::in_app_dir(&dir),
-                Err(_) => SettingsStore::new(
-                    std::env::temp_dir()
-                        .join("agentgauge")
-                        .join("settings.json"),
-                ),
-            };
+            // Each store imports its pre-database file exactly once, so an
+            // upgraded install keeps its progress: a user who already finished
+            // onboarding must never see the flow restart.
+            let onboarding = OnboardingStore::new(Arc::clone(&database))
+                .with_legacy(data_dir.clone().map(|dir| dir.join("onboarding.json")));
+            let settings = SettingsStore::new(Arc::clone(&database))
+                .with_legacy(data_dir.clone().map(|dir| dir.join("settings.json")));
 
             // The automation runner owns its persisted per-sub choices: the
             // same durability rule as preferences, and the same fallback.
             let automation = {
-                let store = match app.path().app_data_dir() {
-                    Ok(dir) => AutomationStore::new(dir.join("automation.json")),
-                    Err(_) => AutomationStore::new(
-                        std::env::temp_dir()
-                            .join("agentgauge")
-                            .join("automation.json"),
-                    ),
-                };
+                let store = AutomationStore::new(Arc::clone(&database))
+                    .with_legacy(data_dir.clone().map(|dir| dir.join("automation.json")));
                 let mut runner = AutomationRunner::new(Arc::clone(&registry)).with_store(store);
                 // Every monitor reading also feeds the kickoff schedule, so
                 // its worker stays on the freshest window boundary without
@@ -132,7 +158,7 @@ pub fn run() {
                 widget_snapshots,
                 settings,
                 kickoff: kickoff_shared,
-                app_data: app.path().app_data_dir().ok(),
+                app_data: data_dir,
             }));
 
             // While the app is open it runs the kickoff tick itself, so a

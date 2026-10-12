@@ -4,14 +4,23 @@
 //! account, so there is no auth here by design. What must persist is *where the
 //! user got to*, so "skip" resumes in the right place instead of restarting.
 //!
-//! State lives in the OS application-data directory, never in the renderer.
+//! State lives in the shared SQLite database — the renderer never holds it:
+//! webview storage is not the app's and does not survive a cleared webview
+//! data directory. A pre-database install's `onboarding.json` is imported once
+//! through [`Database::import_doc`], so a user who already finished the flow
+//! never sees it restart after an upgrade; the import's consume-on-sight rule
+//! is what keeps a stale file from replaying over newer state forever.
 
-use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::shared::database::Database;
 use crate::shared::error::Error;
+
+/// The document key this store owns inside the shared database.
+const KEY: &str = "onboarding";
 
 /// A step in the demonstration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,7 +67,7 @@ impl OnboardingStep {
     ];
 
     /// Parses a persisted string, defaulting to the first step so a corrupt
-    /// file cannot strand the user past the end.
+    /// document cannot strand the user past the end.
     pub fn from_wire(value: &str) -> Self {
         Self::ALL
             .into_iter()
@@ -121,30 +130,31 @@ pub struct OnboardingProgress {
 /// Reads and writes the onboarding state.
 #[derive(Clone)]
 pub struct OnboardingStore {
-    path: PathBuf,
+    db: Arc<Database>,
+    legacy: Option<PathBuf>,
 }
 
 impl OnboardingStore {
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
+    pub fn new(db: Arc<Database>) -> Self {
+        Self { db, legacy: None }
     }
 
-    /// A store rooted in the OS application-data directory.
-    pub fn in_app_dir(app_data: &std::path::Path) -> Self {
-        Self::new(app_data.join("onboarding.json"))
+    /// Names the pre-database file to import on first sight, when one exists.
+    pub fn with_legacy(mut self, path: Option<PathBuf>) -> Self {
+        self.legacy = path;
+        self
     }
 
     /// Reads the persisted state, defaulting to a fresh start.
     ///
-    /// A missing file is the normal first-run case. An unreadable or corrupt
-    /// one also defaults rather than failing: onboarding must never be able to
-    /// block the app from launching.
+    /// A missing document is the normal first-run case. An unreadable or
+    /// corrupt one also defaults rather than failing: onboarding must never be
+    /// able to block the app from launching.
     pub fn load(&self) -> OnboardingState {
-        let Ok(raw) = fs::read_to_string(&self.path) else {
-            return OnboardingState {
-                step: OnboardingStep::Welcome,
-                dismissed: false,
-            };
+        self.import_legacy();
+
+        let Ok(raw) = self.db.read_doc(KEY) else {
+            return Self::fresh();
         };
 
         #[derive(Deserialize)]
@@ -153,53 +163,90 @@ impl OnboardingStore {
             dismissed: Option<bool>,
         }
 
-        let Ok(parsed) = serde_json::from_str::<Persisted>(&raw) else {
-            return OnboardingState {
-                step: OnboardingStep::Welcome,
-                dismissed: false,
-            };
-        };
+        raw.as_deref()
+            .and_then(|raw| serde_json::from_str::<Persisted>(raw).ok())
+            .map(|parsed| OnboardingState {
+                step: parsed
+                    .step
+                    .as_deref()
+                    .map(OnboardingStep::from_wire)
+                    .unwrap_or(OnboardingStep::Welcome),
+                dismissed: parsed.dismissed.unwrap_or(false),
+            })
+            .unwrap_or_else(Self::fresh)
+    }
 
-        OnboardingState {
-            step: parsed
-                .step
-                .as_deref()
-                .map(OnboardingStep::from_wire)
-                .unwrap_or(OnboardingStep::Welcome),
-            dismissed: parsed.dismissed.unwrap_or(false),
+    /// Persists the state.
+    ///
+    /// A failed write is reported rather than swallowed: silently losing
+    /// progress would restart the whole flow on the next launch.
+    pub fn save(&self, state: &OnboardingState) -> Result<(), Error> {
+        let encoded = serde_json::to_string(state).map_err(|err| {
+            Error::storage(format!("Onboarding state could not be encoded: {err}"))
+        })?;
+        self.db.write_doc(KEY, &encoded)?;
+        self.consume_legacy();
+        Ok(())
+    }
+
+    /// Hands a predecessor file to the database before the first read, so an
+    /// upgraded install resumes where it left off.
+    fn import_legacy(&self) {
+        if let Err(error) = self.db.import_doc(KEY, self.legacy.as_deref()) {
+            eprintln!(
+                "agentgauge: could not import onboarding state: {}",
+                error.message
+            );
         }
     }
 
-    /// Persists the state, creating the parent directory if needed.
-    pub fn save(&self, state: &OnboardingState) -> Result<(), Error> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
-                Error::storage(format!("Could not create the app data directory: {err}"))
-            })?;
+    /// Retires a predecessor file after a write, so it can never replay over
+    /// newer state.
+    fn consume_legacy(&self) {
+        if let Err(error) = self.db.consume_doc(self.legacy.as_deref()) {
+            eprintln!(
+                "agentgauge: could not retire the old onboarding store: {}",
+                error.message
+            );
         }
+    }
 
-        let encoded = serde_json::to_string_pretty(state).map_err(|err| {
-            Error::storage(format!("Onboarding state could not be encoded: {err}"))
-        })?;
-
-        fs::write(&self.path, encoded)
-            .map_err(|err| Error::storage(format!("Onboarding state could not be saved: {err}")))
+    /// The state every install starts from.
+    fn fresh() -> OnboardingState {
+        OnboardingState {
+            step: OnboardingStep::Welcome,
+            dismissed: false,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::Path;
 
-    fn temp_path(name: &str) -> PathBuf {
+    /// A store over a throwaway database, plus the pre-database file path it
+    /// would import from.
+    fn store(name: &str) -> (OnboardingStore, PathBuf) {
         let dir = std::env::temp_dir().join(format!("agentgauge-onboarding-{name}"));
         let _ = fs::remove_dir_all(&dir);
-        dir.join("nested").join("onboarding.json")
+        fs::create_dir_all(&dir).expect("creates dir");
+        let db = Database::open(&dir.join("agentgauge.db")).expect("opens");
+        let legacy = dir.join("onboarding.json");
+        (
+            OnboardingStore::new(Arc::new(db)).with_legacy(Some(legacy.clone())),
+            legacy,
+        )
+    }
+
+    fn write_legacy(path: &Path, contents: &str) {
+        fs::write(path, contents).expect("writes the legacy file");
     }
 
     #[test]
-    fn a_missing_file_starts_at_welcome() {
-        let store = OnboardingStore::new(temp_path("missing"));
+    fn a_missing_document_and_no_legacy_start_at_welcome() {
+        let (store, _) = store("missing");
         let state = store.load();
         assert_eq!(state.step, OnboardingStep::Welcome);
         assert!(!state.dismissed);
@@ -207,7 +254,7 @@ mod tests {
 
     #[test]
     fn saves_and_reloads_a_step() {
-        let store = OnboardingStore::new(temp_path("roundtrip"));
+        let (store, _) = store("roundtrip");
         let state = OnboardingState {
             step: OnboardingStep::WindowRollover,
             dismissed: false,
@@ -217,69 +264,140 @@ mod tests {
     }
 
     #[test]
-    fn creates_missing_parent_directories() {
-        let path = temp_path("creates");
-        assert!(!path.parent().expect("has parent").exists());
-        let store = OnboardingStore::new(path.clone());
-        store
-            .save(&OnboardingState {
-                step: OnboardingStep::Automation,
-                dismissed: false,
-            })
-            .expect("saves");
-        assert!(path.exists());
+    fn a_completed_flow_survives_the_upgrade_to_the_database() {
+        // The cold-start regression: an install that had finished onboarding
+        // must not be thrown back to the start by the storage migration.
+        let (store, legacy) = store("upgrade-done");
+        write_legacy(&legacy, r#"{"step":"done","dismissed":true}"#);
+
+        let state = store.load();
+
+        assert_eq!(state.step, OnboardingStep::Done);
+        assert!(state.dismissed);
+        assert!(!state.should_show());
+        assert!(
+            !legacy.exists(),
+            "the imported file must be spent, or it would replay forever"
+        );
+        assert!(legacy.with_extension("json.imported").exists());
     }
 
     #[test]
-    fn a_corrupt_file_falls_back_to_the_start() {
+    fn a_mid_flow_upgrade_resumes_at_the_reached_step() {
+        let (store, legacy) = store("upgrade-mid");
+        write_legacy(&legacy, r#"{"step":"widget","dismissed":false}"#);
+
+        let state = store.load();
+
+        assert_eq!(state.step, OnboardingStep::Widget);
+        assert!(state.should_show());
+    }
+
+    #[test]
+    fn an_upgrade_can_never_un_finish_itself() {
+        // Import, then the user's own state advances past the file. On the
+        // next read — the next cold start — the spent file must not replay.
+        let (store, legacy) = store("upgrade-noreplay");
+        write_legacy(&legacy, r#"{"step":"welcome","dismissed":false}"#);
+        assert!(store.load().should_show());
+
+        store
+            .save(&OnboardingState {
+                step: OnboardingStep::Done,
+                dismissed: true,
+            })
+            .expect("saves");
+
+        let state = store.load();
+        assert_eq!(state.step, OnboardingStep::Done);
+        assert!(state.dismissed);
+    }
+
+    #[test]
+    fn a_new_seed_while_the_file_is_unspent_is_honoured() {
+        // The e2e harness re-seeds the gate between boots; a boot must read
+        // the newest seed rather than a once-imported older one.
+        let (store, legacy) = store("reseed");
+        write_legacy(&legacy, r#"{"step":"done","dismissed":true}"#);
+        assert!(!store.load().should_show());
+
+        write_legacy(&legacy, r#"{"step":"statusCheck","dismissed":false}"#);
+        assert!(store.load().should_show());
+    }
+
+    #[test]
+    fn a_corrupt_document_falls_back_to_the_start() {
         // Onboarding must never be able to block launch.
-        let path = temp_path("corrupt");
-        write_raw(&path, "{ not json");
-        let state = OnboardingStore::new(path).load();
+        let (store, _) = store("corrupt-doc");
+        store
+            .db
+            .write_doc(KEY, "{ not json")
+            .expect("seeds a corrupt document");
+        let state = store.load();
         assert_eq!(state.step, OnboardingStep::Welcome);
     }
 
     #[test]
+    fn a_corrupt_legacy_file_is_spent_without_importing() {
+        let (store, legacy) = store("corrupt-legacy");
+        write_legacy(&legacy, "{ not json");
+
+        let state = store.load();
+
+        assert_eq!(state.step, OnboardingStep::Welcome);
+        assert!(legacy.with_extension("json.imported").exists());
+    }
+
+    #[test]
     fn an_unknown_step_string_falls_back_to_the_start() {
-        let path = temp_path("unknown-step");
-        write_raw(&path, r#"{"step":"teleport","dismissed":true}"#);
-        let state = OnboardingStore::new(path).load();
+        let (store, legacy) = store("unknown-step");
+        write_legacy(&legacy, r#"{"step":"teleport","dismissed":true}"#);
+        let state = store.load();
         assert_eq!(state.step, OnboardingStep::Welcome);
         assert!(state.dismissed, "other fields still load");
     }
 
     #[test]
-    fn an_unreadable_path_degrades_instead_of_failing() {
-        // A path whose ancestor is a regular file can never exist. Reading must
-        // still yield a usable state rather than blocking launch.
-        let dir = temp_path("blocked-parent");
-        let parent = dir.parent().expect("has parent");
-        fs::create_dir_all(parent).expect("creates dir");
-        fs::write(&dir, "a file, not a directory").expect("writes a file");
+    fn an_unreadable_legacy_path_degrades_instead_of_failing() {
+        // A path whose ancestor is a regular file can never exist. Reading
+        // must still yield a usable state rather than blocking launch.
+        let dir = std::env::temp_dir().join("agentgauge-onboarding-blocked-parent");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("creates dir");
+        fs::write(dir.join("blocked"), "a file, not a directory").expect("writes a file");
 
-        let state = OnboardingStore::new(dir.join("onboarding.json")).load();
-        assert_eq!(state.step, OnboardingStep::Welcome);
+        let db = Database::open(&dir.join("db.sqlite")).expect("opens");
+        let store = OnboardingStore::new(Arc::new(db))
+            .with_legacy(Some(dir.join("blocked").join("onboarding.json")));
+
+        assert_eq!(store.load().step, OnboardingStep::Welcome);
     }
 
     #[test]
-    fn a_save_into_a_blocked_path_is_reported_not_swallowed() {
+    fn a_failed_write_is_reported_not_swallowed() {
         // Losing progress silently would send the user through the whole flow
         // again, so a failed write must surface as an error.
-        let dir = temp_path("blocked-save");
-        let parent = dir.parent().expect("has parent");
-        fs::create_dir_all(parent).expect("creates dir");
-        fs::write(&dir, "a file, not a directory").expect("writes a file");
+        let dir = std::env::temp_dir().join("agentgauge-onboarding-readonly");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("creates dir");
+        let path = dir.join("agentgauge.db");
+        {
+            let db = Database::open(&path).expect("creates the schema");
+            db.write_doc(KEY, r#"{"step":"welcome","dismissed":false}"#)
+                .expect("seeds");
+        }
+        let conn = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .expect("opens read-only");
+        let store = OnboardingStore::new(Arc::new(Database::from_connection(conn).expect("wraps")));
 
-        let err = OnboardingStore::new(dir.join("onboarding.json")).save(&OnboardingState {
+        let err = store.save(&OnboardingState {
             step: OnboardingStep::Done,
             dismissed: false,
         });
-        assert!(err.is_err(), "a blocked write must be reported");
-    }
-
-    fn write_raw(path: &std::path::Path, contents: &str) {
-        fs::create_dir_all(path.parent().expect("has parent")).expect("creates dir");
-        fs::write(path, contents).expect("writes");
+        assert!(err.is_err(), "a failed write must be reported");
     }
 
     #[test]
@@ -326,7 +444,7 @@ mod tests {
 
     #[test]
     fn dismissal_is_persisted() {
-        let store = OnboardingStore::new(temp_path("dismissed"));
+        let (store, _) = store("dismissed");
         let state = OnboardingState {
             step: OnboardingStep::Widget,
             dismissed: true,

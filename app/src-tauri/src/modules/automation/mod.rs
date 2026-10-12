@@ -470,6 +470,16 @@ mod tests {
         Arc::new(Mutex::new(Vec::new()))
     }
 
+    /// A store over a throwaway database.
+    fn temp_store(name: &str) -> AutomationStore {
+        let dir = std::env::temp_dir().join(format!("agentgauge-automation-runner-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("creates dir");
+        let db = crate::shared::database::Database::open(&dir.join("agentgauge.db"))
+            .expect("opens a temp database");
+        AutomationStore::new(Arc::new(db))
+    }
+
     #[test]
     fn starts_out_idle_for_every_kind() {
         let runner = runner(None);
@@ -536,8 +546,7 @@ mod tests {
 
     #[test]
     fn starting_marks_only_that_kind_running_and_persists_the_choice() {
-        let store = AutomationStore::at(std::env::temp_dir().join("agentgauge-automation-start"));
-        let _ = std::fs::remove_file(store.path());
+        let store = temp_store("start");
         let runner = runner(Some(store));
         runner.start(ProviderKind::Codex);
 
@@ -557,8 +566,7 @@ mod tests {
 
     #[test]
     fn stopping_persists_the_choice_and_clears_the_schedule() {
-        let store = AutomationStore::at(std::env::temp_dir().join("agentgauge-automation-stop"));
-        let _ = std::fs::remove_file(store.path());
+        let store = temp_store("stop");
         let runner = runner(Some(store));
         runner.start(ProviderKind::Kimi);
         runner.stop(ProviderKind::Kimi);
@@ -578,8 +586,7 @@ mod tests {
 
     #[test]
     fn resume_persisted_starts_exactly_the_enabled_subs_and_restores_state() {
-        let store = AutomationStore::at(std::env::temp_dir().join("agentgauge-automation-resume"));
-        let _ = std::fs::remove_file(store.path());
+        let store = temp_store("resume");
         store
             .update(ProviderKind::Zai, |mut record| {
                 record.enabled = true;
@@ -615,8 +622,7 @@ mod tests {
 
     #[test]
     fn a_reading_is_persisted_with_its_observed_state() {
-        let store = AutomationStore::at(std::env::temp_dir().join("agentgauge-automation-observe"));
-        let _ = std::fs::remove_file(store.path());
+        let store = temp_store("observe");
         let runner = runner(Some(store));
 
         runner.record(
