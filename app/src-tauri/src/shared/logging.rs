@@ -134,7 +134,9 @@ impl Sink {
     }
 
     fn write(&self, level: log::Level, target: &str, message: &str) {
-        let message = scrub(message, self.home.as_deref());
+        let home = self.home.as_deref();
+        let target = scrub(target, home);
+        let message = scrub(message, home);
         let mut inner = match self.inner.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -150,9 +152,10 @@ impl Sink {
             inner.open_file(day, next);
         }
         let line = format!(
-            "timestamp={stamp} level={level} pid={} target={target} message={}\n",
+            "timestamp={stamp} level={level} pid={} target={} message={}\n",
             std::process::id(),
-            quote_message(&message),
+            quote_value(&target),
+            quote_value(&message),
         );
         if let Some(file) = inner.file.as_mut() {
             if file
@@ -419,15 +422,15 @@ fn is_credential_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
 }
 
-fn quote_message(message: &str) -> String {
-    let plain = !message.is_empty()
-        && message.chars().all(|character: char| {
+fn quote_value(value: &str) -> String {
+    let plain = !value.is_empty()
+        && value.chars().all(|character: char| {
             !matches!(character, ' ' | '=' | '"' | '\\') && !character.is_control()
         });
     if plain {
-        message.to_string()
+        value.to_string()
     } else {
-        serde_json::to_string(message).unwrap_or_else(|_| "\"[unloggable]\"".to_string())
+        serde_json::to_string(value).unwrap_or_else(|_| "\"[unloggable]\"".to_string())
     }
 }
 
@@ -556,6 +559,38 @@ mod tests {
         let text = contents(&dir, &file_name(19_675, 0));
         assert_eq!(text.lines().count(), 1);
         assert!(text.contains("first\\nsecond"), "unexpected: {text:?}");
+    }
+
+    #[test]
+    fn target_with_spaces_is_quoted() {
+        let dir = scratch("target-quoted");
+        let sink = sink_in(&dir);
+        sink.write(log::Level::Warn, "my target", "msg");
+        let line = contents(&dir, &file_name(19_675, 0));
+        assert!(
+            line.contains("target=\"my target\""),
+            "target with spaces should be quoted: {line:?}"
+        );
+        assert_eq!(line.lines().count(), 1);
+    }
+
+    #[test]
+    fn target_is_scrubbed_for_pii() {
+        let dir = scratch("target-scrub");
+        let sink = Sink::open_in(
+            Arc::new(FixedClock::new(SEED_MS)),
+            dir.to_path_buf(),
+            MAX_FILE_BYTES,
+            KEEP_DAYS,
+        )
+        .expect("sink");
+        sink.write(log::Level::Warn, "dev@example.com", "msg");
+        let line = contents(&dir, &file_name(19_675, 0));
+        assert!(
+            line.contains("[redacted-email]"),
+            "email in target should be scrubbed: {line:?}"
+        );
+        assert!(!line.contains("dev@example.com"));
     }
 
     #[test]
