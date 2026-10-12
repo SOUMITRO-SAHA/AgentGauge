@@ -259,7 +259,7 @@ export function seedOnboardingStep(step: string, dismissed: boolean): void {
  * boot's import would honour. The sandbox is disposable; the real profile is
  * never involved.
  */
-export function restoreOnboardingStore(): void {
+export function clearSeededStores(): void {
   for (const file of [
     onboardingStorePath(),
     `${onboardingStorePath()}.imported`,
@@ -1602,6 +1602,109 @@ export async function dashboardWithSlowPlans(): Promise<void> {
  * The Z.AI stats dashboard, with both of Z.AI's reads arriving late, so specs
  * can observe the skeletons a first stats read shows.
  */
+/**
+ * The local session ledger OpenCode records for a coding plan whose vendor
+ * publishes no token history of its own (MiniMax, Kimi).
+ */
+export function openCodeLocalUsage() {
+  return {
+    models: [
+      {
+        id: "MiniMax-M3",
+        displayName: "minimax-M3",
+        input: 900000000,
+        cachedInput: 300000000,
+        cacheWrite: 0,
+        output: 40000000,
+        reasoning: 10000000,
+        responses: 900,
+        costUsd: 42.5,
+      },
+    ],
+    days: [{ day: "2026-09-24", tokens: 940000000 }],
+    costUsd: 42.5,
+    unpricedTokens: 0,
+    sessions: 94,
+    filesScanned: 1,
+    filesUnreadable: 0,
+    filesCompressed: 0,
+    firstDay: "2026-09-24",
+    lastDay: "2026-10-12",
+  };
+}
+
+/**
+ * Onboarding dismissed with a MiniMax plan connected through OpenCode, whose
+ * analytics can only come from OpenCode's own session database.
+ */
+export async function dashboardWithLocalCodingPlan(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    subscriptions: [
+      subscription({
+        providerId: "minimax-coding-plan",
+        name: "MiniMax Coding Plan",
+        label: "MiniMax",
+        integration: "minimax",
+        apiBase: "https://api.minimax.example/v1",
+      }),
+    ],
+    usageByProvider: { minimax: minimaxSnapshot() },
+    accountUsageByProvider: { minimax: localOnlyAccountUsage() },
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+  });
+}
+
+/** A coding-plan snapshot, which the plan's window reading needs. */
+export function minimaxSnapshot() {
+  const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+  return {
+    provider: "minimax",
+    freshness: "live",
+    fetchedAt: Date.now(),
+    source: "minimax coding plan",
+    reason: null,
+    plan: null,
+    permission: "allowed",
+    windows: [
+      {
+        label: "weekly",
+        usedPercent: 28,
+        durationMins: 10080,
+        resetsAt: resetsAt + 86400,
+        remainingPercent: 72,
+      },
+    ],
+    fiveHour: null,
+    weekly: null,
+    extra: null,
+  };
+}
+
+/** An account reading with no provider analytics of its own, only the local one. */
+export function localOnlyAccountUsage() {
+  return {
+    fetchedAt: Date.now(),
+    summary: {
+      totalTokens: null,
+      peakDailyTokens: null,
+      longestRunningTurnSec: null,
+      currentStreakDays: null,
+      longestStreakDays: null,
+      totalRequests: null,
+    },
+    windowDays: null,
+    dailyUsageBuckets: [],
+    models: [],
+    local: openCodeLocalUsage(),
+  };
+}
+
 export async function dashboardWithSlowStats(): Promise<void> {
   await boot({
     visible: false,

@@ -2,6 +2,7 @@ import { expect, browser, $, $$ } from "@wdio/globals";
 
 import {
   dashboardLive,
+  dashboardWithLocalCodingPlan,
   dashboardWithPlans,
   dashboardWithSlowStats,
   dashboardWithZaiAnalytics,
@@ -9,7 +10,7 @@ import {
   clickDisplayed,
   expectDisplayed,
   gotoView,
-  restoreOnboardingStore,
+  clearSeededStores,
 } from "../fixtures.js";
 
 /**
@@ -26,7 +27,7 @@ import {
  * for Radix tabs, and the usage-tabs specs prove the native path.
  */
 after(() => {
-  restoreOnboardingStore();
+  clearSeededStores();
 });
 
 describe("stats", () => {
@@ -379,6 +380,42 @@ describe("stats", () => {
     expect(reading.source).toContain("168");
     expect(reading.source).toContain("2026-09-04");
     expect(reading.source).toContain("2026-09-24");
+    expect(reading.source).toContain("not a bill");
+  });
+  it("answers a coding-plan tab from OpenCode's local sessions", async () => {
+    await dashboardWithLocalCodingPlan();
+    await gotoView("stats");
+
+    await clickDisplayed('[data-testid="stats-tab-minimax"]');
+    // The vendor publishes no analytics, and the screen says so before showing
+    // the local reading rather than a panel of "not reported".
+    await expectDisplayed('[data-testid="stats-plan-no-provider-analytics"]');
+    await expectDisplayed('[data-testid="stats-local-logs"]');
+    await expectDisplayed('[data-testid="stats-local-model-MiniMax-M3"]');
+
+    const reading = await browser.execute(() => {
+      const read = (id: string) =>
+        document
+          .querySelector(`[data-testid="${id}"]`)
+          ?.textContent?.replace(/\s+/g, " ") ?? "";
+      return {
+        cost: read("stats-local-cost"),
+        cache: read("stats-local-cache"),
+        source: read("stats-local-source"),
+        row: read("stats-local-model-MiniMax-M3"),
+      };
+    });
+
+    expect(reading.cost).toMatch(/42[.,]50/);
+    expect(reading.cache).toContain("33%");
+    expect(reading.row).toMatch(/42[.,]50/);
+    expect(reading.row).toContain("100% of est. cost");
+    // The provenance names OpenCode as the source, not the plan vendor: these
+    // numbers came from OpenCode's database on this machine.
+    expect(reading.source).toContain("OpenCode");
+    expect(reading.source).toContain("94");
+    expect(reading.source).toContain("2026-09-24");
+    expect(reading.source).toContain("2026-10-12");
     expect(reading.source).toContain("not a bill");
   });
 });

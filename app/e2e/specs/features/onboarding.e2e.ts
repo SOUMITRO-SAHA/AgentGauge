@@ -9,7 +9,7 @@ import {
   expectDisplayed,
   onboardingVisible,
   onboardingWithNoData,
-  restoreOnboardingStore,
+  clearSeededStores,
 } from "../fixtures.js";
 
 const screenshots = path.resolve(
@@ -32,7 +32,7 @@ const screenshots = path.resolve(
  * than nested, so there is no inner hook that could restore at the right time.
  */
 after(() => {
-  restoreOnboardingStore();
+  clearSeededStores();
 });
 
 describe("onboarding flow", () => {

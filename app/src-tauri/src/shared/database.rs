@@ -28,13 +28,21 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::shared::error::Error;
 
-/// The schema revision this build understands.
-const SCHEMA_VERSION: i32 = 1;
-
 /// How long a writer waits for a competing writer before giving up. The only
 /// contenders are threads of this same process, whose transactions are
 /// sub-millisecond; five seconds means a real fault, not contention.
 const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Ordered schema steps. Each step's SQL must be idempotent (a crash mid-step
+/// leaves the file at the previous version and the step reruns on the next
+/// open) and must not reorder or drop earlier steps' tables.
+const MIGRATIONS: &[(i32, &str)] = &[(
+    1,
+    "CREATE TABLE IF NOT EXISTS app_state (
+         key TEXT PRIMARY KEY,
+         value TEXT NOT NULL
+     ) STRICT;",
+)];
 
 /// Reads and writes the app's durable documents.
 pub struct Database {
@@ -43,14 +51,21 @@ pub struct Database {
 
 impl Database {
     /// Opens the database at `path`, creating it and its schema when absent.
+    ///
+    /// The failure message is deliberately free of the path: storage errors
+    /// cross IPC through `AppResponse::Failure`, and the renderer shows these
+    /// strings. The full error — which does name the file — goes to this
+    /// process's stderr instead, where a local log belongs.
     pub fn open(path: &Path) -> Result<Self, Error> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|err| {
                 Error::storage(format!("Could not create the data directory: {err}"))
             })?;
         }
-        let conn = Connection::open(path)
-            .map_err(|err| Error::storage(format!("Could not open the database: {err}")))?;
+        let conn = Connection::open(path).map_err(|err| {
+            eprintln!("agentgauge: could not open the database: {err}");
+            Error::storage("The app database could not be opened.")
+        })?;
         Self::prepare(conn)
     }
 
@@ -202,15 +217,36 @@ fn consume(path: &Path) -> Result<(), Error> {
     }
 }
 
-/// Applies every migration past the stored schema version, and makes sure the
-/// tables this build reads exist.
+/// Applies every schema step past the stored version.
 ///
-/// Each step runs in its own transaction, so a failed upgrade leaves the file
-/// at its previous version rather than half-migrated. Creation is idempotent
-/// and runs regardless of the stored version, so a database from a *newer*
-/// build — a user who downgraded — still opens and reads the documents it
-/// kept in the same table instead of failing every read into a default.
+/// Each step runs in its own transaction that also records the step's own
+/// version, so a failed upgrade leaves the file at the previous step rather
+/// than half-migrated, and adding a later step can never re-run (or
+/// mis-stamp) an earlier one.
+///
+/// After the steps, this build's one table is ensured unconditionally: a
+/// database from a *newer* build — a user who downgraded — may carry a
+/// version this build has never heard of, so no step above ran, and the app
+/// must still read and write the documents it kept in that table instead of
+/// failing every read into a default.
 fn migrate(conn: &Connection) -> Result<(), Error> {
+    let version: i32 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|err| Error::storage(format!("Could not read the schema version: {err}")))?;
+
+    for (step, sql) in MIGRATIONS {
+        if version >= *step {
+            continue;
+        }
+        conn.execute_batch(&format!(
+            "BEGIN;
+             {sql}
+             PRAGMA user_version = {step};
+             COMMIT;"
+        ))
+        .map_err(|err| Error::storage(format!("Could not apply schema step {step}: {err}")))?;
+    }
+
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS app_state (
              key TEXT PRIMARY KEY,
@@ -218,15 +254,6 @@ fn migrate(conn: &Connection) -> Result<(), Error> {
          ) STRICT;",
     )
     .map_err(|err| Error::storage(format!("Could not set up the database: {err}")))?;
-
-    let version: i32 = conn
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(|err| Error::storage(format!("Could not read the schema version: {err}")))?;
-
-    if version < SCHEMA_VERSION {
-        conn.execute_batch("PRAGMA user_version = 1;")
-            .map_err(|err| Error::storage(format!("Could not record the schema version: {err}")))?;
-    }
 
     Ok(())
 }
@@ -274,6 +301,24 @@ mod tests {
         }
         let db = Database::open(&path).expect("opens and migrates");
         db.write_doc("k", "v").expect("writes");
+        cleanup(&path);
+    }
+
+    #[test]
+    fn a_migrated_database_is_stamped_with_the_applied_step() {
+        // The stamp is written from the step's own version, never a constant,
+        // so a future step cannot mis-stamp the file and rerun forever.
+        let path = temp_db("stamp");
+        let db = Database::open(&path).expect("opens");
+        let stamped: i32 = db
+            .conn()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("reads the stamp");
+        let latest = MIGRATIONS
+            .last()
+            .expect("the schema has at least one step")
+            .0;
+        assert_eq!(stamped, latest);
         cleanup(&path);
     }
 

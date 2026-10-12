@@ -6,7 +6,7 @@ import {
   dispatchCalls,
   expectDisplayed,
   gotoView,
-  restoreOnboardingStore,
+  clearSeededStores,
 } from "../fixtures.js";
 
 /**
@@ -23,7 +23,7 @@ import {
  * Runs in the single ordered group configured in `wdio.conf.ts`.
  */
 after(() => {
-  restoreOnboardingStore();
+  clearSeededStores();
 });
 
 async function bootOnHome(): Promise<void> {

@@ -6,7 +6,7 @@ import {
   dispatchCalls,
   gotoView,
   liveSnapshot,
-  restoreOnboardingStore,
+  clearSeededStores,
   subscription,
   type DispatchFixtures,
 } from "../fixtures.js";
@@ -24,7 +24,7 @@ import {
  * after every `describe` here has finished.
  */
 after(() => {
-  restoreOnboardingStore();
+  clearSeededStores();
 });
 
 /** Codex (enabled, the persisted default under test) beside a connected Z.AI. */

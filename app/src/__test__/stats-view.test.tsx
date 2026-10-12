@@ -17,6 +17,7 @@ import { statsTabAtom } from "~/atoms";
 import {
   LocalLogPanel,
   ModelMixBlock,
+  reportsOwnAnalytics,
   StatsView,
   tokenTooltipFormatter,
 } from "~/components/views/stats-view";
@@ -731,4 +732,108 @@ it("leaves the local panel off a tab with no local record", async () => {
 
   expect(await screen.findByTestId("stats-model-mix")).toBeTruthy();
   expect(screen.queryByTestId("stats-local-logs")).toBeNull();
+});
+
+/**
+ * A coding-plan tab with no provider analytics of its own, answered from
+ * OpenCode's local session database: this is the MiniMax/Kimi shape.
+ */
+function localOnlyUsage() {
+  return {
+    fetchedAt: 1_791_561_935_000,
+    summary: {
+      totalTokens: null,
+      peakDailyTokens: null,
+      longestRunningTurnSec: null,
+      currentStreakDays: null,
+      longestStreakDays: null,
+      totalRequests: null,
+    },
+    windowDays: null,
+    dailyUsageBuckets: [],
+    models: [],
+    local: {
+      models: [
+        {
+          id: "MiniMax-M3",
+          displayName: "minimax-M3",
+          input: 900_000_000,
+          cachedInput: 300_000_000,
+          cacheWrite: 0,
+          output: 40_000_000,
+          reasoning: 10_000_000,
+          responses: 900,
+          costUsd: 42.5,
+        },
+      ],
+      days: [{ day: "2026-09-24", tokens: 940_000_000 }],
+      costUsd: 42.5,
+      unpricedTokens: 0,
+      sessions: 94,
+      filesScanned: 1,
+      filesUnreadable: 0,
+      filesCompressed: 0,
+      firstDay: "2026-09-24",
+      lastDay: "2026-10-12",
+    },
+  };
+}
+
+it("answers a coding-plan tab from OpenCode's local sessions", () => {
+  render(
+    createElement(LocalLogPanel, {
+      usage: localOnlyUsage().local,
+      source: "OpenCode",
+    }),
+  );
+
+  // The panel names its own source: these numbers came from OpenCode's
+  // database, not from the plan vendor.
+  const source = screen.getByTestId("stats-local-source");
+  expect(source.textContent ?? "").toContain("OpenCode");
+  expect(source.textContent ?? "").toContain("94");
+  expect(source.textContent ?? "").toContain("2026-09-24");
+  expect(source.textContent ?? "").toContain("2026-10-12");
+
+  const cost = screen.getByTestId("stats-local-cost");
+  expect(cost.textContent ?? "").toMatch(/42[.,]50/);
+  const cache = screen.getByTestId("stats-local-cache");
+  expect(cache.textContent ?? "").toContain("33%");
+});
+
+it("shows a local reading on a coding-plan tab that reports nothing itself", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const tab = await screen.findByTestId("stats-tab-alibaba-coding-plan");
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+
+  // Alibaba has no integration, so its tab shows only the window reading and
+  // no local panel — the reading is absent, not zero.
+  expect(await screen.findByTestId("stats-plan-unreadable")).toBeTruthy();
+  expect(screen.queryByTestId("stats-local-logs")).toBeNull();
+});
+
+it("does not double up the model mix when the provider reports its own", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const tab = await screen.findByTestId("stats-tab-zai");
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+
+  // Z.AI's monitor API already answers with a model mix; the OpenCode local
+  // record is a different lens, not a second copy of the same panel.
+  expect(await screen.findByTestId("stats-model-mix")).toBeTruthy();
+  expect(screen.queryByTestId("stats-local-logs")).toBeNull();
+});
+
+it("says a plan publishes no analytics before showing its local reading", () => {
+  // MiniMax/Kimi shape: no provider totals at all, only the local ledger.
+  expect(reportsOwnAnalytics(localOnlyUsage())).toBe(false);
+  expect(reportsOwnAnalytics(zaiAccountUsage())).toBe(true);
+  expect(reportsOwnAnalytics(codexAccountUsage())).toBe(true);
 });

@@ -6,7 +6,7 @@ import {
   expectDisplayed,
   gotoView,
   openApp,
-  restoreOnboardingStore,
+  clearSeededStores,
   seedOnboardingStore,
   seedRoute,
 } from "../fixtures.js";
@@ -32,7 +32,7 @@ import {
  * `.opencode/skills/tauri-e2e-testing/references/capabilities.md`.
  */
 after(() => {
-  restoreOnboardingStore();
+  clearSeededStores();
 });
 
 describe("system widget", () => {

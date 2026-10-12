@@ -5,7 +5,7 @@ import {
   expectDisplayed,
   installDispatch,
   liveSnapshot,
-  restoreOnboardingStore,
+  clearSeededStores,
   settle,
 } from "../fixtures.js";
 
@@ -19,7 +19,7 @@ import {
  * after every `describe` here has finished.
  */
 after(() => {
-  restoreOnboardingStore();
+  clearSeededStores();
 });
 
 describe("styling and chrome", () => {

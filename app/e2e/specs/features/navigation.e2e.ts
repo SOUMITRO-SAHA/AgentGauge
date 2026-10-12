@@ -5,7 +5,7 @@ import {
   dispatchCalls,
   expectDisplayed,
   gotoView,
-  restoreOnboardingStore,
+  clearSeededStores,
 } from "../fixtures.js";
 
 /**
@@ -18,7 +18,7 @@ import {
  * after every `describe` here has finished.
  */
 after(() => {
-  restoreOnboardingStore();
+  clearSeededStores();
 });
 
 describe("navigation", () => {

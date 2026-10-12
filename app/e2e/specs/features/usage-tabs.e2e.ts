@@ -9,7 +9,7 @@ import {
   dispatchCalls,
   expectDisplayed,
   gotoView,
-  restoreOnboardingStore,
+  clearSeededStores,
 } from "../fixtures.js";
 
 /**
@@ -26,7 +26,7 @@ import {
  * rules that make that work live in `../fixtures.ts`.
  */
 after(() => {
-  restoreOnboardingStore();
+  clearSeededStores();
 });
 
 /** Boots onto Home and re-reads, so the fixture's provider set is what shows. */

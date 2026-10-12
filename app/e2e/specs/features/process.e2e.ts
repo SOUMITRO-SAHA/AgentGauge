@@ -5,7 +5,7 @@ import {
   gotoView,
   processScreenLive,
   processScreenWithPorts,
-  restoreOnboardingStore,
+  clearSeededStores,
 } from "../fixtures.js";
 
 /**
@@ -19,7 +19,7 @@ import {
  * are refreshes".
  */
 after(() => {
-  restoreOnboardingStore();
+  clearSeededStores();
 });
 
 describe("processes", () => {

@@ -11,7 +11,7 @@ import {
   liveSnapshot,
   openApp,
   pollForDisplayed,
-  restoreOnboardingStore,
+  clearSeededStores,
   seedOnboardingStep,
   seedRoute,
 } from "../fixtures.js";
@@ -31,7 +31,7 @@ describe("persistence", () => {
   const legacyPath = path.join(E2E_DATA_DIR, "onboarding.json");
 
   after(() => {
-    restoreOnboardingStore();
+    clearSeededStores();
   });
 
   it("imports a pre-database mid-flow file and resumes at that step", async () => {

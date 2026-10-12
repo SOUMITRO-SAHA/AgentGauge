@@ -8,7 +8,7 @@ import {
   dashboardLive,
   dispatchCalls,
   expectDisplayed,
-  restoreOnboardingStore,
+  clearSeededStores,
 } from "../fixtures.js";
 
 const repoRoot = path.resolve(
@@ -72,7 +72,7 @@ async function expectOnboardingButtonsFit(): Promise<void> {
 }
 
 after(() => {
-  restoreOnboardingStore();
+  clearSeededStores();
 });
 
 describe("developer test screen", () => {

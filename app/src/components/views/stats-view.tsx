@@ -158,16 +158,40 @@ function StatsTabBody({ tab }: { readonly tab: UsageTab }) {
 }
 
 /**
- * The providers whose backend reports token history, so a stats tab can carry
- * the same activity analytics Codex's does. Anything absent keeps reading its
- * windows only, and a provider added here must implement the account-usage
- * read in Rust — the card is a promise the read has to keep.
+ * The providers whose Stats tab carries activity analytics.
+ *
+ * Codex and Z.AI report token history from the provider's own API. MiniMax
+ * and Kimi publish none, so their reading comes from the sessions OpenCode
+ * recorded locally — different source, same tab. Anything absent keeps reading
+ * its windows only, and a provider added here must implement the account-usage
+ * read in Rust: the panel is a promise the read has to keep.
  */
-const TOKEN_HISTORY_PROVIDERS: readonly Ipc.ProviderKind[] = ["codex", "zai"];
+const TOKEN_HISTORY_PROVIDERS: readonly Ipc.ProviderKind[] = [
+  "codex",
+  "zai",
+  "minimax",
+  "kimi",
+];
+
+/**
+ * Whether an account reading carries anything the provider itself reported.
+ *
+ * MiniMax and Kimi answer with the local reading alone, and a panel of
+ * "not reported" cards over an empty chart would misdescribe that as missing
+ * data rather than as the shape of the answer.
+ */
+export function reportsOwnAnalytics(usage: Ipc.AccountUsage): boolean {
+  return (
+    usage.models.length > 0 ||
+    usage.dailyUsageBuckets.some((bucket) => (bucket.tokens ?? 0) > 0) ||
+    usage.summary.totalTokens !== null
+  );
+}
 
 /** The Codex tab: token activity, with the window reading below. */
 /**
- * The local log reading: what Codex's own rollout files say, priced exactly.
+ * The local log reading: what a harness's own session files say, priced
+ * exactly.
  *
  * This is the Codex tab's answer to the two questions the provider's account
  * read cannot answer — which model carried the work, and what it would have
@@ -178,7 +202,13 @@ const TOKEN_HISTORY_PROVIDERS: readonly Ipc.ProviderKind[] = ["codex", "zai"];
  * machine over a window the provider never states, so the panel names the log
  * count, the span, anything it could not read, and that none of it is a bill.
  */
-export function LocalLogPanel({ usage }: { readonly usage: Ipc.LocalUsage }) {
+export function LocalLogPanel({
+  usage,
+  source = "Codex",
+}: {
+  readonly usage: Ipc.LocalUsage;
+  readonly source?: string;
+}) {
   const promptTokens = usage.models.reduce((sum, model) => sum + model.input, 0);
   const cachedTokens = usage.models.reduce(
     (sum, model) => sum + model.cachedInput,
@@ -208,8 +238,8 @@ export function LocalLogPanel({ usage }: { readonly usage: Ipc.LocalUsage }) {
           Local log reading
         </h3>
         <p className="text-xs text-muted-foreground">
-          Read from Codex's own session logs on this machine — per-model tokens
-          and what they would have cost at API prices.
+          Read from {source}'s own session logs on this machine — per-model
+          tokens and what they would have cost at API prices.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -286,7 +316,7 @@ export function LocalLogPanel({ usage }: { readonly usage: Ipc.LocalUsage }) {
         className="text-xs text-muted-foreground"
         data-testid="stats-local-source"
       >
-        {usage.sessions} Codex session logs on this machine
+        {usage.sessions} {source} session logs on this machine
         {coverage !== null ? ` · ${coverage}` : ""} · exact per-response rates ·
         not a bill.
       </p>
@@ -440,7 +470,20 @@ function PlanAnalytics({
         onInitial: () => <AnalyticsLoadingSkeleton />,
         onSuccess: (result) => (
           <>
-            <AnalyticsContent usage={result.value} refreshing={result.waiting} />
+            {reportsOwnAnalytics(result.value) ? (
+              <AnalyticsContent usage={result.value} refreshing={result.waiting} />
+            ) : (
+              <p
+                className="text-sm text-muted-foreground"
+                data-testid="stats-plan-no-provider-analytics"
+              >
+                {label} publishes no token activity of its own. What follows is
+                read from this machine&apos;s OpenCode session logs.
+              </p>
+            )}
+            {result.value.local !== null && result.value.models.length === 0 ? (
+              <LocalLogPanel usage={result.value.local} source="OpenCode" />
+            ) : null}
             {result.value.models.length > 0 ? (
               <ModelMixBlock
                 kind={kind}
