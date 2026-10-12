@@ -138,9 +138,23 @@ binary** through its native webview.
   constraint in [`tauri.md`](tauri.md).
 - Assert the **rendered result**: the element, its text, and the state it is in.
   A spec that only proves the app compiled is not coverage.
-- Mock a Rust command with `browser.tauri.mock(...)` to drive renderer states
-  (live, cached, stale, unavailable) deterministically. `mock()` fully resets on
-  every call — set implementations in `beforeEach`, always `mockRestore()`.
+- Product UI calls cross one app command, `dispatch`. Drive rendered states
+  through `installDispatch` and `DispatchFixtures` in `app/e2e/specs/fixtures.ts`
+  (usually through a view-specific fixture), not `browser.tauri.mock(...)`.
+  `app/src/lib/ipc.ts` checks the app-visible `window.__wdio_mocks__` registry
+  before reaching Rust; the plugin's `core.invoke` interception does not take
+  on the current WKWebView path. `browser.tauri.mock(...)` remains useful in the
+  capabilities self-test for testing the plugin API itself.
+- For non-onboarding fixtures, shared `boot()` installs the dispatcher after
+  launch and the mount-time read, then refreshes Home, Automation, Processes,
+  and Settings twice. That broad setup is not appropriate for a focused screen
+  spec. Supply the target route and only its refresh nudges (as
+  `statsWithZaiAnalytics()` does), then assert route history if visiting another
+  destination would violate the test's scope.
+- Dispatcher functions must be closure-free: pass fixture data as JSON through
+  `__ismFixtures__`; a Node-side closure does not survive serialization into
+  the page. Install after navigation/remount, then use the surface's real refresh
+  action to issue the mocked read.
 - Reach the Rust side with
   `browser.tauri.execute(({ core }) => core.invoke(...))` when no UI gesture
   triggers the command; prefer a real gesture when the gesture producing the call

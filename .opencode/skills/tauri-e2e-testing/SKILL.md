@@ -104,8 +104,10 @@ Check these in order — the first three account for nearly every failure.
 
 ## Writing tests
 
-Specs live in `app/e2e/specs/features/*.e2e.ts`, one file per feature, and
-drive the real binary. Follow `e2e/specs/features/dashboard.e2e.ts`.
+Specs live in `app/e2e/specs/features/`, one small file per feature or surface,
+and drive the real binary. Group related specs in a subfolder once a surface has
+several; every file still belongs in the single ordered group in
+`e2e/wdio.conf.ts`. Follow the matching feature spec for setup patterns.
 
 ```ts
 import { expect, browser, $ } from "@wdio/globals";
@@ -116,19 +118,31 @@ import { expect, browser, $ } from "@wdio/globals";
 - Reach the Rust side with `browser.tauri.execute(({ core }) => core.invoke(...))`
   when no UI gesture triggers the command; use UI gestures when the point of the
   test is that the gesture produces the call.
-- Mock a command to isolate the renderer, then assert on recorded arguments:
-
-  ```ts
-  const mock = await browser.tauri.mock("get_usage");
-  await mock.mockResolvedValue({ remaining: 42 });
-  // ...trigger via UI...
-  await mock.update();
-  expect(mock.mock.calls[0]).toEqual([{ range: "week" }]);
-  await mock.mockRestore();
-  ```
-
-  `mock()` fully resets on every call, so set implementations in `beforeEach`,
-  never `beforeAll`.
+- Product UI state goes through the app's single `dispatch` IPC command. Use
+  `installDispatch` and `DispatchFixtures` from `app/e2e/specs/fixtures.ts` (or a
+  view-specific helper built on them). They install a closure-free dispatcher in
+  the app-visible `window.__wdio_mocks__` registry that
+  `app/src/lib/ipc.ts` checks before calling Rust. The plugin's
+  `browser.tauri.mock(...)` API is covered by
+  the capabilities self-test for direct plugin behavior; it is not the product
+  UI fixture mechanism on this WKWebView path.
+- Fixture values cross into the page as JSON in `__ismFixtures__`. Do not close
+  over Node-side fixture builders in the page dispatcher; those functions do
+  not survive serialization.
+- For non-onboarding fixtures, `boot()` defaults to refreshing several views'
+  atoms, so it navigates across Home, Automation, Processes, and Settings before
+  returning Home. A focused screen spec should set its initial/final route and
+  only that screen's refresh nudges, then assert it did not visit unrelated
+  routes. The All plans spec uses `statsWithZaiAnalytics()` as the Stats-only
+  example.
+- Run one targeted file per invocation with
+  `bun run e2e --spec ./e2e/specs/features/<feature>.e2e.ts`. Multiple `--spec`
+  values start racing app instances against the same renderer; run another
+  command for another file.
+- Navigate before installing the app-visible dispatcher: a page remount clears
+  `window.__wdio_mocks__`. After installing it, trigger a real refresh control
+  so the app issues the mocked read. The shared `boot()` helper handles this
+  ordering and waits out the mount-time read first.
 
 - Screenshot on failure with `browser.saveScreenshot(file)`. It returns a
   Buffer, not `true`. **Element screenshots are not cropped** — they return the

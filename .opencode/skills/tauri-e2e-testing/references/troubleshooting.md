@@ -110,17 +110,28 @@ Same root cause as above. If `import "@wdio/tauri-plugin"` is present, confirm
 the test is not racing initialization — `await browser.pause(500)` is a
 diagnostic, not a fix.
 
-## Mocked command throws "unmocked Tauri command in browser mode"
+## A product view uses live data despite its fixture
 
-The renderer invoked the command before `browser.tauri.mock(command)` was
-called. Register mocks in `beforeEach`, before any code path that can trigger
-the call.
+Product UI reads go through the app's `dispatch` command and its own
+`window.__wdio_mocks__` registry. Use `installDispatch` or a view-specific
+fixture from `e2e/specs/fixtures.ts`; `browser.tauri.mock()` is for the plugin
+capability self-test, not a substitute for this app-visible dispatcher. The
+dispatcher must be installed after the app navigation and mount-time read, then
+the screen's refresh control must issue the mocked read.
 
-## Mock returns `undefined` after `browser.url()`
+## The app fixture disappears after `browser.url()`
 
-A navigation wipes the renderer-side mock registry. The worker-side handle
-survives, so calling `mock(command)` alone does not re-register the browser
-side. Call `mock.mockRestore()` first, then `mock()` again.
+A page remount discards the renderer's `window.__wdio_mocks__` registry. Navigate
+and seed state first, then call `installDispatch` again and refresh the target
+screen. The shared `boot()` helper handles this order; use its focused route and
+nudge options instead of navigating unrelated screens for a one-screen spec.
+
+## A direct plugin mock is not called
+
+For a capabilities test that calls `browser.tauri.mock()` and then invokes
+`core.invoke` directly, register the mock after navigation and before the invoke.
+The app's feature UI uses `installDispatch` instead because the plugin's
+`core.invoke` interceptor does not take on the current WKWebView path.
 
 ## Cargo warns: `Found debug_assertions in target.'cfg(...)'.dependencies`
 

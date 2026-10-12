@@ -47,7 +47,7 @@ Provided by `tauri-plugin-wdio` (Rust) plus `@wdio/tauri-plugin` (JS).
 | -------------------------------------------- | ----------------------------------------------------- |
 | `execute(({ core }) => core.invoke(cmd, args))` | Real Rust round-trip; returns the command's value  |
 | `execute(fn, arg1, arg2, …)`                 | Extra arguments pass through to the script            |
-| `mock(command)`                              | Intercepts `invoke`; supports `mockResolvedValue`, `mockImplementation`, `mockReturnValue`, `update`, `mockRestore` |
+| `mock(command)`                              | Direct plugin test API; supports `mockResolvedValue`, `mockImplementation`, `mockReturnValue`, `update`, `mockRestore` |
 | `listWindows()`                              | `["main"]` for a single-window app                    |
 | `switchWindow(label)`                        | Retargets subsequent operations                       |
 | `emitEvent(name, payload, target?)`          | Declared in the type surface; not exercised here      |
@@ -60,28 +60,25 @@ Provided by `tauri-plugin-wdio` (Rust) plus `@wdio/tauri-plugin` (JS).
 implementations in `beforeEach`; a `beforeAll` setup will be wiped by the first
 test that calls `mock()` again.
 
-### Mocks are cleared by any navigation — verified on macOS 15
+### Product dispatch fixtures are page-scoped
 
-`window.__wdio_mocks__` is **emptied by `browser.url()` and by `refresh()`**.
-Verified directly: the registry reads `[]` immediately after either call.
+The app's renderer sends product IPC through one `dispatch` command. Its
+`Ipc.invoke` first checks the app-visible `window.__wdio_mocks__` registry, so
+feature specs use `installDispatch` and `DispatchFixtures` from
+`app/e2e/specs/fixtures.ts`; the `browser.tauri.mock()` API is exercised
+separately by the capabilities self-test. On the current WKWebView path, the
+plugin's interceptor does not replace the app-visible dispatch registry.
 
-The only working order is therefore **navigate → mock**:
+A navigation/remount discards the page's registry. Seed state and navigate to
+the app first, wait for its mount-time read, install the dispatcher, then trigger
+the view's real refresh control. `boot()` follows this order. Its default
+non-onboarding fixture refreshes atoms across multiple screens; a screen-focused
+spec should pass a target route and only that screen's nudges, as
+`statsWithZaiAnalytics()` does for `stats/all-plans.e2e.ts`.
 
-```ts
-await browser.url("tauri://localhost");       // 1. navigate first
-const mock = await browser.tauri.mock("x");  // 2. then mock
-await mock.mockResolvedValue(...);
-```
-
-Mocking *before* navigating is silently a no-op — the app then reads the real
-provider, and the spec passes or fails against live data while looking stubbed.
-
-**Known limitation:** state decided on mount that cannot be re-read through a
-control on the visible screen cannot be mocked, because the read happens before
-the mock exists and the control needed to trigger a re-read is itself hidden by
-the state under test. The onboarding gate has this shape;
-`app/e2e/specs/fixtures.ts` works around it and the `specs/features/` files
-carry the remaining failures.
+Dispatcher functions must be closure-free. `installDispatch` transfers fixture
+values as JSON on `__ismFixtures__`; a Node-side function captured by the mock
+does not survive serialization into the page.
 
 ### `window.__TAURI__.core.invoke` interception does not apply on this build
 
@@ -99,14 +96,14 @@ recording why.
 The app is a single window, so every spec file drives the *same* page. A mock
 installed by one file replaces the previous file's, and running files
 concurrently makes the fixtures race. Product coverage is therefore split by
-feature into `app/e2e/specs/features/*.e2e.ts` but kept in **one ordered group**
+feature into `app/e2e/specs/features/**/*.e2e.ts` but kept in **one ordered group**
 in `wdio.conf.ts`, which wdio runs in a single worker, in order. Splitting is
 safe because the group is sequential; splitting it into parallel instances is
 not.
 
-Do not write the persisted onboarding store to set up a spec: it lives on disk,
-so a write races every other spec that reads it. Each feature file restores both
-persisted stores in its own file-scope `after`.
+The fixtures seed both persisted stores before launch and restore their original
+bytes in each feature file's file-scope `after`. Keep the spec paths in one
+ordered worker group; parallel app instances would race these shared files.
 
 ## Window geometry — supported
 
@@ -124,10 +121,10 @@ session. `getProperty` is available via `browser.getProperty()`.
 
 ## Mocking is JS-side only
 
-`mock()` patches `window.__TAURI_INTERNALS__.invoke` in the renderer. It
-intercepts the frontend's call before it reaches Rust — the real command still
-exists and still runs if invoked from anywhere else. Mocking is therefore a
-renderer-isolation tool, not a backend sandbox.
+`browser.tauri.mock()` tests the plugin's JavaScript interception API; it does
+not replace Rust behavior. Product UI specs use the app's own page-side
+`dispatch` registry instead, because the plugin interceptor and the app's
+`Ipc.invoke` do not share a reliable interception path in this WKWebView build.
 
 No `wdio:allow-set-mock` / `allow-clear-mocks` permissions exist because there
 is no IPC surface to gate. `wdio:default` suffices.
