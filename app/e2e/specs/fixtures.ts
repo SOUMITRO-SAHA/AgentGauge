@@ -1,7 +1,8 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { expect, browser, $, $$ } from "@wdio/globals";
+
+import { E2E_DATA_DIR } from "../data-dir.js";
 
 /**
  * Shared fixtures for the dashboard specs.
@@ -58,43 +59,32 @@ async function storeFixtures(fixtures: DispatchFixtures): Promise<boolean> {
 // ---------------------------------------------------------------------------
 // The persisted onboarding store
 //
-// The old rule — never write the store from a spec — existed because two
-// workers drove one renderer and one disk. The grouped `specs` config runs
-// everything in ONE ordered worker, so with a save/restore around each use
-// there is nothing left to race: the store is seeded before the app launches,
-// every boot therefore starts from a known gate, and the original bytes come
-// back at the end of the run.
+// The app keeps its state in a SQLite database inside the sandbox data
+// directory (`AGENTGAUGE_DATA_DIR`, set by `wdio.conf.ts`), and imports these
+// legacy JSON files once when it finds them. Seeding therefore happens through
+// the exact path a real pre-database install upgrades through: write the file
+// before the boot, and the first read imports it, honours it, and spends it.
+//
+// The seeds never touch the user's real profile: the sandbox is wiped at the
+// start of every run, so a crashed run can no longer reset anyone's actual
+// onboarding state — the failure that used to present as "onboarding on every
+// cold start".
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // The persisted route
 //
-// The app remembers the last destination across launches, so a developer
-// machine left on Settings reopens on Settings and every assumption of
-// "starts on Home" quietly fails. Seeded the same way as the onboarding gate,
-// and restored at the end of the run.
+// The app remembers the last destination across launches, seeded the same way
+// as the onboarding gate so a run always opens from a known destination.
 // ---------------------------------------------------------------------------
 
 function settingsStorePath(): string {
-  return path.join(
-    os.homedir(),
-    "Library",
-    "Application Support",
-    "com.soumitrasaha.agentgauge",
-    "settings.json",
-  );
+  return path.join(E2E_DATA_DIR, "settings.json");
 }
-
-let savedSettingsStore: string | null | undefined;
 
 /** Seeds the persisted route to Home before the app launches. */
 export function seedRoute(route: "home" = "home"): void {
   const file = settingsStorePath();
-  if (savedSettingsStore === undefined) {
-    savedSettingsStore = fs.existsSync(file)
-      ? fs.readFileSync(file, "utf8")
-      : null;
-  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ lastRoute: route }));
 }
@@ -236,65 +226,48 @@ async function waitForWindow(): Promise<void> {
 }
 
 function onboardingStorePath(): string {
-  return path.join(
-    os.homedir(),
-    "Library",
-    "Application Support",
-    "com.soumitrasaha.agentgauge",
-    "onboarding.json",
-  );
+  return path.join(E2E_DATA_DIR, "onboarding.json");
 }
-
-let savedOnboardingStore: string | null | undefined;
 
 /**
  * Seeds the persisted onboarding gate before the app launches.
  *
  * `visible: true` = a fresh user (flow shows); `false` = dismissed. Must be
- * called BEFORE the boot's `url()`.
+ * called BEFORE the boot's `url()`. The seed lands as a legacy JSON file the
+ * app imports on its first read; a mid-flow step can be seeded with
+ * `seedOnboardingStep`.
  */
 export function seedOnboardingStore(visible: boolean): void {
   // `visible` means what it says: `true` seeds a fresh user whose flow shows.
   // An inverted call site is the single easiest mistake to make here, and it
   // fails silently — the app reads a dismissed store and the gate never opens.
+  seedOnboardingStep(visible ? "welcome" : "done", !visible);
+}
+
+/** Seeds an exact step, for specs that need more than fresh-or-dismissed. */
+export function seedOnboardingStep(step: string, dismissed: boolean): void {
   const file = onboardingStorePath();
-  if (savedOnboardingStore === undefined) {
-    savedOnboardingStore = fs.existsSync(file)
-      ? fs.readFileSync(file, "utf8")
-      : null;
-  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(
-    file,
-    JSON.stringify(
-      visible
-        ? { step: "welcome", dismissed: false }
-        : { step: "done", dismissed: true },
-    ),
-  );
+  fs.writeFileSync(file, JSON.stringify({ step, dismissed }));
 }
 
 /**
- * Puts the original persisted stores back. Call once, at the end of the run.
+ * Clears the sandbox's legacy seeds. Kept as the spec files' `afterAll` hook.
  *
- * Both stores are restored together: a run that seeds only onboarding leaves
- * the route as the last spec's navigation set it, which then changes what the
- * next run's app opens on.
+ * The app consumes each seed on import, so this mostly removes nothing — but a
+ * spec that seeded and never booted would otherwise leave a file that a later
+ * boot's import would honour. The sandbox is disposable; the real profile is
+ * never involved.
  */
 export function restoreOnboardingStore(): void {
-  for (const [file, saved] of [
-    [onboardingStorePath(), savedOnboardingStore],
-    [settingsStorePath(), savedSettingsStore],
-  ] as const) {
-    if (saved === undefined) continue;
-    if (saved === null) {
-      fs.rmSync(file, { force: true });
-    } else {
-      fs.writeFileSync(file, saved);
-    }
+  for (const file of [
+    onboardingStorePath(),
+    `${onboardingStorePath()}.imported`,
+    settingsStorePath(),
+    `${settingsStorePath()}.imported`,
+  ]) {
+    fs.rmSync(file, { force: true });
   }
-  savedOnboardingStore = undefined;
-  savedSettingsStore = undefined;
 }
 
 /** A live-looking Codex reading: 12% used, an hour to reset. */
@@ -828,6 +801,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               },
               windowDays: null,
               models: [],
+              local: codexLocalUsage(),
               dailyUsageBuckets: [
                 { startDate: "2026-10-07", tokens: 2300 },
                 { startDate: "2026-10-08", tokens: 0 },
@@ -1483,6 +1457,63 @@ export async function dashboardWithPlans(): Promise<void> {
 }
 
 /** A Z.AI account-analytics reading, as the model-usage monitor API reports it. */
+/**
+ * What the backend's rollout scan reports for the default Codex account: two
+ * priced models and one the price list does not carry, over a stated span, so
+ * the local panel has a real shape to render (including its gaps row).
+ */
+export function codexLocalUsage() {
+  return {
+    models: [
+      {
+        id: "gpt-5.5",
+        displayName: "GPT-5.5",
+        input: 132064094,
+        cachedInput: 125855104,
+        cacheWrite: 0,
+        output: 616260,
+        reasoning: 400000,
+        responses: 1146,
+        costUsd: 112.46,
+      },
+      {
+        id: "gpt-6-luna",
+        displayName: "GPT-6 Luna",
+        input: 137116712,
+        cachedInput: 133943168,
+        cacheWrite: 0,
+        output: 780596,
+        reasoning: 300000,
+        responses: 1080,
+        costUsd: 2.05,
+      },
+      {
+        id: "gpt-5.5-preview",
+        displayName: "gpt-5.5-preview",
+        input: 1000000,
+        cachedInput: 900000,
+        cacheWrite: 0,
+        output: 100000,
+        reasoning: 0,
+        responses: 10,
+        costUsd: null,
+      },
+    ],
+    days: [
+      { day: "2026-09-04", tokens: 120000000 },
+      { day: "2026-09-24", tokens: 180000000 },
+    ],
+    costUsd: 114.51,
+    unpricedTokens: 1100000,
+    sessions: 168,
+    filesScanned: 168,
+    filesUnreadable: 0,
+    filesCompressed: 0,
+    firstDay: "2026-09-04",
+    lastDay: "2026-09-24",
+  };
+}
+
 export function zaiAccountUsage() {
   return {
     fetchedAt: 1791561935000,
@@ -1508,6 +1539,7 @@ export function zaiAccountUsage() {
         requests: null,
       },
     ],
+    local: null,
   };
 }
 

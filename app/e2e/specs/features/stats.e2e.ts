@@ -339,4 +339,46 @@ describe("stats", () => {
     expect(shares.source).toContain("80% input");
     expect(shares.source).toContain("not a bill");
   });
+  it("shows Codex's local model mix with exact cost and cache efficiency", async () => {
+    await dashboardLive();
+    await gotoView("stats");
+
+    await expectDisplayed('[data-testid="stats-local-logs"]');
+    await expectDisplayed('[data-testid="stats-local-model-gpt-5.5"]');
+    await expectDisplayed('[data-testid="stats-local-model-gpt-6-luna"]');
+
+    const reading = await browser.execute(() => {
+      const read = (id: string) =>
+        document
+          .querySelector(`[data-testid="${id}"]`)
+          ?.textContent?.replace(/\s+/g, " ") ?? "";
+      return {
+        cost: read("stats-local-cost"),
+        cache: read("stats-local-cache"),
+        source: read("stats-local-source"),
+        gpt55: read("stats-local-model-gpt-5.5"),
+        luna: read("stats-local-model-gpt-6-luna"),
+        unpriced: read("stats-local-model-gpt-5.5-preview"),
+        note: read("stats-local-unpriced"),
+      };
+    });
+
+    // The exact figure is the sum of the per-model costs (112.46 + 2.05).
+    expect(reading.cost).toContain("$115");
+    // The cache share is the reason that figure stays small.
+    expect(reading.cache).toContain("96%");
+    // Token share and cost share disagree, which is why both lenses render:
+    // Luna carries about half the tokens for 2% of the dollars.
+    expect(reading.gpt55).toContain("98% of est. cost");
+    expect(reading.luna).toContain("2% of est. cost");
+    expect(reading.luna).toContain("51% of tokens");
+    // A model the price list cannot cover stays a token count, never $0.
+    expect(reading.unpriced).toContain("No reference price");
+    expect(reading.note).toContain("1.1M");
+    // Provenance: the logs, the span they cover, and the not-a-bill claim.
+    expect(reading.source).toContain("168");
+    expect(reading.source).toContain("2026-09-04");
+    expect(reading.source).toContain("2026-09-24");
+    expect(reading.source).toContain("not a bill");
+  });
 });
