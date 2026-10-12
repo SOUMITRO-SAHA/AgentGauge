@@ -13,8 +13,9 @@
  * spec selector ambiguous.
  *
  * The tab strip is mounted from app start like Home's, so a click never races
- * a fresh Radix mount; only the tab *bodies* are gated on visibility, which is
- * what keeps a hidden view from reading the account in the background.
+ * a fresh Radix mount. Tab *bodies* mount on the first Stats visit and stay
+ * mounted for the rest of the session (the outer div hides via `display:none`),
+ * so revisiting Stats renders from cached atom values without re-subscribing.
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
@@ -80,7 +81,7 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
   const subscriptions = useAtomValue(subscriptionsAtom);
   const [mounted, setMounted] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
-  const nowMs = useClock();
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     if (visible && !mounted) {
@@ -101,6 +102,19 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
     ? selected
     : ALL_PLANS_TAB.value;
 
+  const connectedKinds = useMemo(
+    () =>
+      tabs
+        .filter((t) => t.kind !== null)
+        .map((t) => t.kind as Ipc.ProviderKind),
+    [tabs],
+  );
+
+  const handleReload = useCallback(() => {
+    setRefreshTick((t) => t + 1);
+    setLastRefreshed(Date.now());
+  }, []);
+
   return (
     <div
       className={visible ? "flex flex-col gap-4" : "hidden"}
@@ -112,11 +126,19 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
           subtitle="Local analytics across your connected plans."
         />
         {mounted ? (
-          <StatsReloadButton
-            onReloaded={() => setLastRefreshed(Date.now())}
-          />
+          <StatsReloadButton onReload={handleReload} />
         ) : null}
       </div>
+
+      {mounted
+        ? connectedKinds.map((kind) => (
+            <ProviderRefreshHandler
+              key={kind}
+              kind={kind}
+              tick={refreshTick}
+            />
+          ))
+        : null}
 
       <Tabs
         value={active}
@@ -143,7 +165,6 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
                 <AllPlansOverview
                   tabs={tabs}
                   lastRefreshed={lastRefreshed}
-                  nowMs={nowMs}
                 />
               ) : (
                 <StatsTabBody tab={tab} />
@@ -174,13 +195,12 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
 export function AllPlansOverview({
   tabs,
   lastRefreshed,
-  nowMs,
 }: {
   readonly tabs: readonly UsageTab[];
   readonly lastRefreshed: number | null;
-  readonly nowMs: number;
 }) {
   const plans = tabs.filter((tab) => tab.kind !== null);
+  const nowMs = useClock();
   const freshnessLabel =
     lastRefreshed !== null
       ? (formatFreshness(lastRefreshed, nowMs) ?? "just now")
@@ -235,45 +255,49 @@ export function AllPlansOverview({
 }
 
 function StatsReloadButton({
-  onReloaded,
+  onReload,
 }: {
-  readonly onReloaded: () => void;
+  readonly onReload: () => void;
 }) {
-  const r1 = useAtomRefresh(usageForAtom("codex"));
-  const r2 = useAtomRefresh(accountUsageForAtom("codex"));
-  const r3 = useAtomRefresh(usageForAtom("zai"));
-  const r4 = useAtomRefresh(accountUsageForAtom("zai"));
-  const r5 = useAtomRefresh(usageForAtom("minimax"));
-  const r6 = useAtomRefresh(accountUsageForAtom("minimax"));
-  const r7 = useAtomRefresh(usageForAtom("kimi"));
-  const r8 = useAtomRefresh(accountUsageForAtom("kimi"));
-  const r9 = useAtomRefresh(subscriptionsAtom);
+  const refreshSubs = useAtomRefresh(subscriptionsAtom);
 
-  const handleReload = useCallback(() => {
-    r9();
-    r1();
-    r2();
-    r3();
-    r4();
-    r5();
-    r6();
-    r7();
-    r8();
-    onReloaded();
-  }, [r1, r2, r3, r4, r5, r6, r7, r8, r9, onReloaded]);
+  const handleClick = useCallback(() => {
+    refreshSubs();
+    onReload();
+  }, [refreshSubs, onReload]);
 
   return (
     <Button
       variant="ghost"
       size="sm"
       className="shrink-0"
-      onClick={handleReload}
+      onClick={handleClick}
       data-testid="stats-reload"
     >
       <ArrowClockwise aria-hidden="true" />
       <span className="hidden sm:inline">Reload</span>
     </Button>
   );
+}
+
+function ProviderRefreshHandler({
+  kind,
+  tick,
+}: {
+  readonly kind: Ipc.ProviderKind;
+  readonly tick: number;
+}) {
+  const refreshUsage = useAtomRefresh(usageForAtom(kind));
+  const refreshAccount = useAtomRefresh(accountUsageForAtom(kind));
+  const mountTick = useRef(tick);
+
+  useEffect(() => {
+    if (tick === mountTick.current) return;
+    refreshUsage();
+    refreshAccount();
+  }, [tick, refreshUsage, refreshAccount]);
+
+  return null;
 }
 
 /**
