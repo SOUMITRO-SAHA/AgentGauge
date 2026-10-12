@@ -82,8 +82,10 @@ function settingsStorePath(): string {
   return path.join(E2E_DATA_DIR, "settings.json");
 }
 
-/** Seeds the persisted route to Home before the app launches. */
-export function seedRoute(route: "home" = "home"): void {
+type E2EView = "home" | "automation" | "stats" | "processes" | "settings";
+
+/** Seeds the persisted route before the app launches. */
+export function seedRoute(route: E2EView = "home"): void {
   const file = settingsStorePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ lastRoute: route }));
@@ -1190,7 +1192,17 @@ type UiNudge =
   | "refresh-usage"
   | "refresh-automation"
   | "refresh-widget"
-  | "refresh-processes-codex";
+  | "refresh-processes-codex"
+  | "stats-reload";
+
+interface BootOptions {
+  readonly initialRoute?: E2EView;
+  readonly nudges?: ReadonlyArray<{
+    readonly view: E2EView | null;
+    readonly control: UiNudge;
+  }>;
+  readonly finalRoute?: E2EView;
+}
 
 export async function settle(nudge: UiNudge): Promise<void> {
   const target = await firstDisplayed(`[data-testid="${nudge}"]`);
@@ -1232,7 +1244,7 @@ export async function firstDisplayed(
  * so a spec never touches the on-disk settings file).
  */
 export async function gotoView(
-  view: "home" | "automation" | "stats" | "processes" | "settings",
+  view: E2EView,
 ): Promise<void> {
   const button = await firstDisplayed(`[data-testid="nav-${view}"]`);
   if (!button) {
@@ -1275,7 +1287,10 @@ export async function dispatchCalls(): Promise<Array<Record<string, unknown>>> {
  * atoms being refreshed. Each settle waits for the surface to reach the state
  * the fixtures asked for.
  */
-export async function boot(fixtures: DispatchFixtures): Promise<void> {
+export async function boot(
+  fixtures: DispatchFixtures,
+  options: BootOptions = {},
+): Promise<void> {
   // The gate and the route are seeded on disk BEFORE the app launches, so the
   // mount-time read answers what the fixtures need — no post-hoc fixing.
   //
@@ -1286,7 +1301,7 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
   // correct. Verified by printing the file after `openApp`: it read
   // `{"step":"done","dismissed":true}` for a spec that had asked for the flow.
   seedOnboardingStore(fixtures.visible);
-  seedRoute("home");
+  seedRoute(options.initialRoute ?? "home");
 
   await openApp();
 
@@ -1324,8 +1339,9 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
   // now.
   // The test-only replay control above makes visible-onboarding boots
   // deterministic even when a same-URL navigation preserves session atoms.
-  const nudges = [
-    ...(fixtures.visible
+  const nudges =
+    options.nudges ??
+    (fixtures.visible
       ? []
       : [
           { view: "home", control: "refresh-provider" },
@@ -1333,11 +1349,7 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
           { view: "automation", control: "refresh-automation" },
           { view: "processes", control: "refresh-processes-codex" },
           { view: "settings", control: "refresh-widget" },
-        ]),
-  ] as ReadonlyArray<{
-    view: "home" | "automation" | "processes" | "settings" | null;
-    control: UiNudge;
-  }>;
+        ]);
   for (let pass = 0; pass < 2; pass += 1) {
     for (const { view, control } of nudges) {
       // The shell is hidden while onboarding shows, so its destinations are
@@ -1353,12 +1365,10 @@ export async function boot(fixtures: DispatchFixtures): Promise<void> {
     }
   }
 
-  // The nudge trail above ends on the last visited destination, but every
-  // spec asserts against Home's panels; leave the app where the assertions
-  // are, so "displayed" means what the spec says and not wherever the last
-  // nudge happened to land.
+  // The nudge trail above ends on the last visited destination; leave the app
+  // where the assertions are, so "displayed" means the requested surface.
   try {
-    await gotoView("home");
+    await gotoView(options.finalRoute ?? "home");
   } catch {
     // A navigation failure here is the suite's problem to surface, not a
     // reason to hide the surface the fixtures describe.
@@ -1680,7 +1690,19 @@ export async function dashboardWithZaiWeek(): Promise<void> {
 }
 
 export async function dashboardWithZaiAnalytics(): Promise<void> {
-  await boot({
+  await boot(zaiAnalyticsFixture());
+}
+
+export async function statsWithZaiAnalytics(): Promise<void> {
+  await boot(zaiAnalyticsFixture(), {
+    initialRoute: "stats",
+    nudges: [{ view: "stats", control: "stats-reload" }],
+    finalRoute: "stats",
+  });
+}
+
+function zaiAnalyticsFixture(): DispatchFixtures {
+  return {
     visible: false,
     usage: liveSnapshot(),
     subscriptions: [subscription()],
@@ -1692,7 +1714,7 @@ export async function dashboardWithZaiAnalytics(): Promise<void> {
     widgetSupported: true,
     automationRunning: true,
     codexLocalUsage: codexLocalUsage(),
-  });
+  };
 }
 
 /** The same dashboard, with the Z.AI reading arriving late. */

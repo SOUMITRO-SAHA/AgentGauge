@@ -424,61 +424,6 @@ describe("stats", () => {
     expect(reading.source).toContain("2026-10-12");
     expect(reading.source).toContain("not a bill");
   });
-  it("opens on an all-plans overview that sums nothing", async () => {
-    await dashboardWithZaiAnalytics();
-    await gotoView("stats");
-
-    // The overview is the landing tab, and it lists each plan on its own row.
-    await expectDisplayed('[data-testid="stats-all-plans"]');
-    await expectDisplayed('[data-testid="stats-plan-row-codex"]');
-    await expectDisplayed('[data-testid="stats-plan-row-zai"]');
-
-    const overview = await browser.execute(() => {
-      const read = (id: string) =>
-        document
-          .querySelector(`[data-testid="${id}"]`)
-          ?.textContent?.replace(/\s+/g, " ") ?? "";
-      return {
-        codexSource: read("stats-plan-row-codex-source"),
-        codexCost: read("stats-plan-row-codex-cost"),
-        zaiSource: read("stats-plan-row-zai-source"),
-        zaiCost: read("stats-plan-row-zai-cost"),
-        zaiBasis: read("stats-plan-row-zai-cost-basis"),
-        codexBasis: read("stats-plan-row-codex-cost-basis"),
-        codexRequests: read("stats-plan-row-codex-requests"),
-        zaiRequests: read("stats-plan-row-zai-requests"),
-        zaiPeak: read("stats-plan-row-zai-peak"),
-        note: read("stats-all-plans-not-summed"),
-        totalExists:
-          document.querySelector('[data-testid="stats-all-plans-total"]') !==
-          null,
-      };
-    });
-
-    // Each row names its own span, and neither is folded into a total the
-    // spans could not support.
-    expect(overview.codexSource).toContain("local sessions");
-    expect(overview.codexCost).toContain("$");
-    expect(overview.zaiSource).toContain("30 days");
-
-    // Both plans are priced and both say how, rather than one plan carrying a
-    // dollar figure and the other a bare dash that reads as "free".
-    expect(overview.zaiCost).not.toBe("—");
-    expect(overview.zaiCost).toContain("$");
-    expect(overview.zaiBasis).toContain("price list");
-    expect(overview.zaiBasis).toContain("80% input / 20% output");
-    expect(overview.zaiBasis).toContain("2026-10-11");
-    expect(overview.codexBasis).toContain("not a bill");
-    expect(overview.codexBasis).toContain("2026-10-11");
-    expect(overview.codexBasis).toContain("1.1M tokens remain unpriced");
-    // Basic figures every plan has, shown the same way on every row.
-    expect(overview.codexRequests.replace(/\D/g, "")).toBe("2236");
-    expect(overview.zaiRequests).toContain("requests");
-    expect(overview.zaiPeak).toContain("peak");
-    expect(overview.zaiPeak).toContain("2026-10-08");
-    expect(overview.totalExists).toBe(false);
-    expect(overview.note).toContain("summed");
-  });
   it("ranks the projects the tokens went to, without pricing what it cannot", async () => {
     await dashboardLive();
     await gotoView("stats");
