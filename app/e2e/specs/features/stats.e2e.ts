@@ -35,6 +35,9 @@ describe("stats", () => {
     await dashboardLive();
     await gotoView("stats");
 
+    // The view lands on the overview; the Codex tab is one click away and
+    // still reads by default once open.
+    await clickDisplayed('[data-testid="stats-tab-codex"]');
     await expectDisplayed('[data-testid="stats-account-analytics"]');
     expect(
       (await $$('[data-testid="stats-analytics-consent"]')).length,
@@ -292,6 +295,7 @@ describe("stats", () => {
 
     // Analytics is the product: it reads by default and there is nothing to
     // turn off — no button, no disabled state, no gate.
+    await clickDisplayed('[data-testid="stats-tab-codex"]');
     await expectDisplayed('[data-testid="stats-account-analytics"]');
     expect(
       await $('[data-testid="stats-disable-analytics"]').isExisting(),
@@ -344,6 +348,7 @@ describe("stats", () => {
     await dashboardLive();
     await gotoView("stats");
 
+    await clickDisplayed('[data-testid="stats-tab-codex"]');
     await expectDisplayed('[data-testid="stats-local-logs"]');
     await expectDisplayed('[data-testid="stats-local-model-gpt-5.5"]');
     await expectDisplayed('[data-testid="stats-local-model-gpt-6-luna"]');
@@ -417,5 +422,38 @@ describe("stats", () => {
     expect(reading.source).toContain("2026-09-24");
     expect(reading.source).toContain("2026-10-12");
     expect(reading.source).toContain("not a bill");
+  });
+  it("opens on an all-plans overview that sums nothing", async () => {
+    await dashboardWithZaiAnalytics();
+    await gotoView("stats");
+
+    // The overview is the landing tab, and it lists each plan on its own row.
+    await expectDisplayed('[data-testid="stats-all-plans"]');
+    await expectDisplayed('[data-testid="stats-plan-row-codex"]');
+    await expectDisplayed('[data-testid="stats-plan-row-zai"]');
+
+    const overview = await browser.execute(() => {
+      const read = (id: string) =>
+        document
+          .querySelector(`[data-testid="${id}"]`)
+          ?.textContent?.replace(/\s+/g, " ") ?? "";
+      return {
+        codexSource: read("stats-plan-row-codex-source"),
+        codexCost: read("stats-plan-row-codex-cost"),
+        zaiSource: read("stats-plan-row-zai-source"),
+        note: read("stats-all-plans-not-summed"),
+        totalExists:
+          document.querySelector('[data-testid="stats-all-plans-total"]') !==
+          null,
+      };
+    });
+
+    // Each row names its own span, and neither is folded into a total the
+    // spans could not support.
+    expect(overview.codexSource).toContain("local sessions");
+    expect(overview.codexCost).toContain("$");
+    expect(overview.zaiSource).toContain("30 days");
+    expect(overview.totalExists).toBe(false);
+    expect(overview.note).toContain("summed");
   });
 });
