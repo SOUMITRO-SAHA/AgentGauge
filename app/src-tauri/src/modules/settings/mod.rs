@@ -82,10 +82,7 @@ impl SettingsStore {
     /// block the app from launching.
     pub fn load(&self) -> UiState {
         if let Err(error) = self.db.import_doc(KEY, self.legacy.as_deref()) {
-            eprintln!(
-                "agentgauge: could not import saved preferences: {}",
-                error.message
-            );
+            log::warn!("could not import saved preferences: {}", error.message);
         }
 
         let Ok(raw) = self.db.read_doc(KEY) else {
@@ -106,8 +103,8 @@ impl SettingsStore {
             .map_err(|err| Error::storage(format!("Settings could not be encoded: {err}")))?;
         self.db.write_doc(KEY, &encoded)?;
         if let Err(error) = self.db.consume_doc(self.legacy.as_deref()) {
-            eprintln!(
-                "agentgauge: could not retire the old preferences store: {}",
+            log::warn!(
+                "could not retire the old preferences store: {}",
                 error.message
             );
         }

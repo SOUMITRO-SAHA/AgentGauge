@@ -61,6 +61,11 @@ pub fn run() {
     // window, no Tauri runtime, and no renderer. It must be decided before
     // anything Tauri is built — a worker tick must never open the UI.
     if std::env::args().nth(1).as_deref() == Some("kickoff-worker") {
+        if let Some(home) = std::env::var_os("HOME") {
+            if let Some(dir) = shared::logging::app_log_dir_from_home(&home) {
+                let _ = shared::logging::init(Arc::new(shared::clock::SystemClock), dir);
+            }
+        }
         std::process::exit(run_kickoff_worker());
     }
 
@@ -89,6 +94,11 @@ pub fn run() {
             // the variable.
             let data_dir = resolve_data_dir(app);
 
+            if let Some(dir) = data_dir.as_deref() {
+                let _ =
+                    shared::logging::init(Arc::new(shared::clock::SystemClock), dir.join("logs"));
+            }
+
             // One database behind every persisted store. Without a usable
             // data directory the app degrades to an in-memory database — it
             // still runs; persistence simply does not outlive the process,
@@ -100,10 +110,7 @@ pub fn run() {
                 Some(Ok(db)) => Arc::new(db),
                 other => {
                     if let Some(Err(error)) = other {
-                        eprintln!(
-                            "agentgauge: falling back to in-memory storage: {}",
-                            error.message
-                        );
+                        log::warn!("falling back to in-memory storage: {}", error.message);
                     }
                     Arc::new(Database::open_in_memory().expect("an in-memory database"))
                 }
@@ -188,7 +195,7 @@ pub fn run() {
                                 &crate::shared::clock::SystemClock,
                             );
                             if let Err(error) = modules::kickoff::worker::tick(&store, now, &kick) {
-                                eprintln!("agentgauge: kickoff tick failed: {}", error.message);
+                                log::error!("kickoff tick failed: {}", error.message);
                             }
                         }
                     })
@@ -230,7 +237,7 @@ pub fn run() {
 /// stays meaningful.
 fn run_kickoff_worker() -> i32 {
     let Some(store) = KickoffStore::from_env() else {
-        eprintln!("agentgauge: no home directory; the kickoff worker cannot run.");
+        log::warn!("no home directory; the kickoff worker cannot run.");
         return 0;
     };
 
@@ -245,12 +252,12 @@ fn run_kickoff_worker() -> i32 {
     match modules::kickoff::worker::tick(&store, now, &kick) {
         Ok(fired) => {
             if fired > 0 {
-                eprintln!("agentgauge: kickoff worker fired {fired} attempt(s).");
+                log::info!("kickoff worker fired {fired} attempt(s).");
             }
             0
         }
         Err(error) => {
-            eprintln!("agentgauge: kickoff worker failed: {}", error.message);
+            log::error!("kickoff worker failed: {}", error.message);
             1
         }
     }

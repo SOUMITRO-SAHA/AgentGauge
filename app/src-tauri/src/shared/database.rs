@@ -63,7 +63,7 @@ impl Database {
             })?;
         }
         let conn = Connection::open(path).map_err(|err| {
-            eprintln!("agentgauge: could not open the database: {err}");
+            log::error!("could not open the database: {err}");
             Error::storage("The app database could not be opened.")
         })?;
         Self::prepare(conn)

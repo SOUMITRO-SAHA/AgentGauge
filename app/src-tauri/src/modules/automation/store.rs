@@ -119,10 +119,7 @@ impl AutomationStore {
     /// cannot be understood must never be guessed at.
     pub fn load(&self) -> AutomationConfig {
         if let Err(error) = self.db.import_doc(KEY, self.legacy.as_deref()) {
-            eprintln!(
-                "agentgauge: could not import automation choices: {}",
-                error.message
-            );
+            log::warn!("could not import automation choices: {}", error.message);
         }
         self.decode(self.db.read_doc(KEY).ok().flatten())
     }
@@ -167,8 +164,8 @@ impl AutomationStore {
             Ok((updated, encoded))
         })?;
         if let Err(error) = self.db.consume_doc(self.legacy.as_deref()) {
-            eprintln!(
-                "agentgauge: could not retire the old automation store: {}",
+            log::warn!(
+                "could not retire the old automation store: {}",
                 error.message
             );
         }

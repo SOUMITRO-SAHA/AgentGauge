@@ -103,7 +103,7 @@ fn handle(request: AppRequest, state: &AppState, app: &AppHandle) -> Result<AppR
     let name = request.name();
 
     if let Err(error) = validate(&request) {
-        eprintln!("agentgauge: rejected `{name}`: {}", error.message);
+        log::warn!("rejected `{name}`: {}", error.message);
         return Err(error);
     }
 
@@ -369,10 +369,7 @@ fn sync_reset_times(state: &AppState, snapshots: &[UsageSnapshot]) {
             sub
         });
         if let Err(error) = result {
-            eprintln!(
-                "agentgauge: could not sync the kickoff schedule: {}",
-                error.message
-            );
+            log::error!("could not sync the kickoff schedule: {}", error.message);
         }
     }
 }
@@ -392,10 +389,7 @@ fn opencode_subscriptions(_state: &AppState) -> Vec<CodingSubscription> {
             // Reported rather than propagated: the renderer still has the
             // OpenCode CLI status to explain an empty list, and a missing
             // OpenCode must not blank the Codex reading.
-            eprintln!(
-                "agentgauge: could not list OpenCode subscriptions: {}",
-                error.message
-            );
+            log::warn!("could not list OpenCode subscriptions: {}", error.message);
             Vec::new()
         }
     }
@@ -438,10 +432,7 @@ fn publish_snapshot(state: &AppState, snapshots: &[UsageSnapshot]) {
     if let Err(error) = store.write(&snapshot) {
         // A widget that cannot be written must not break the reading the user
         // actually asked for, so this is reported and not propagated.
-        eprintln!(
-            "agentgauge: could not publish widget snapshot: {}",
-            error.message
-        );
+        log::warn!("could not publish widget snapshot: {}", error.message);
     }
 }
 

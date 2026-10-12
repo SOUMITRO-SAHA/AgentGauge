@@ -42,6 +42,11 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 # screen. `system` only: the default feature set (disks, networks, components,
 # users, gpu) is disabled so none of it is compiled. Approved by the user.
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+# The logging facade every module emits through; `shared::logging` is the only
+# sink (a rotated, PII-scrubbed file). Already in the graph via `tauri` at the
+# same version, so this names an existing crate rather than adding one.
+# Approved by the user as part of the logger-service task.
+log = "0.4"
 # E2E testing plugins. Registered only under #[cfg(debug_assertions)] in
 # src/lib.rs, so they are compiled into debug builds but never activated in release.
 tauri-plugin-wdio = "1"

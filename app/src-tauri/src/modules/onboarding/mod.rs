@@ -193,10 +193,7 @@ impl OnboardingStore {
     /// upgraded install resumes where it left off.
     fn import_legacy(&self) {
         if let Err(error) = self.db.import_doc(KEY, self.legacy.as_deref()) {
-            eprintln!(
-                "agentgauge: could not import onboarding state: {}",
-                error.message
-            );
+            log::warn!("could not import onboarding state: {}", error.message);
         }
     }
 
@@ -204,8 +201,8 @@ impl OnboardingStore {
     /// newer state.
     fn consume_legacy(&self) {
         if let Err(error) = self.db.consume_doc(self.legacy.as_deref()) {
-            eprintln!(
-                "agentgauge: could not retire the old onboarding store: {}",
+            log::warn!(
+                "could not retire the old onboarding store: {}",
                 error.message
             );
         }
