@@ -1,0 +1,35 @@
+name: Bug report
+description: Report something in AgentGauge that does not work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report this. Please search the existing issues first — if the problem is already reported, add your details there.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+    validations:
+      required: false
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: System diagnostics
+      description: >
+        Prefilled by the app when you start from Settings → Feedback. Edit
+        freely — remove anything you would rather not share.
+    validations:
+      required: false

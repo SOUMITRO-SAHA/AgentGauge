@@ -1,0 +1,7 @@
+# Renders the repository's "Sponsor this project" button only together with
+# the Sponsorships flag (repo Settings → Features), which CLI-created repos
+# leave off until it is enabled via GraphQL `hasSponsorshipsEnabled`.
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+
+github: [SOUMITRO-SAHA]
+patreon: SOUMITROSAHA

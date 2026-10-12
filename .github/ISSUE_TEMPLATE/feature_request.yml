@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest an improvement or a new capability for AgentGauge.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature direction lives in the project's roadmap; a request here records demand and helps prioritise. For substantial integration work, please read the contributing guide's boundaries first.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or gap
+      description: What are you trying to do, and what stands in the way?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What would you expect AgentGauge to do instead?
+    validations:
+      required: false
