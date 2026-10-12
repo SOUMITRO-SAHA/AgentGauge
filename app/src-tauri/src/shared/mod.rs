@@ -10,5 +10,6 @@ pub mod database;
 pub mod domain;
 pub mod error;
 pub mod legacy_shared;
+pub mod platform;
 pub mod protocol;
 pub mod provider;

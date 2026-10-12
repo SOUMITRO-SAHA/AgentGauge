@@ -13,6 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::modules::about::AppInfo;
 use crate::modules::automation::AutomationState;
 use crate::modules::cli_detection::CliToolStatus;
 use crate::modules::kickoff::KickoffOverview;
@@ -40,6 +41,13 @@ pub enum AppRequest {
     Hello,
     /// Probes every provider without starting a long-lived process.
     ProviderStatus,
+    /// Facts about this build, and the outbound links the Settings screen offers.
+    AppInfo,
+    /// Opens one of the app's own outbound links in the user's browser.
+    ///
+    /// The URL is validated against the allowlist in `modules::about` before
+    /// the opener runs, so this is not a generic "open anything" capability.
+    OpenLink { url: String },
     /// Detects supported coding-agent CLIs without starting sessions.
     CliDetection,
     /// Reads the read-only process and storage insights for the app and the
@@ -132,6 +140,8 @@ impl AppRequest {
         match self {
             Self::Hello => "hello",
             Self::ProviderStatus => "providerStatus",
+            Self::AppInfo => "appInfo",
+            Self::OpenLink { .. } => "openLink",
             Self::CliDetection => "cliDetection",
             Self::ProcessInsights => "processInsights",
             Self::OpenCodeSubscriptions => "openCodeSubscriptions",
@@ -172,6 +182,12 @@ pub enum AppResponse {
     ProviderStatuses {
         providers: Vec<ProviderStatus>,
     },
+    /// This build's facts and outbound links.
+    AppInfo {
+        info: AppInfo,
+    },
+    /// An outbound link was handed to the system opener.
+    LinkOpened,
     CliDetections {
         tools: Vec<CliToolStatus>,
     },

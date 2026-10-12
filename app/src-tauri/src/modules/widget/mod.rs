@@ -31,11 +31,9 @@
 //! user's desktop.
 
 use std::fs;
-use std::path::PathBuf;
-
 #[cfg(test)]
 use std::path::Path;
-use std::process::Command;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -43,6 +41,7 @@ use serde::{Deserialize, Serialize};
 use crate::shared::bundle::bundle_root;
 use crate::shared::domain::{Freshness, UsageSnapshot};
 use crate::shared::error::Error;
+use crate::shared::platform::macos_version;
 
 /// Bundle name of the extension. Must match `SCHEME` in `widget/build-widget.sh`.
 pub const WIDGET_EXTENSION_NAME: &str = "AIStatsWidget.appex";
@@ -439,27 +438,6 @@ fn setup_steps(extension_present: bool, snapshot_written: bool, menu_bar: bool) 
 // ---------------------------------------------------------------------------
 // Probing the host machine
 // ---------------------------------------------------------------------------
-
-/// The macOS product version, e.g. `("27", "0")` on macOS 27.0.
-///
-/// Read through `sw_vers` rather than `uname`, whose Darwin kernel version does
-/// not map cleanly onto the marketing release — and guessing that mapping wrong
-/// would produce a wrong minimum-version verdict.
-pub fn macos_version() -> Option<String> {
-    let output = Command::new("sw_vers")
-        .arg("-productVersion")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let version = String::from_utf8(output.stdout).ok()?;
-    let version = version.trim();
-    if version.is_empty() {
-        return None;
-    }
-    Some(version.to_string())
-}
 
 /// Parses `"14.0"` into `(14, 0)`.
 ///

@@ -158,6 +158,7 @@ pub fn run() {
                 widget_snapshots,
                 settings,
                 kickoff: kickoff_shared,
+                app_version: app.package_info().version.to_string(),
             }));
 
             // While the app is open it runs the kickoff tick itself, so a

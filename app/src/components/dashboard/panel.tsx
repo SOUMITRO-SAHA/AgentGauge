@@ -35,10 +35,12 @@ export function Panel({
 }
 
 /**
- * A panel title with a refresh action.
+ * A panel title with an optional refresh action.
  *
  * The title truncates rather than wrapping, so the action stays on one line at
- * narrow widths instead of pushing itself off-screen.
+ * narrow widths instead of pushing itself off-screen. Panels whose content is
+ * static facts (the Settings about/feedback/support panels) omit the action
+ * rather than performing a refresh that could not change anything.
  */
 export function PanelHeader({
   title,
@@ -46,24 +48,26 @@ export function PanelHeader({
   onRefresh,
 }: {
   readonly title: string;
-  readonly testId: string;
-  readonly onRefresh: () => void;
+  readonly testId?: string;
+  readonly onRefresh?: () => void;
 }) {
   return (
     <div className="mb-4 flex items-center justify-between gap-2">
       <h2 className="truncate font-display text-sm font-semibold text-foreground">
         {title}
       </h2>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="shrink-0"
-        onClick={onRefresh}
-        data-testid={testId}
-      >
-        <ArrowClockwise aria-hidden="true" />
-        <span className="hidden sm:inline">Refresh</span>
-      </Button>
+      {testId && onRefresh && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0"
+          onClick={onRefresh}
+          data-testid={testId}
+        >
+          <ArrowClockwise aria-hidden="true" />
+          <span className="hidden sm:inline">Refresh</span>
+        </Button>
+      )}
     </div>
   );
 }

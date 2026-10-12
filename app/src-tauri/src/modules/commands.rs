@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Manager};
 
+use crate::modules::about;
 use crate::modules::automation::AutomationRunner;
 use crate::modules::cli_detection;
 use crate::modules::kickoff::{self, KickoffStore};
@@ -43,6 +44,9 @@ pub struct AppState {
     /// directory, in which case every kickoff capability reports unsupported.
     /// Shared because the automation reading hook also folds into it.
     pub kickoff: Option<Arc<KickoffStore>>,
+    /// This build's version, read from the Tauri package info at setup so the
+    /// Settings screen and the diagnostics prefill state one number.
+    pub app_version: String,
 }
 
 /// The single entry point for every renderer capability.
@@ -67,7 +71,7 @@ pub async fn dispatch(request: AppRequest, app: AppHandle) -> Result<AppResponse
     // handed to a blocking thread below so it cannot occupy this one either.
     let state = Arc::clone(app.state::<Arc<AppState>>().inner());
 
-    match off_thread(move || match handle(request, &state) {
+    match off_thread(move || match handle(request, &state, &app) {
         Ok(response) => response,
         Err(error) => AppResponse::Failure { error },
     })
@@ -94,7 +98,7 @@ fn off_thread(
     tauri::async_runtime::spawn_blocking(work)
 }
 
-fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
+fn handle(request: AppRequest, state: &AppState, app: &AppHandle) -> Result<AppResponse, Error> {
     // Named up front so a rejected request says which capability was refused.
     let name = request.name();
 
@@ -111,6 +115,15 @@ fn handle(request: AppRequest, state: &AppState) -> Result<AppResponse, Error> {
         AppRequest::ProviderStatus => Ok(AppResponse::ProviderStatuses {
             providers: state.registry.status(),
         }),
+
+        AppRequest::AppInfo => Ok(AppResponse::AppInfo {
+            info: about::app_info(&state.app_version),
+        }),
+
+        AppRequest::OpenLink { url } => {
+            about::open_link(app, &url)?;
+            Ok(AppResponse::LinkOpened)
+        }
 
         AppRequest::CliDetection => Ok(AppResponse::CliDetections {
             tools: cli_detection::detect(),
@@ -463,6 +476,11 @@ fn validate(request: &AppRequest) -> Result<(), Error> {
         {
             Err(Error::invalid_request("The effort id is not an effort id."))
         }
+        AppRequest::OpenLink { url } if url.is_empty() || url.chars().count() > MAX_LINK_CHARS => {
+            Err(Error::invalid_request(
+                "That link is not one this app opens.",
+            ))
+        }
         _ => Ok(()),
     }
 }
@@ -470,6 +488,8 @@ fn validate(request: &AppRequest) -> Result<(), Error> {
 /// Longest model id accepted, in characters.
 const MAX_MODEL_ID_CHARS: usize = 64;
 const MAX_EFFORT_ID_CHARS: usize = 32;
+/// Longest outbound link accepted; the app's own URLs stay far below this.
+const MAX_LINK_CHARS: usize = 4096;
 
 #[cfg(test)]
 mod tests {

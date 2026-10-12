@@ -174,6 +174,9 @@ export const automationAtom = runtime.atom(Ipc.getAutomationState);
 /** Whether this machine can run the system widget, and how to add it. */
 export const systemWidgetAtom = runtime.atom(Ipc.getSystemWidgetStatus);
 
+/** This build's facts, and the outbound links the Settings screen offers. */
+export const appInfoAtom = runtime.atom(Ipc.getAppInfo);
+
 /** Persisted onboarding progress. */
 export const onboardingAtom = runtime.atom(Ipc.getOnboardingProgress);
 

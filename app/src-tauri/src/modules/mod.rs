@@ -4,6 +4,7 @@
 //! stay private so they can be replaced without touching callers. Sibling
 //! modules never import each other — they meet at the traits in `shared/`.
 
+pub mod about;
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub mod app_icon;
 pub mod automation;

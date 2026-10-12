@@ -514,6 +514,45 @@ export const SystemWidgetStatus = Schema.Struct({
 });
 export type SystemWidgetStatus = typeof SystemWidgetStatus.Type;
 
+/**
+ * One place a reader can support the project.
+ */
+export const FundingLink = Schema.Struct({
+  label: Schema.String,
+  url: Schema.String,
+});
+export type FundingLink = typeof FundingLink.Type;
+
+/**
+ * The outbound destinations this build offers. Every URL arrives from the
+ * backend, which owns them and allowlists them on the way back out.
+ */
+export const AppLinks = Schema.Struct({
+  repository: Schema.String,
+  releases: Schema.String,
+  bugReport: Schema.String,
+  featureRequest: Schema.String,
+  funding: Schema.Array(FundingLink),
+});
+export type AppLinks = typeof AppLinks.Type;
+
+/**
+ * Facts about this build, for the Settings screen's About panel.
+ *
+ * `diagnostics` is the same facts as a short Markdown block, prefilled into
+ * bug reports and offered for pasting anywhere — build facts only, never
+ * usage data or credentials.
+ */
+export const AppInfo = Schema.Struct({
+  appVersion: Schema.String,
+  os: Schema.String,
+  arch: Schema.String,
+  osVersion: Schema.NullOr(Schema.String),
+  diagnostics: Schema.String,
+  links: AppLinks,
+});
+export type AppInfo = typeof AppInfo.Type;
+
 export const PingOutcome = Schema.Struct({
   accepted: Schema.Boolean,
   reply: Schema.String,
@@ -590,6 +629,8 @@ const ErrorPayload = Schema.Struct({ kind: Schema.String, message: Schema.String
 export const AppRequest = Schema.Union([
   Schema.Struct({ type: Schema.Literal("hello") }),
   Schema.Struct({ type: Schema.Literal("providerStatus") }),
+  Schema.Struct({ type: Schema.Literal("appInfo") }),
+  Schema.Struct({ type: Schema.Literal("openLink"), url: Schema.String }),
   Schema.Struct({ type: Schema.Literal("cliDetection") }),
   Schema.Struct({ type: Schema.Literal("processInsights") }),
   Schema.Struct({ type: Schema.Literal("openCodeSubscriptions") }),
@@ -657,6 +698,8 @@ export const AppResponse = Schema.Union([
     type: Schema.Literal("providerStatuses"),
     providers: Schema.Array(ProviderStatus),
   }),
+  Schema.Struct({ type: Schema.Literal("appInfo"), info: AppInfo }),
+  Schema.Struct({ type: Schema.Literal("linkOpened") }),
   Schema.Struct({
     type: Schema.Literal("cliDetections"),
     tools: Schema.Array(CliToolStatus),
@@ -777,6 +820,30 @@ export const hello = () =>
 export const getProviderStatus = () =>
   request({ type: "providerStatus" }).pipe(
     Effect.map((response) => expectType(response, "providerStatuses").providers),
+  );
+
+/**
+ * This build's facts, and the outbound links the Settings screen offers.
+ *
+ * The links are data, not literals in the renderer: the backend owns them and
+ * refuses anything else on the way back out.
+ */
+export const getAppInfo = () =>
+  request({ type: "appInfo" }).pipe(
+    Effect.map((response) => expectType(response, "appInfo").info),
+  );
+
+/**
+ * Opens one of the app's own outbound links in the user's browser.
+ *
+ * Rust allowlists the URL before the opener runs, so this reaches only the
+ * destinations `getAppInfo` named.
+ */
+export const openLink = (url: string) =>
+  request({ type: "openLink", url }).pipe(
+    Effect.map((response) => {
+      expectType(response, "linkOpened");
+    }),
   );
 
 /** Detects supported coding-agent CLIs using only their version commands. */
