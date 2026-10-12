@@ -34,7 +34,7 @@ function summary(overrides: Record<string, unknown> = {}) {
 function group(id: string, overrides: Record<string, unknown> = {}) {
   return {
     id,
-    displayName: id === "agentgauge" ? "AgentGauge" : id === "codex" ? "Codex" : "OpenCode",
+    displayName: id === "codex" ? "Codex" : "OpenCode",
     processes: [],
     totalMemoryBytes: 0,
     storage: { state: "absent", reason: "has not created its data directory yet." },
@@ -67,7 +67,7 @@ async function renderView(): Promise<void> {
       visible: true,
     }),
   );
-  await screen.findByTestId("process-panel-agentgauge");
+  await screen.findByTestId("process-panel-codex");
 }
 
 beforeEach(() => {
@@ -94,12 +94,12 @@ it("renders one panel per group, in the order the report carries", async () => {
 it("shows each process with its memory and uptime beside the group totals", async () => {
   const pid = 4242;
   installDispatch([
-    group("agentgauge", {
+    group("codex", {
       processes: [
-        summary({ pid, name: "agentgauge", memoryBytes: 300 }),
+        summary({ pid, name: "codex", memoryBytes: 300 }),
         summary({
           pid: 4243,
-          name: "com.apple.WebKit.WebContent",
+          name: "codex",
           memoryBytes: 100,
           command: null,
         }),
@@ -110,32 +110,30 @@ it("shows each process with its memory and uptime beside the group totals", asyn
         totalBytes: 3_000,
         totalFiles: 4,
         rows: [
-          { label: "App data", path: "/app-data", bytes: 2_000, fileCount: 3 },
-          { label: "Widget & schedule data", path: "/shared", bytes: 1_000, fileCount: 1 },
+          { label: "Session transcripts", path: "/sessions", bytes: 2_000, fileCount: 3 },
+          { label: "Everything else", path: "/codex", bytes: 1_000, fileCount: 1 },
         ],
       },
     }),
-    group("codex"),
     group("opencode"),
   ]);
   await renderView();
 
-  const panel = screen.getByTestId("process-panel-agentgauge");
+  const panel = screen.getByTestId("process-panel-codex");
   expect(panel.contains(screen.getByTestId(`process-row-${pid}`))).toBe(true);
   expect(screen.getByTestId(`process-memory-${pid}`)?.textContent).toBe("300 B");
   expect(screen.getByTestId(`process-uptime-${pid}`)?.textContent).toContain("1h");
-  expect(screen.getByTestId("process-totals-agentgauge")?.textContent).toContain("400 B");
-  expect(screen.getByTestId("process-totals-agentgauge")?.textContent).toContain("3 kB");
-  expect(screen.getByTestId("process-storage-agentgauge")?.textContent).toContain(
-    "App data",
+  expect(screen.getByTestId("process-totals-codex")?.textContent).toContain("400 B");
+  expect(screen.getByTestId("process-totals-codex")?.textContent).toContain("3 kB");
+  expect(screen.getByTestId("process-storage-codex")?.textContent).toContain(
+    "Session transcripts",
   );
-  expect(screen.getByTestId("process-storage-agentgauge")?.textContent).toContain("2 kB");
+  expect(screen.getByTestId("process-storage-codex")?.textContent).toContain("2 kB");
 });
 
 it("renders listening ports per process and in the group totals", async () => {
   installDispatch([
-    group("agentgauge"),
-    group("codex"),
+        group("codex"),
     group("opencode", {
       processes: [
         summary({
@@ -160,7 +158,7 @@ it("renders listening ports per process and in the group totals", async () => {
 });
 
 it("says none are listening when the scan checked and found nothing", async () => {
-  installDispatch([group("agentgauge"), group("codex"), group("opencode")]);
+  installDispatch([group("codex"), group("opencode")]);
   await renderView();
 
   expect(screen.getByTestId("process-totals-codex")?.textContent).toContain(
@@ -171,8 +169,7 @@ it("says none are listening when the scan checked and found nothing", async () =
 
 it("carries the reason when ports cannot be inspected at all", async () => {
   installDispatch([
-    group("agentgauge"),
-    group("codex"),
+        group("codex"),
     group("opencode", {
       ports: {
         state: "unavailable",
@@ -192,8 +189,7 @@ it("carries the reason when ports cannot be inspected at all", async () => {
 
 it("names the databases inside the storage breakdown", async () => {
   installDispatch([
-    group("agentgauge"),
-    group("codex", {
+        group("codex", {
       storage: {
         state: "measured",
         totalBytes: 500_000_000,
@@ -221,8 +217,7 @@ it("names the databases inside the storage breakdown", async () => {
 
 it("renders an absent footprint as its reason, never as zero bytes", async () => {
   installDispatch([
-    group("agentgauge"),
-    group("codex"),
+        group("codex"),
     group("opencode", {
       storage: {
         state: "absent",
@@ -241,8 +236,7 @@ it("renders an absent footprint as its reason, never as zero bytes", async () =>
 
 it("says explicitly when a group has nothing running", async () => {
   installDispatch([
-    group("agentgauge"),
-    group("codex"),
+        group("codex"),
     group("opencode", { processes: [], storage: { state: "measured", totalBytes: 5, totalFiles: 1, rows: [] } }),
   ]);
   await renderView();
@@ -253,7 +247,7 @@ it("says explicitly when a group has nothing running", async () => {
 });
 
 it("marks a re-read in flight instead of rendering it as fresh", async () => {
-  installDispatch([group("agentgauge"), group("codex"), group("opencode")]);
+  installDispatch([group("codex"), group("opencode")]);
   await renderView();
 
   // Swap the mock for one that never answers, then refresh: the retained
@@ -264,14 +258,14 @@ it("marks a re-read in flight instead of rendering it as fresh", async () => {
         // Deliberately unresolved: the read stays in flight.
       }),
   };
-  fireEvent.click(screen.getByTestId("refresh-processes-agentgauge"));
+  fireEvent.click(screen.getByTestId("refresh-processes-codex"));
 
   expect(await screen.findByTestId("process-refreshing")).toBeTruthy();
-  expect(screen.getByTestId("process-panel-agentgauge")).toBeTruthy();
+  expect(screen.getByTestId("process-panel-codex")).toBeTruthy();
 });
 
 it("offers no control beyond refresh, because the capability has no write", async () => {
-  installDispatch([group("agentgauge"), group("codex"), group("opencode")]);
+  installDispatch([group("codex"), group("opencode")]);
   await renderView();
 
   const buttons = screen.getAllByRole("button");

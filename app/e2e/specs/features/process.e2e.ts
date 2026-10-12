@@ -51,7 +51,6 @@ describe("processes", () => {
 
   it("renders every group's processes with memory and uptime", async () => {
     await gotoView("processes");
-    await expectDisplayed('[data-testid="process-panel-agentgauge"]');
     await expectDisplayed('[data-testid="process-panel-codex"]');
     await expectDisplayed('[data-testid="process-panel-opencode"]');
 
@@ -61,7 +60,7 @@ describe("processes", () => {
     await expect($(`[data-testid="process-uptime-${pid}"]`)).toHaveText(
       expect.stringContaining("1h"),
     );
-    await expect($('[data-testid="process-totals-agentgauge"]')).toHaveText(
+    await expect($('[data-testid="process-totals-codex"]')).toHaveText(
       expect.stringContaining("432 MB"),
     );
   });
@@ -115,7 +114,7 @@ describe("processes", () => {
     await expect($('[data-testid="process-empty-opencode"]')).toHaveText(
       expect.stringContaining("No OpenCode processes"),
     );
-    expect(await $$('[data-testid^="process-row-"]')).toHaveLength(3);
+    expect(await $$('[data-testid^="process-row-"]')).toHaveLength(1);
   });
 
   it("offers no control beyond refresh, because the capability has no write", async () => {

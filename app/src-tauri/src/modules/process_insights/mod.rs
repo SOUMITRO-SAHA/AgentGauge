@@ -1,9 +1,11 @@
 //! Read-only process and storage insights for the agent toolchain.
 //!
-//! One bounded capability: a snapshot of what AgentGauge, Codex and OpenCode
-//! are doing to this machine — running processes with their memory and age,
-//! and the on-disk footprint each one owns. Everything here is a read; there
-//! is deliberately no capability to stop, signal, or delete anything.
+//! One bounded capability: a snapshot of what Codex and OpenCode are doing
+//! to this machine — running processes with their memory, age, and listening
+//! ports, and the on-disk footprint each one owns. The app itself is
+//! deliberately not a group: the screen is for the toolchain's cost, not
+//! ours. Everything here is a read; there is deliberately no capability to
+//! stop, signal, or delete anything.
 //!
 //! [`RawProcess`] is the provider-agnostic process record. The matching and
 //! grouping functions over it are pure and unit-tested; the `sysinfo` adapter
@@ -15,8 +17,6 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-
-use crate::shared::legacy_shared;
 
 /// One running process, as the renderer renders it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,18 +141,12 @@ pub struct RawProcess {
 /// absent footprint with a reason.
 #[derive(Debug, Clone, Default)]
 pub struct PathEnv {
-    pub agentgauge_data: Option<PathBuf>,
-    pub legacy_shared: Option<PathBuf>,
     pub codex_home: Option<PathBuf>,
     pub opencode_data: Option<PathBuf>,
 }
 
-/// The executables tracked as tool groups beside the app itself.
+/// The executables tracked as tool groups.
 const TRACKED_TOOLS: [(&str, &str); 2] = [("codex", "Codex"), ("opencode", "OpenCode")];
-
-/// The widget extension's executable, so the app group counts the process
-/// that renders the system widget even when it runs outside the app bundle.
-const WIDGET_EXECUTABLE: &str = "aistatswidget";
 
 /// Longest command line returned, in characters.
 const MAX_COMMAND_CHARS: usize = 160;
@@ -208,70 +202,6 @@ fn launched_by_runtime(process: &RawProcess) -> bool {
         .cmd
         .first()
         .is_some_and(|first| RUNTIME_LAUNCHERS.contains(&normalized_stem(first).as_str()))
-}
-
-/// Whether a process is a root of the AgentGauge group: this very process,
-/// any `agentgauge` binary (the desktop app, the kickoff worker, an e2e
-/// build), or the widget extension.
-fn is_agentgauge_root(process: &RawProcess, self_pid: u32) -> bool {
-    if process.pid == self_pid {
-        return true;
-    }
-    if process
-        .exe
-        .as_deref()
-        .is_some_and(|exe| normalized_stem(exe).contains("agentgauge"))
-    {
-        return true;
-    }
-    let name = normalized_stem(&process.name);
-    name.contains("agentgauge") || name == WIDGET_EXECUTABLE
-}
-
-/// Selects the AgentGauge group: its roots plus every descendant, minus the
-/// processes that belong to a tracked tool (a provider process the app
-/// spawned is the tool's cost, not the app's).
-pub fn select_agentgauge(processes: &[RawProcess], self_pid: u32) -> Vec<RawProcess> {
-    let mut selected: Vec<bool> = processes
-        .iter()
-        .map(|process| is_agentgauge_root(process, self_pid))
-        .collect();
-
-    loop {
-        let selected_pids: std::collections::HashSet<u32> = processes
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| selected[*index])
-            .map(|(_, process)| process.pid)
-            .collect();
-
-        let mut changed = false;
-        for (index, process) in processes.iter().enumerate() {
-            if selected[index] {
-                continue;
-            }
-            let parent_selected = process
-                .parent_pid
-                .is_some_and(|parent| selected_pids.contains(&parent));
-            let belongs_to_a_tool = TRACKED_TOOLS
-                .iter()
-                .any(|(executable, _)| matches_tool(process, executable));
-            if parent_selected && !belongs_to_a_tool {
-                selected[index] = true;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-
-    processes
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| selected[*index])
-        .map(|(_, process)| process.clone())
-        .collect()
 }
 
 /// Selects one tracked tool's processes.
@@ -444,57 +374,6 @@ fn measure_storage(root: &Path, components: &[Component]) -> StorageReport {
     }
 }
 
-/// The app's own footprint: every root it writes, measured and summed.
-///
-/// Unlike a tool's single home, the app owns two directories — its private
-/// app data and the legacy shared directory the widget and kickoff worker
-/// read — so each measured root is a row and the total spans them.
-///
-/// When nothing could be measured, the reason distinguishes the two ways
-/// that happens: roots that do not exist (nothing written yet) from roots
-/// that exist but could not be read. A permission failure must not render
-/// as "never wrote anything".
-fn agentgauge_storage(paths: &PathEnv) -> StorageReport {
-    let mut rows = Vec::new();
-    let mut total = Walked::default();
-    let mut any_unreadable = false;
-
-    for (label, root) in [
-        ("App data", paths.agentgauge_data.as_deref()),
-        ("Widget & schedule data", paths.legacy_shared.as_deref()),
-    ] {
-        let Some(root) = root else { continue };
-        if let Ok(walked) = walk_size(root) {
-            total.bytes += walked.bytes;
-            total.file_count += walked.file_count;
-            rows.push(StorageRow {
-                label: label.to_owned(),
-                path: root.display().to_string(),
-                bytes: walked.bytes,
-                file_count: walked.file_count,
-            });
-        } else if root.exists() {
-            any_unreadable = true;
-        }
-    }
-
-    if rows.is_empty() {
-        return StorageReport::Absent {
-            reason: if any_unreadable {
-                "AgentGauge's data directories exist but could not be read.".to_owned()
-            } else {
-                "AgentGauge has not written any data yet.".to_owned()
-            },
-        };
-    }
-
-    StorageReport::Measured {
-        total_bytes: total.bytes,
-        total_files: total.file_count,
-        rows,
-    }
-}
-
 /// One tracked tool's footprint, from its resolved data root.
 ///
 /// An executable with no defined root reports exactly that. It must never
@@ -651,32 +530,17 @@ fn group_ports(ports: &PortScan, group: &[RawProcess]) -> PortScan {
 ///
 /// The port scan is passed in rather than run here so the report assembly
 /// stays pure: tests inject a scan, production injects [`scan_ports`]'s
-/// answer for exactly the pids the groups selected.
+/// answer for exactly the pids the groups selected. Only the tracked tools
+/// have groups — the app's own processes belong to none of them, so this
+/// process, any other `agentgauge` binary, and the widget extension simply
+/// do not appear.
 pub fn build_report(
     processes: &[RawProcess],
     paths: &PathEnv,
-    self_pid: u32,
     ports: PortScan,
     now_ms: u64,
 ) -> ProcessInsights {
-    let mut groups = Vec::with_capacity(TRACKED_TOOLS.len() + 1);
-
-    let mut app_processes = select_agentgauge(processes, self_pid);
-    app_processes.sort_by_key(|process| process.started_at);
-    groups.push(ProcessGroup {
-        id: "agentgauge".to_owned(),
-        display_name: "AgentGauge".to_owned(),
-        total_memory_bytes: app_processes
-            .iter()
-            .map(|process| process.memory_bytes)
-            .sum(),
-        processes: app_processes
-            .iter()
-            .map(|process| summarize(process, &ports_for_pid(&ports, process.pid)))
-            .collect(),
-        storage: agentgauge_storage(paths),
-        ports: group_ports(&ports, &app_processes),
-    });
+    let mut groups = Vec::with_capacity(TRACKED_TOOLS.len());
 
     for (executable, display_name) in TRACKED_TOOLS {
         let mut selected = select_tool(processes, executable);
@@ -746,35 +610,28 @@ fn snapshot_processes() -> Vec<RawProcess> {
         .collect()
 }
 
-/// Resolves the storage roots from the environment and the app's own data
-/// directory, which the composition root hands in.
-pub fn resolve_paths(home: Option<PathBuf>, app_data: Option<PathBuf>) -> PathEnv {
+/// Resolves the storage roots from the environment.
+pub fn resolve_paths(home: Option<PathBuf>) -> PathEnv {
     let codex_home = std::env::var_os("CODEX_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
     let xdg_data = std::env::var_os("XDG_DATA_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
-    paths_for(home, app_data, codex_home, xdg_data)
+    paths_for(home, codex_home, xdg_data)
 }
 
 /// The pure root-resolution rule, with the environment already read.
 fn paths_for(
     home: Option<PathBuf>,
-    app_data: Option<PathBuf>,
     codex_home: Option<PathBuf>,
     xdg_data: Option<PathBuf>,
 ) -> PathEnv {
     let Some(home) = home else {
-        return PathEnv {
-            agentgauge_data: app_data,
-            ..PathEnv::default()
-        };
+        return PathEnv::default();
     };
 
     PathEnv {
-        agentgauge_data: app_data,
-        legacy_shared: Some(legacy_shared::legacy_dir(&home.clone().into_os_string())),
         codex_home: Some(codex_home.unwrap_or_else(|| home.join(".codex"))),
         opencode_data: Some(
             xdg_data
@@ -785,33 +642,22 @@ fn paths_for(
 }
 
 /// The capability behind the `processInsights` request.
-pub fn read_insights(app_data: Option<PathBuf>) -> ProcessInsights {
+pub fn read_insights() -> ProcessInsights {
     let home = std::env::var_os("HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
     let now = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
-    let self_pid = std::process::id();
 
     let processes = snapshot_processes();
-    // Only the pids the groups will actually show are scanned: one `lsof`
-    // call for the tool processes and the app's own tree, never the whole
-    // table.
-    let mut scan_pids: Vec<u32> = select_agentgauge(&processes, self_pid)
-        .iter()
-        .map(|process| process.pid)
-        .collect();
+    // Only the tool pids the groups will actually show are scanned: one
+    // `lsof` call, never the whole table.
+    let mut scan_pids: Vec<u32> = Vec::new();
     for (executable, _) in TRACKED_TOOLS {
         scan_pids.extend(select_tool(&processes, executable).iter().map(|p| p.pid));
     }
     let ports = scan_ports(&scan_pids);
 
-    build_report(
-        &processes,
-        &resolve_paths(home, app_data),
-        self_pid,
-        ports,
-        now.max(0) as u64,
-    )
+    build_report(&processes, &resolve_paths(home), ports, now.max(0) as u64)
 }
 
 #[cfg(test)]
@@ -904,65 +750,13 @@ mod tests {
         assert!(matches_tool(&exe, "codex"));
     }
 
-    // --- the app group ---------------------------------------------------
-
     #[test]
-    fn the_app_group_always_contains_the_current_process() {
-        let all = [process(10, "agentgauge", None), process(11, "codex", None)];
-        let selected = select_agentgauge(&all, 10);
-        assert_eq!(selected.iter().map(|p| p.pid).collect::<Vec<_>>(), [10]);
-    }
-
-    #[test]
-    fn agentgauge_binaries_beyond_this_process_are_roots() {
-        let all = [process(12, "agentgauge", Some("/usr/local/bin/agentgauge"))];
-        let selected = select_agentgauge(&all, 1);
-        assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].pid, 12);
-    }
-
-    #[test]
-    fn the_widget_extension_belongs_to_the_app_group() {
-        let widget = process(
-            13,
-            "AIStatsWidget",
-            Some("/Applications/AgentGauge.app/Contents/PlugIns/AIStatsWidget.appex/Contents/MacOS/AIStatsWidget"),
-        );
-        assert!(is_agentgauge_root(&widget, 1));
-    }
-
-    #[test]
-    fn descendants_join_the_app_group_transitively() {
-        let webcontent = RawProcess {
-            parent_pid: Some(10),
-            ..process(14, "com.apple.WebKit.WebContent", None)
-        };
-        let grandchild = RawProcess {
-            parent_pid: Some(14),
-            ..process(15, "com.apple.WebKit.Networking", None)
-        };
-        let me = process(10, "agentgauge", None);
-        let selected = select_agentgauge(&[me, webcontent, grandchild], 10);
-        let mut pids: Vec<u32> = selected.iter().map(|p| p.pid).collect();
-        pids.sort_unstable();
-        assert_eq!(pids, [10, 14, 15]);
-    }
-
-    #[test]
-    fn a_spawned_tool_process_is_the_tools_cost_not_the_apps() {
-        let me = process(10, "agentgauge", None);
+    fn a_spawned_tool_process_belongs_to_its_tool_wherever_it_came_from() {
         let server = RawProcess {
             parent_pid: Some(10),
             ..process(16, "codex", Some("/usr/local/bin/codex"))
         };
-        let all = [me, server];
-        assert_eq!(
-            select_agentgauge(&all, 10)
-                .iter()
-                .map(|p| p.pid)
-                .collect::<Vec<_>>(),
-            [10]
-        );
+        let all = [process(10, "agentgauge", None), server];
         assert_eq!(
             select_tool(&all, "codex")
                 .iter()
@@ -1130,33 +924,6 @@ mod tests {
         assert!(!reason.contains("opencode"));
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn an_unreadable_app_root_is_not_claimed_as_never_written() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let root = temp_root("unreadable-app");
-        fs::write(root.join("settings.json"), vec![0u8; 2]).expect("writes settings");
-        let mut permissions = fs::metadata(&root).expect("reads metadata").permissions();
-        permissions.set_mode(0o000);
-        fs::set_permissions(&root, permissions).expect("locks the root");
-
-        let report = agentgauge_storage(&PathEnv {
-            agentgauge_data: Some(root.clone()),
-            ..PathEnv::default()
-        });
-
-        let mut permissions = fs::metadata(&root).expect("reads metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&root, permissions).expect("unlocks the root");
-
-        let StorageReport::Absent { reason } = report else {
-            panic!("expected an absent report for an unreadable root");
-        };
-        assert!(reason.contains("could not be read"));
-        assert!(!reason.contains("not written"));
-    }
-
     #[test]
     fn a_missing_component_is_omitted_rather_than_listed_as_zero() {
         let root = temp_root("partial");
@@ -1178,40 +945,36 @@ mod tests {
     // --- the report ------------------------------------------------------
 
     #[test]
-    fn the_report_lists_the_app_then_the_tools_in_order() {
+    fn the_report_lists_only_the_tool_groups_in_order() {
         let root = temp_root("report");
         fs::write(root.join("settings.json"), vec![0u8; 3]).expect("writes settings");
         let insights = build_report(
             &[process(10, "agentgauge", None), process(11, "codex", None)],
             &PathEnv {
-                agentgauge_data: Some(root.clone()),
-                legacy_shared: None,
                 codex_home: Some(root.join("codex-home-absent")),
                 opencode_data: None,
             },
-            10,
             PortScan::Checked {
                 listening: Vec::new(),
             },
             1_700_000_000_000,
         );
         let ids: Vec<&str> = insights.groups.iter().map(|g| g.id.as_str()).collect();
-        assert_eq!(ids, ["agentgauge", "codex", "opencode"]);
+        assert_eq!(ids, ["codex", "opencode"]);
         assert_eq!(insights.fetched_at, 1_700_000_000_000);
+        // The app's own processes belong to no group: the screen is for the
+        // toolchain's cost, not ours.
+        assert!(insights
+            .groups
+            .iter()
+            .all(|g| !g.processes.iter().any(|p| p.pid == 10)));
     }
 
     #[test]
     fn a_group_with_no_processes_is_an_explicit_empty_list() {
-        let root = temp_root("empty");
         let insights = build_report(
             &[],
-            &PathEnv {
-                agentgauge_data: Some(root.clone()),
-                legacy_shared: None,
-                codex_home: None,
-                opencode_data: None,
-            },
-            10,
+            &PathEnv::default(),
             PortScan::Checked {
                 listening: Vec::new(),
             },
@@ -1230,22 +993,19 @@ mod tests {
     fn totals_sum_the_selected_processes() {
         let root = temp_root("totals");
         fs::write(root.join("x"), vec![0u8; 1]).expect("writes x");
-        let mut a = process(10, "agentgauge", None);
+        let mut a = process(10, "codex", Some("/usr/local/bin/codex"));
         a.memory_bytes = 300;
         let mut b = RawProcess {
             parent_pid: Some(10),
-            ..process(11, "WebContent", None)
+            ..process(11, "codex", Some("/usr/local/bin/codex"))
         };
         b.memory_bytes = 100;
         let insights = build_report(
             &[a, b],
             &PathEnv {
-                agentgauge_data: Some(root),
-                legacy_shared: None,
-                codex_home: None,
+                codex_home: Some(root),
                 opencode_data: None,
             },
-            10,
             PortScan::Checked {
                 listening: Vec::new(),
             },
@@ -1345,14 +1105,13 @@ mod tests {
 
     #[test]
     fn a_process_summary_carries_its_own_sorted_listening_ports() {
-        let me = RawProcess {
+        let server = RawProcess {
             cmd: vec!["opencode".into(), "serve".into()],
             ..process(12966, "opencode", Some("/opt/homebrew/bin/opencode"))
         };
         let insights = build_report(
-            &[me],
+            &[server],
             &PathEnv::default(),
-            12966,
             PortScan::Checked {
                 listening: vec![
                     ProcessPort {
@@ -1367,9 +1126,14 @@ mod tests {
             },
             0,
         );
-        let summary = &insights.groups[0].processes[0];
+        let opencode = insights
+            .groups
+            .iter()
+            .find(|g| g.id == "opencode")
+            .expect("group");
+        let summary = &opencode.processes[0];
         assert_eq!(summary.listening_ports, [49374, 49375]);
-        match &insights.groups[0].ports {
+        match &opencode.ports {
             PortScan::Checked { listening } => assert_eq!(listening.len(), 2),
             PortScan::Unavailable { .. } => panic!("expected a checked scan"),
         }
@@ -1377,21 +1141,25 @@ mod tests {
 
     #[test]
     fn a_port_scan_unavailability_is_carried_through_to_the_group() {
-        let me = process(10, "agentgauge", None);
+        let server = process(10, "codex", Some("/usr/local/bin/codex"));
         let insights = build_report(
-            &[me],
+            &[server],
             &PathEnv::default(),
-            10,
             PortScan::Unavailable {
                 reason: "lsof was not found.".into(),
             },
             0,
         );
-        match &insights.groups[0].ports {
+        let codex = insights
+            .groups
+            .iter()
+            .find(|g| g.id == "codex")
+            .expect("group");
+        match &codex.ports {
             PortScan::Checked { .. } => panic!("expected an unavailable scan"),
             PortScan::Unavailable { reason } => assert!(reason.contains("lsof")),
         }
-        assert!(insights.groups[0].processes[0].listening_ports.is_empty());
+        assert!(codex.processes[0].listening_ports.is_empty());
     }
 
     #[test]
@@ -1399,7 +1167,6 @@ mod tests {
         let home = PathBuf::from("/tmp/fake-home");
         let paths = paths_for(
             Some(home.clone()),
-            Some(PathBuf::from("/app-data")),
             Some(PathBuf::from("/custom/codex")),
             Some(PathBuf::from("/custom/data")),
         );
@@ -1408,12 +1175,8 @@ mod tests {
             paths.opencode_data,
             Some(PathBuf::from("/custom/data/opencode"))
         );
-        assert_eq!(
-            paths.legacy_shared,
-            Some(home.join(legacy_shared::LEGACY_RELATIVE_DIR))
-        );
 
-        let defaults = paths_for(Some(home), None, None, None);
+        let defaults = paths_for(Some(home), None, None);
         assert_eq!(
             defaults.codex_home,
             Some(PathBuf::from("/tmp/fake-home/.codex"))
@@ -1426,11 +1189,9 @@ mod tests {
 
     #[test]
     fn without_a_home_no_storage_root_is_known() {
-        let paths = paths_for(None, Some(PathBuf::from("/app-data")), None, None);
+        let paths = paths_for(None, None, None);
         assert!(paths.codex_home.is_none());
         assert!(paths.opencode_data.is_none());
-        assert!(paths.legacy_shared.is_none());
-        assert_eq!(paths.agentgauge_data, Some(PathBuf::from("/app-data")));
     }
 
     #[test]
@@ -1443,14 +1204,23 @@ mod tests {
     }
 
     #[test]
-    fn a_live_read_places_this_process_in_the_app_group() {
-        let insights = read_insights(None);
-        assert_eq!(insights.groups.len(), TRACKED_TOOLS.len() + 1);
-        let app = insights.groups.first().expect("the app group comes first");
-        assert_eq!(app.id, "agentgauge");
+    fn a_live_read_lists_only_the_tool_groups() {
+        let insights = read_insights();
+        assert_eq!(insights.groups.len(), TRACKED_TOOLS.len());
+        assert_eq!(
+            insights
+                .groups
+                .iter()
+                .map(|g| g.id.as_str())
+                .collect::<Vec<_>>(),
+            ["codex", "opencode"]
+        );
         assert!(
-            app.processes.iter().any(|p| p.pid == std::process::id()),
-            "the reading must contain the process that asked for it"
+            insights
+                .groups
+                .iter()
+                .all(|g| !g.processes.iter().any(|p| p.pid == std::process::id())),
+            "the asking process belongs to no group"
         );
     }
 }

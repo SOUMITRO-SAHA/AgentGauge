@@ -158,7 +158,6 @@ pub fn run() {
                 widget_snapshots,
                 settings,
                 kickoff: kickoff_shared,
-                app_data: data_dir,
             }));
 
             // While the app is open it runs the kickoff tick itself, so a
