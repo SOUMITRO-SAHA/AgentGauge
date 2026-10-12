@@ -125,6 +125,26 @@ describe("automation", () => {
     await expect($('[data-testid="automation-next-poll-zai"]')).toHaveText(
       "Not scheduled",
     );
+
+    const dividerSpacing = await browser.execute(() => {
+      const lastRow = document.querySelector(
+        '[data-testid="automation-next-poll-zai"]',
+      )?.parentElement;
+      const kickoff = document.querySelector(
+        '[data-testid="kickoff-section-zai"]',
+      );
+      const divider = kickoff?.parentElement;
+      if (lastRow === undefined || lastRow === null || divider === null) {
+        return null;
+      }
+
+      return (
+        divider.getBoundingClientRect().top -
+        lastRow.getBoundingClientRect().bottom
+      );
+    });
+    expect(dividerSpacing).toBeGreaterThanOrEqual(16);
+
     await captureAutomationScreenshot("zai");
   });
 
