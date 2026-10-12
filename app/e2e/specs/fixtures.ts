@@ -462,6 +462,24 @@ export async function processScreenLive(): Promise<void> {
 }
 
 /**
+ * The same boot with the process read arriving late, so specs can observe
+ * the loading skeleton a first read shows and the layout it hands over.
+ */
+export async function processScreenSlow(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+    processInsights: processInsightsReport(),
+    processInsightsDelay: { ms: 4_000 },
+  });
+}
+
+/**
  * The same screen with OpenCode serving and listening — the positive port
  * story: `opencode serve` binds loopback (4096 first, then any free port,
  * per the vendored source), so 49374 is a realistic answer — and an
@@ -611,6 +629,11 @@ export interface DispatchFixtures {
    * deterministic floor for specs that do not care about this screen.
    */
   readonly processInsights?: Record<string, unknown>;
+  /**
+   * Delays the `processInsights` answer, so specs can observe the loading
+   * skeleton a first read shows instead of a blocking switch.
+   */
+  readonly processInsightsDelay?: { readonly ms: number };
   /**
    * Whether this build contains the widget extension.
    *
@@ -841,6 +864,11 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
             ],
           };
         case "processInsights":
+          if (data.processInsightsDelay) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, data.processInsightsDelay?.ms ?? 0),
+            );
+          }
           return {
             type: "processInsights",
             insights:
@@ -868,9 +896,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               lastPolledAt: running[kind] === true ? Date.now() : null,
               nextPollAt: running[kind] === true ? Date.now() + 300_000 : null,
               observedResetsAt:
-                running[kind] === true
-                  ? Math.floor(Date.now() / 1000) + 3600
-                  : null,
+                running[kind] === true ? Date.now() + 3_600_000 : null,
               rolledOver: data.automationRolledOver === kind,
               rolledOverAt: data.automationRolledOver === kind ? Date.now() : null,
             })),
@@ -1497,6 +1523,31 @@ export function codexLocalUsage() {
       { day: "2026-09-07", tokens: 0 },
       { day: "2026-09-24", tokens: 180000000 },
     ],
+    projects: [
+      {
+        name: "ai-sub-stats-widget",
+        input: 180000000,
+        output: 900000,
+        responses: 980,
+        costUsd: 96.4,
+      },
+      {
+        name: "maximize-app-mono",
+        input: 92000000,
+        output: 610000,
+        responses: 620,
+        costUsd: 17.55,
+      },
+      {
+        // A project whose models the catalog could not price: it must show
+        // token counts, never a $0 that reads as free.
+        name: "bookmark-hub",
+        input: 26000000,
+        output: 240000,
+        responses: 140,
+        costUsd: null,
+      },
+    ],
     costUsd: 114.51,
     unpricedTokens: 1100000,
     sessions: 168,
@@ -1639,6 +1690,22 @@ export function openCodeLocalUsage() {
       },
     ],
     days: [{ day: "2026-09-24", tokens: 940000000 }],
+    projects: [
+      {
+        name: "maximize-app-mono",
+        input: 700000000,
+        output: 60000000,
+        responses: 620,
+        costUsd: 33.1,
+      },
+      {
+        name: "ai-sub-stats-widget",
+        input: 200000000,
+        output: 20000000,
+        responses: 280,
+        costUsd: 9.4,
+      },
+    ],
     costUsd: 42.5,
     unpricedTokens: 0,
     sessions: 94,

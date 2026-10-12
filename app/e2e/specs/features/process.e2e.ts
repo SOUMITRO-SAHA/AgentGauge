@@ -4,6 +4,7 @@ import {
   expectDisplayed,
   gotoView,
   processScreenLive,
+  processScreenSlow,
   processScreenWithPorts,
   clearSeededStores,
 } from "../fixtures.js";
@@ -130,6 +131,46 @@ describe("processes", () => {
     await expect($('[data-testid="process-readonly-note"]')).toHaveText(
       expect.stringContaining("only reads"),
     );
+  });
+});
+
+describe("processes loading flow", () => {
+  beforeEach(async () => {
+    await processScreenSlow();
+  });
+
+  it("holds a shaped skeleton and replaces it without moving the layout", async () => {
+    await gotoView("processes");
+
+    await expectDisplayed('[data-testid="process-loading-skeleton"]');
+    expect(await $$('[data-testid="process-loading-panel"]')).toHaveLength(2);
+    await expectDisplayed('[data-testid="process-loading-note"]');
+    // The refresh-status slot is mounted from the start, invisible, so its
+    // text can never shift the panels when it appears or clears.
+    const statusClass = await browser.execute(
+      () =>
+        document.querySelector('[data-testid="process-refreshing"]')?.className ??
+        null,
+    );
+    expect(statusClass).toContain("invisible");
+
+    const topBefore = (await browser.execute(
+      () =>
+        document
+          .querySelector('[data-testid="process-loading-panel"]')
+          ?.getBoundingClientRect().top ?? null,
+    )) as number | null;
+    expect(topBefore).not.toBeNull();
+
+    await expectDisplayed('[data-testid="process-panel-codex"]');
+    const topAfter = (await browser.execute(
+      () =>
+        document
+          .querySelector('[data-testid="process-panel-codex"]')
+          ?.getBoundingClientRect().top ?? null,
+    )) as number | null;
+    expect(topAfter).not.toBeNull();
+    expect(Math.abs((topAfter as number) - (topBefore as number))).toBeLessThanOrEqual(1);
   });
 });
 

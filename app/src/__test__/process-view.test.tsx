@@ -17,6 +17,20 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 type Request = { readonly type: string };
 
+let processReadResolvers: Array<(value: unknown) => void> = [];
+
+function releaseProcessRead(): void {
+  for (const resolve of processReadResolvers.splice(0)) {
+    resolve({
+      type: "processInsights",
+      insights: {
+        fetchedAt: Date.now(),
+        groups: [group("codex"), group("opencode")],
+      },
+    });
+  }
+}
+
 const HOUR_SEC = 3_600;
 
 function summary(overrides: Record<string, unknown> = {}) {
@@ -75,17 +89,103 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  releaseProcessRead();
   delete (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__;
   cleanup();
 });
 
+it("reserves the process panel shape while the first snapshot loads", async () => {
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: () =>
+      new Promise((resolve: (value: unknown) => void) => {
+        processReadResolvers.push(resolve);
+      }),
+  };
+  const { ProcessView } = await import("~/components/views/process-view");
+  render(
+    createElement(ProcessView as ComponentType<{ visible: boolean }>, {
+      visible: true,
+    }),
+  );
+
+  const skeleton = await screen.findByTestId("process-loading-skeleton");
+  expect(skeleton.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(8);
+
+  releaseProcessRead();
+  expect(await screen.findByTestId("process-panel-codex")).toBeTruthy();
+  expect(screen.queryByTestId("process-loading-skeleton")).toBeNull();
+});
+
+it("mirrors the success shape while loading: one skeleton panel per group plus the note", async () => {
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: () =>
+      new Promise((resolve: (value: unknown) => void) => {
+        processReadResolvers.push(resolve);
+      }),
+  };
+  const { ProcessView } = await import("~/components/views/process-view");
+  render(
+    createElement(ProcessView as ComponentType<{ visible: boolean }>, {
+      visible: true,
+    }),
+  );
+
+  const panels = await screen.findAllByTestId("process-loading-panel");
+  expect(panels).toHaveLength(2);
+  expect(await screen.findByTestId("process-loading-note")).toBeTruthy();
+  // The refresh-status slot exists even before there is anything to say, so
+  // its text appearing later cannot move the panels.
+  expect(screen.getByTestId("process-refreshing")).toBeTruthy();
+
+  releaseProcessRead();
+});
+
+it("keeps the refresh-status slot mounted when a re-read completes", async () => {
+  installDispatch([group("codex"), group("opencode")]);
+  await renderView();
+
+  // Swap in a mock whose one read hangs until released, then refresh.
+  let holder: ((value: Record<string, unknown>) => void) | null = null;
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: ({ request }: { request: Request }) => {
+      if (request.type !== "processInsights") {
+        return { type: "failure", error: { kind: "protocolMismatch", message: "x" } };
+      }
+      return new Promise((resolve) => {
+        holder = resolve as (value: Record<string, unknown>) => void;
+      });
+    },
+  };
+  fireEvent.click(screen.getByTestId("refresh-processes-codex"));
+
+  const status = await screen.findByTestId("process-refreshing");
+  expect(status.textContent).toContain("Refreshing");
+  expect(status.className).not.toContain("invisible");
+
+  // Narrowed through a local so TS does not fold the callback assignment away.
+  const settle = (value: Record<string, unknown>) => {
+    (holder as ((v: Record<string, unknown>) => void) | null)?.(value);
+  };
+  settle({
+    type: "processInsights",
+    insights: {
+      fetchedAt: Date.now(),
+      groups: [group("codex"), group("opencode")],
+    },
+  });
+  await screen.findByTestId("process-panel-codex");
+  // The slot stays in the layout — hidden by visibility, not unmounted — so
+  // completing a refresh never shifts the panels upward.
+  const settled = screen.getByTestId("process-refreshing");
+  expect(settled.className).toContain("invisible");
+});
+
 it("renders one panel per group, in the order the report carries", async () => {
-  installDispatch([group("agentgauge"), group("codex"), group("opencode")]);
+  installDispatch([group("codex"), group("opencode")]);
   await renderView();
 
   const panels = await screen.findAllByTestId(/^process-panel-/);
   expect(panels.map((panel) => panel.getAttribute("data-testid"))).toEqual([
-    "process-panel-agentgauge",
     "process-panel-codex",
     "process-panel-opencode",
   ]);
