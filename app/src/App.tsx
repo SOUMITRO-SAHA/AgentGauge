@@ -53,8 +53,9 @@ function Surface() {
  *
  * The gate is read from Rust rather than held here: `onboardingVisibleAtom` is
  * the session-local override for "the user just skipped", and Rust's
- * `OnboardingProgress.visible` is the durable answer. Either one hiding the
- * flow hides it.
+ * `OnboardingProgress.visible` is the durable answer. Onboarding stays hidden
+ * until Rust confirms it should show, so a returning user never sees a loading
+ * flash of the flow.
  */
 function OnboardingGate() {
   const sessionVisible = useAtomValue(onboardingVisibleAtom);
@@ -64,9 +65,9 @@ function OnboardingGate() {
   // are consulted so a dismissed user is never shown the flow again, and a
   // user who has not dismissed it always sees it.
   const showFlow = AsyncResult.match(progress, {
-    onInitial: () => true,
+    onInitial: () => false,
     onSuccess: (result) => result.value.visible,
-    onFailure: () => true,
+    onFailure: () => false,
   });
 
   return (

@@ -65,7 +65,7 @@ describe("persistence", () => {
     });
   });
 
-  it("persists a dismissal into the database, not just the session", async () => {
+  it("keeps completed onboarding hidden after a renderer reload", async () => {
     // The mock absorbs writes, so remove it: the Skip click must travel the
     // real client -> server -> database path for this assertion to mean
     // anything.
@@ -101,6 +101,7 @@ describe("persistence", () => {
     // the session.
     await browser.url("tauri://localhost");
     await pollForDisplayed('[data-testid="app-shell"]', 15_000);
+    await expectDisplayed('[data-testid="app-shell"]');
     expect(await $('[data-testid="onboarding"]').isDisplayed()).toBe(false);
   });
 });

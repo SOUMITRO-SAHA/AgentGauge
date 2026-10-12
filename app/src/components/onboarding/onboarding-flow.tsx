@@ -98,16 +98,16 @@ export function OnboardingFlow() {
   const progress = useAtomValue(onboardingAtom);
   const refreshProgress = useAtomRefresh(onboardingAtom);
 
-  // Rust owns the "should this reappear" rule. Until the read resolves the flow
-  // is shown — a returning user sees it for one frame, which is harmless — and
-  // the moment the answer arrives the gate is authoritative.
+  // Rust owns the "should this reappear" rule. The flow stays hidden until the
+  // read resolves and confirms it should show; loading or failure must not send
+  // a returning user through onboarding again.
   //
   // Derived rather than written to the atom: writing here would be a state
   // update in the render phase, and React would warn about it.
   const persistedVisible = AsyncResult.match(progress, {
-    onInitial: () => true,
+    onInitial: () => false,
     onSuccess: (result) => result.value.visible,
-    onFailure: () => true,
+    onFailure: () => false,
   });
 
   // `visible` is the session-local override: once the user skips or finishes,

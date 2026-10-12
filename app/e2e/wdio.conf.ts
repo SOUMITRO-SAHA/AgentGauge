@@ -30,6 +30,7 @@ export const config: WebdriverIO.Config = {
   specs: [
     [
       path.join(here, "specs", "capabilities.e2e.ts"),
+      path.join(here, "specs", "features", "onboarding-startup.e2e.ts"),
       path.join(here, "specs", "features", "onboarding.e2e.ts"),
       path.join(here, "specs", "features", "persistence.e2e.ts"),
       path.join(here, "specs", "features", "dashboard.e2e.ts"),
@@ -63,11 +64,14 @@ export const config: WebdriverIO.Config = {
   reporters: ["spec"],
 
   onPrepare() {
-    // A pristine sandbox per run: the app boots into an empty data directory,
-    // so each run's first boot is a genuine first run. The fixtures then seed
-    // the gate per spec through the same legacy-import path a real install
-    // upgrades through.
+    // Start the app as a returning user. Specs that exercise first-run
+    // onboarding seed their own state explicitly through the legacy import.
     fs.rmSync(E2E_DATA_DIR, { recursive: true, force: true });
+    fs.mkdirSync(E2E_DATA_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(E2E_DATA_DIR, "onboarding.json"),
+      JSON.stringify({ step: "done", dismissed: true }),
+    );
   },
 
   services: [
