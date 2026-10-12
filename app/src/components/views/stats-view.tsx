@@ -20,6 +20,7 @@
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -28,7 +29,7 @@ import {
   type ReactNode,
 } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
-import { Fire, Lightning } from "@phosphor-icons/react";
+import { ArrowClockwise, Fire, Lightning } from "@phosphor-icons/react";
 
 import {
   accountUsageForAtom,
@@ -39,6 +40,7 @@ import {
 } from "~/atoms";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
 import { FreshnessPill } from "~/components/usage/provider-status-card";
+import { Button } from "~/components/ui/button";
 import {
   ChartContainer,
   ChartTooltip,
@@ -76,6 +78,16 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
   const selected = useAtomValue(statsTabAtom);
   const setSelected = useAtomSet(statsTabAtom);
   const subscriptions = useAtomValue(subscriptionsAtom);
+  const [mounted, setMounted] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
+  const nowMs = useClock();
+
+  useEffect(() => {
+    if (visible && !mounted) {
+      setMounted(true);
+      setLastRefreshed(Date.now());
+    }
+  }, [visible, mounted]);
 
   const tabs = statsTabsFrom(
     AsyncResult.match(subscriptions, {
@@ -94,10 +106,17 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
       className={visible ? "flex flex-col gap-4" : "hidden"}
       data-testid="view-stats"
     >
-      <ViewHeader
-        title="Stats"
-        subtitle="Local analytics across your connected plans."
-      />
+      <div className="flex items-start justify-between gap-4">
+        <ViewHeader
+          title="Stats"
+          subtitle="Local analytics across your connected plans."
+        />
+        {mounted ? (
+          <StatsReloadButton
+            onReloaded={() => setLastRefreshed(Date.now())}
+          />
+        ) : null}
+      </div>
 
       <Tabs
         value={active}
@@ -119,9 +138,13 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
 
         {tabs.map((tab) => (
           <TabsContent key={tab.value} value={tab.value}>
-            {visible ? (
+            {mounted ? (
               tab.kind === null && tab.value === ALL_PLANS_TAB.value ? (
-                <AllPlansOverview tabs={tabs} />
+                <AllPlansOverview
+                  tabs={tabs}
+                  lastRefreshed={lastRefreshed}
+                  nowMs={nowMs}
+                />
               ) : (
                 <StatsTabBody tab={tab} />
               )
@@ -148,8 +171,24 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
  * amount nobody can state. Each row carries its own span instead, and the
  * footer says why nothing was summed.
  */
-export function AllPlansOverview({ tabs }: { readonly tabs: readonly UsageTab[] }) {
+export function AllPlansOverview({
+  tabs,
+  lastRefreshed,
+  nowMs,
+}: {
+  readonly tabs: readonly UsageTab[];
+  readonly lastRefreshed: number | null;
+  readonly nowMs: number;
+}) {
   const plans = tabs.filter((tab) => tab.kind !== null);
+  const freshnessLabel =
+    lastRefreshed !== null
+      ? (formatFreshness(lastRefreshed, nowMs) ?? "just now")
+      : null;
+  const freshnessTone =
+    lastRefreshed !== null && nowMs - lastRefreshed > CACHE_STALE_MS
+      ? "stale"
+      : "live";
 
   return (
     <section
@@ -157,9 +196,18 @@ export function AllPlansOverview({ tabs }: { readonly tabs: readonly UsageTab[] 
       data-testid="stats-all-plans"
     >
       <div className="flex flex-col gap-1">
-        <h2 className="font-display text-sm font-medium text-foreground">
-          All plans
-        </h2>
+        <div className="flex items-center gap-2">
+          <h2 className="font-display text-sm font-medium text-foreground">
+            All plans
+          </h2>
+          {freshnessLabel !== null ? (
+            <FreshnessPill
+              freshness={freshnessTone}
+              label={freshnessLabel}
+              className="text-[11px]"
+            />
+          ) : null}
+        </div>
       </div>
       <p className="-mt-3 text-xs text-muted-foreground">
         One row per connected plan, each with its own window, token total and
@@ -183,6 +231,48 @@ export function AllPlansOverview({ tabs }: { readonly tabs: readonly UsageTab[] 
         than summed.
       </p>
     </section>
+  );
+}
+
+function StatsReloadButton({
+  onReloaded,
+}: {
+  readonly onReloaded: () => void;
+}) {
+  const r1 = useAtomRefresh(usageForAtom("codex"));
+  const r2 = useAtomRefresh(accountUsageForAtom("codex"));
+  const r3 = useAtomRefresh(usageForAtom("zai"));
+  const r4 = useAtomRefresh(accountUsageForAtom("zai"));
+  const r5 = useAtomRefresh(usageForAtom("minimax"));
+  const r6 = useAtomRefresh(accountUsageForAtom("minimax"));
+  const r7 = useAtomRefresh(usageForAtom("kimi"));
+  const r8 = useAtomRefresh(accountUsageForAtom("kimi"));
+  const r9 = useAtomRefresh(subscriptionsAtom);
+
+  const handleReload = useCallback(() => {
+    r9();
+    r1();
+    r2();
+    r3();
+    r4();
+    r5();
+    r6();
+    r7();
+    r8();
+    onReloaded();
+  }, [r1, r2, r3, r4, r5, r6, r7, r8, r9, onReloaded]);
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="shrink-0"
+      onClick={handleReload}
+      data-testid="stats-reload"
+    >
+      <ArrowClockwise aria-hidden="true" />
+      <span className="hidden sm:inline">Reload</span>
+    </Button>
   );
 }
 
@@ -478,6 +568,8 @@ const TOKEN_HISTORY_PROVIDERS: readonly Ipc.ProviderKind[] = [
   "minimax",
   "kimi",
 ];
+
+const CACHE_STALE_MS = 15 * 60_000;
 
 /**
  * Whether an account reading carries anything the provider itself reported.
