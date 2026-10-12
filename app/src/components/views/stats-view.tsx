@@ -61,7 +61,8 @@ import {
   formatFreshness,
   formatPlan,
   millisUntilReset,
-  tabsFrom,
+  ALL_PLANS_TAB,
+  statsTabsFrom,
   windowTitle,
   type UsageTab,
 } from "~/lib/usage";
@@ -72,7 +73,7 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
   const setSelected = useAtomSet(statsTabAtom);
   const subscriptions = useAtomValue(subscriptionsAtom);
 
-  const tabs = tabsFrom(
+  const tabs = statsTabsFrom(
     AsyncResult.match(subscriptions, {
       onInitial: () => [],
       onSuccess: (result) => result.value,
@@ -82,7 +83,7 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
 
   const active = tabs.some((tab) => tab.value === selected)
     ? selected
-    : "codex";
+    : ALL_PLANS_TAB.value;
 
   return (
     <div
@@ -114,12 +115,220 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
 
         {tabs.map((tab) => (
           <TabsContent key={tab.value} value={tab.value}>
-            {visible ? <StatsTabBody tab={tab} /> : null}
+            {visible ? (
+              tab.kind === null && tab.value === ALL_PLANS_TAB.value ? (
+                <AllPlansOverview tabs={tabs} />
+              ) : (
+                <StatsTabBody tab={tab} />
+              )
+            ) : null}
           </TabsContent>
         ))}
       </Tabs>
     </div>
   );
+}
+
+/**
+ * Every connected plan on one screen: what each one's window looks like, what
+ * it has used, and what that would have cost.
+ *
+ * The tabs beside this one each answer for a single plan. This answers the
+ * question a user actually has before opening any of them — *which plan is
+ * this, and which one is costing me?*
+ *
+ * What it deliberately does not do is total. The figures here come from
+ * different spans: a provider's rolling window, a year of local rollout logs,
+ * whatever sessions OpenCode recorded. Adding them would average a 30-day
+ * window into an all-time record and produce a number that is wrong by an
+ * amount nobody can state. Each row carries its own span instead, and the
+ * footer says why nothing was summed.
+ */
+export function AllPlansOverview({ tabs }: { readonly tabs: readonly UsageTab[] }) {
+  const plans = tabs.filter((tab) => tab.kind !== null);
+
+  return (
+    <section
+      className={`${PANEL} flex flex-col gap-4`}
+      data-testid="stats-all-plans"
+    >
+      <div className="flex flex-col gap-1">
+        <h2 className="font-display text-sm font-medium text-foreground">
+          All plans
+        </h2>
+      </div>
+      <p className="-mt-3 text-xs text-muted-foreground">
+        One row per connected plan, each with its own window, token total and
+        cost.
+      </p>
+      <div className="flex flex-col gap-3">
+        {plans.map((tab) => (
+          <PlanSummaryRow
+            key={tab.value}
+            kind={tab.kind as Ipc.ProviderKind}
+            label={tab.label}
+          />
+        ))}
+      </div>
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="stats-all-plans-not-summed"
+      >
+        These rows cover different spans — a provider&apos;s rolling window,
+        or every session logged on this machine — so they are listed rather
+        than summed.
+      </p>
+    </section>
+  );
+}
+
+/**
+ * One plan's line in the overview: window fill, tokens, cost, and the span
+ * each number covers.
+ *
+ * The four reads are per-provider session-retained atoms, so a plan that has
+ * not been opened still answers from the same read its own tab would use —
+ * opening this tab costs no new provider traffic.
+ */
+function PlanSummaryRow({
+  kind,
+  label,
+}: {
+  readonly kind: Ipc.ProviderKind;
+  readonly label: string;
+}) {
+  const snapshotRead = useAtomValue(usageForAtom(kind));
+  const accountRead = useAtomValue(accountUsageForAtom(kind));
+
+  const accountPending = AsyncResult.isInitial(accountRead);
+  const snapshot = AsyncResult.match(snapshotRead, {
+    onInitial: () => null,
+    onSuccess: (result) =>
+      result.value.find((item) => item.provider === kind) ?? null,
+    onFailure: () => null,
+  });
+  const account = AsyncResult.match(accountRead, {
+    onInitial: () => null,
+    onSuccess: (result) => result.value,
+    onFailure: () => null,
+  });
+
+  const windowFill = snapshot?.windows.find(
+    (candidate) => candidate.usedPercent > 0,
+  );
+  const tokens = account?.summary.totalTokens ?? null;
+  const local = account?.local ?? null;
+  const coverage = coverageOf(account, kind);
+
+  return (
+    <div
+      className="flex flex-col gap-3 rounded-lg border border-border/70 bg-surface/60 p-3"
+      data-testid={`stats-plan-row-${kind}`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-sm font-medium text-foreground">{label}</span>
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid={`stats-plan-row-${kind}-source`}
+        >
+          {coverage}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+        {snapshot === null ? (
+          <span className="text-muted-foreground">
+            {AsyncResult.match(snapshotRead, {
+              onInitial: () => "Reading windows…",
+              onSuccess: () => "No provider reported a usage window.",
+              onFailure: () => "Window unavailable.",
+            })}
+          </span>
+        ) : (
+          <span
+            className="text-muted-foreground"
+            data-testid={`stats-plan-row-${kind}-window`}
+          >
+            {formatPlan(snapshot.plan)} ·{" "}
+            {windowFill === undefined
+              ? "no usage in the reported window"
+              : `${windowFill.label} ${Math.round(windowFill.usedPercent)}% used`}
+          </span>
+        )}
+        <span
+          className="font-medium tabular text-foreground"
+          data-testid={`stats-plan-row-${kind}-tokens`}
+        >
+          {accountPending
+            ? "Reading…"
+            : tokens !== null
+              ? `${formatCompactCount(tokens)} tokens`
+              : local !== null
+                ? `${formatCompactCount(localTotals(local))} tokens`
+                : "No token history"}
+        </span>
+        <span
+          className="font-medium tabular text-foreground"
+          data-testid={`stats-plan-row-${kind}-cost`}
+        >
+          {accountPending ? "Reading…" : costOf(account)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function localTotals(local: Ipc.LocalUsage): number {
+  return local.models.reduce(
+    (sum, model) => sum + model.input + model.output,
+    0,
+  );
+}
+
+/**
+ * Where a plan's numbers came from and over what span.
+ *
+ * A plan that reports its own token history covers a provider-chosen window;
+ * one answered from this machine's logs covers every session ever recorded.
+ * Those are different claims, and a row that blurred them would be worth less
+ * than no row.
+ */
+function coverageOf(
+  account: Ipc.AccountUsage | null,
+  kind: Ipc.ProviderKind,
+): string {
+  if (account === null) return "Reading…";
+  if (account.local !== null) {
+    const span =
+      account.local.firstDay !== null && account.local.lastDay !== null
+        ? `${account.local.firstDay} → ${account.local.lastDay}`
+        : "every logged session";
+    return `${account.local.sessions} local sessions · ${span}`;
+  }
+  if (account.summary.totalTokens !== null) {
+    return account.windowDays !== null
+      ? `provider window · ${account.windowDays} days`
+      : "provider account total";
+  }
+  return kind === "codex" || kind === "zai"
+    ? "Provider reports no token history."
+    : "No token history from this plan.";
+}
+
+/**
+ * What a plan's usage would have cost at API prices, or the honest reason
+ * there is no figure: an unpriced plan, or one that has reported nothing.
+ */
+function costOf(account: Ipc.AccountUsage | null): string {
+  if (account === null) return "—";
+  if (account.local !== null) {
+    return account.local.costUsd > 0
+      ? `≈ ${formatUsd(account.local.costUsd)}`
+      : account.local.unpricedTokens > 0
+        ? "Not priced"
+        : "No cost recorded";
+  }
+  if (account.summary.totalTokens === null) return "—";
+  return "—";
 }
 
 /** What one plan's tab shows: its stats, or the honest reason there are none. */

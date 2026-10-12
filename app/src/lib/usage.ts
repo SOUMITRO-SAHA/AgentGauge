@@ -164,6 +164,31 @@ export const CODEX_TAB: UsageTab = {
 };
 
 /**
+ * The overview tab, which every connected plan is listed on at once.
+ *
+ * Its value is not a provider id and must never collide with one; a plan
+ * whose catalog id is literally "all" would shadow it, which is why the
+ * overview is selected by position rather than by looking it up.
+ */
+export const ALL_PLANS_TAB: UsageTab = {
+  value: "all",
+  label: "All plans",
+  kind: null,
+};
+
+/**
+ * The tab set for the Stats view: the overview first, then every plan.
+ *
+ * Distinct from [`tabsFrom`], which Automation and the usage tabs share and
+ * which must keep listing plans only.
+ */
+export function statsTabsFrom(
+  subscriptions: readonly Ipc.CodingSubscription[],
+): UsageTab[] {
+  return [ALL_PLANS_TAB, ...tabsFrom(subscriptions)];
+}
+
+/**
  * The tab set for a surface that switches between connected plans.
  *
  * Codex first; every OpenCode-reported plan after. Plans sharing one

@@ -1,0 +1,305 @@
+/**
+ * The All plans overview.
+ *
+ * This lives in its own file rather than beside the per-plan specs for one
+ * reason: the view's atoms are session-retained, so only the first test in a
+ * file sees a pending read. The overview is where that state first became
+ * observable — it reads every plan's analytics on mount — so it owns a file
+ * whose first test is the one that watches a read in flight.
+ */
+
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createElement } from "react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+import { StatsView } from "~/components/views/stats-view";
+
+type Request = { readonly type: string; readonly provider?: string };
+
+const PRICE_LIST = {
+  meta: { currency: "USD", updated: "2026-10-11" },
+  providers: {
+    "zai-coding-plan": {
+      subscription: { plans: [{ name: "Pro", price_usd_per_month: 80 }] },
+      models: {
+        "glm-5.3": { api_cost_per_million: { input: 1.4, output: 4.4 } },
+      },
+    },
+  },
+};
+
+function zaiSnapshot() {
+  const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+  return {
+    provider: "zai",
+    freshness: "live",
+    fetchedAt: Date.now(),
+    source: "z.ai coding plan",
+    reason: null,
+    plan: "pro",
+    permission: "allowed",
+    windows: [
+      {
+        label: "5h",
+        usedPercent: 16,
+        durationMins: 300,
+        resetsAt,
+        remainingPercent: 84,
+      },
+    ],
+    fiveHour: null,
+    weekly: null,
+    extra: null,
+  };
+}
+
+function codexSnapshot() {
+  const resetsAt = Math.floor(Date.now() / 1000) + 7200;
+  return {
+    provider: "codex",
+    freshness: "live",
+    fetchedAt: Date.now(),
+    source: "codex app-server",
+    reason: null,
+    plan: "pro",
+    permission: "allowed",
+    windows: [
+      {
+        label: "weekly",
+        usedPercent: 11,
+        durationMins: 10080,
+        resetsAt: resetsAt + 345_600,
+        remainingPercent: 89,
+      },
+    ],
+    fiveHour: null,
+    weekly: null,
+    extra: null,
+  };
+}
+
+function zaiAccountUsage() {
+  return {
+    fetchedAt: Date.now(),
+    summary: {
+      totalTokens: 21_700_000_000,
+      peakDailyTokens: 1_860_000_000,
+      longestRunningTurnSec: null,
+      currentStreakDays: 5,
+      longestStreakDays: 9,
+      totalRequests: 10_419,
+    },
+    windowDays: 30,
+    dailyUsageBuckets: [{ startDate: "2026-10-08", tokens: 1_470_000_000 }],
+    models: [
+      {
+        id: "glm-5.3",
+        displayName: "GLM-5.3",
+        tokens: 21_700_000_000,
+        requests: null,
+      },
+    ],
+    local: null,
+  };
+}
+
+function codexAccountUsage() {
+  return {
+    fetchedAt: Date.now(),
+    summary: {
+      totalTokens: 1_234_567,
+      peakDailyTokens: 45_678,
+      longestRunningTurnSec: 540,
+      currentStreakDays: 8,
+      longestStreakDays: 14,
+      totalRequests: null,
+    },
+    windowDays: null,
+    dailyUsageBuckets: [{ startDate: "2026-10-07", tokens: 2300 }],
+    models: [],
+    local: {
+      models: [
+        {
+          id: "gpt-5.5",
+          displayName: "GPT-5.5",
+          input: 132_064_094,
+          cachedInput: 125_855_104,
+          cacheWrite: 0,
+          output: 616_260,
+          reasoning: 400_000,
+          responses: 1146,
+          costUsd: 112.46,
+        },
+      ],
+      days: [{ day: "2026-09-24", tokens: 132_680_354 }],
+      costUsd: 112.46,
+      unpricedTokens: 0,
+      sessions: 168,
+      filesScanned: 168,
+      filesUnreadable: 0,
+      filesCompressed: 0,
+      firstDay: "2026-09-24",
+      lastDay: "2026-09-24",
+    },
+  };
+}
+
+function subscriptionsReply() {
+  return {
+    type: "openCodeSubscriptions",
+    subscriptions: [
+      {
+        providerId: "zai-coding-plan",
+        name: "Z.AI Coding Plan",
+        label: "Z.AI",
+        integration: "zai",
+        credential: "stored",
+        apiBase: "https://api.z.ai/api/coding/paas/v4",
+      },
+    ],
+  };
+}
+
+const pending = new Map<string, () => void>();
+
+function installDeferredDispatch(): { releaseAll: () => void } {
+  const hold = (key: string, payload: unknown) =>
+    new Promise((resolve) => pending.set(key, () => resolve(payload)));
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: ({ request }: { request: Request }) => {
+      if (request.type === "readAccountUsage") {
+        return hold(`account:${request.provider ?? ""}`, {
+          type: "accountUsage",
+          usage:
+            request.provider === "zai" ? zaiAccountUsage() : codexAccountUsage(),
+        });
+      }
+      if (request.type === "readUsageFor") {
+        return hold(`usage:${request.provider ?? ""}`, {
+          type: "usage",
+          snapshots:
+            request.provider === "zai" ? [zaiSnapshot()] : [codexSnapshot()],
+        });
+      }
+      return subscriptionsReply();
+    },
+  };
+  return {
+    releaseAll: () => {
+      for (const release of pending.values()) release();
+      pending.clear();
+    },
+  };
+}
+
+function installDispatch(): void {
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: ({ request }: { request: Request }) => {
+      switch (request.type) {
+        case "openCodeSubscriptions":
+          return subscriptionsReply();
+        case "readAccountUsage":
+          return {
+            type: "accountUsage",
+            usage:
+              request.provider === "zai" ? zaiAccountUsage() : codexAccountUsage(),
+          };
+        case "readUsageFor":
+          return {
+            type: "usage",
+            snapshots:
+              request.provider === "zai" ? [zaiSnapshot()] : [codexSnapshot()],
+          };
+        default:
+          return {
+            type: "failure",
+            error: { kind: "protocolMismatch", message: "unexpected" },
+          };
+      }
+    },
+  };
+}
+
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, json: async () => PRICE_LIST })),
+  );
+});
+
+afterEach(() => {
+  for (const release of pending.values()) release();
+  pending.clear();
+  delete (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__;
+  vi.unstubAllGlobals();
+  cleanup();
+});
+
+it("stands in for a plan still reading instead of claiming it has no history", async () => {
+  const release = installDeferredDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const row = await screen.findByTestId("stats-plan-row-zai");
+  // A row whose read is in flight must not read as "No token history" — that
+  // is the state where a provider simply has not answered yet.
+  expect(within(row).getByTestId("stats-plan-row-zai-tokens").textContent).toBe(
+    "Reading…",
+  );
+  expect(
+    within(row).getByTestId("stats-plan-row-zai-cost").textContent,
+  ).toBe("Reading…");
+
+  release.releaseAll();
+  await waitFor(() =>
+    expect(
+      within(row).getByTestId("stats-plan-row-zai-tokens").textContent,
+    ).not.toBe("Reading…"),
+  );
+});
+
+it("lists every readable plan with its own window, tokens and cost", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const overview = await screen.findByTestId("stats-all-plans");
+  expect(overview).toBeTruthy();
+  expect(screen.getByTestId("stats-plan-row-codex")).toBeTruthy();
+  expect(screen.getByTestId("stats-plan-row-zai")).toBeTruthy();
+
+  // Z.AI reports its own history over a 30-day window; Codex's comes from
+  // this machine's logs over a span the panel states. Different claims, so
+  // each row names its own rather than both claiming "tokens".
+  expect(
+    screen.getByTestId("stats-plan-row-zai-source").textContent,
+  ).toContain("30 days");
+  const codexRow = screen.getByTestId("stats-plan-row-codex");
+  expect(within(codexRow).getByTestId("stats-plan-row-codex-source").textContent).toContain(
+    "2026-09-24",
+  );
+  expect(
+    within(codexRow).getByTestId("stats-plan-row-codex-cost").textContent,
+  ).toContain("$112");
+  expect(
+    screen.getByTestId("stats-plan-row-zai-window").textContent,
+  ).toContain("Pro");
+
+  // Nothing is summed across spans that do not match.
+  expect(screen.queryByTestId("stats-all-plans-total")).toBeNull();
+  const note = screen.getByTestId("stats-all-plans-not-summed");
+  expect(note.textContent ?? "").toContain("window");
+  expect(note.textContent ?? "").toContain("summed");
+});
+
+it("opens a plan's own tab from the overview's tab strip", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const tab = await screen.findByTestId("stats-tab-zai");
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+
+  expect(await screen.findByTestId("stats-plan-analytics")).toBeTruthy();
+});

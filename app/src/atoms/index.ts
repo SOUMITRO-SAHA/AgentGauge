@@ -156,8 +156,14 @@ export const priceListAtom = Atom.setIdleTTL(Infinity)(
   ),
 );
 
-/** Which connected plan's stats the Stats view is showing. */
-export const statsTabAtom = Atom.make("codex");
+/**
+ * Which tab the Stats view is showing.
+ *
+ * The overview (`all`) is the landing tab: the question a user brings to a
+ * usage screen is which plan they are on and which one is costing them, and
+ * answering it should not require knowing which provider runs first.
+ */
+export const statsTabAtom = Atom.make("all");
 
 /** The Codex account's plan tier. */
 export const planAtom = runtime.atom(Ipc.getPlan("codex"));

@@ -351,10 +351,15 @@ function registerDeferredDispatch() {
   return deferred;
 }
 
+
+
 it("stands in with a shaped skeleton while the first analytics read runs", async () => {
   const release = registerDeferredDispatch();
 
   render(createElement(StatsView, { visible: true }));
+
+  fireEvent.mouseDown(await screen.findByTestId("stats-tab-codex"));
+  fireEvent.click(screen.getByTestId("stats-tab-codex"));
 
   expect(await screen.findByTestId("stats-account-analytics")).toBeTruthy();
   const skeleton = await screen.findByTestId("stats-analytics-skeleton");
@@ -370,38 +375,15 @@ it("stands in with a shaped skeleton while the first analytics read runs", async
   // The old loading line is gone; a placeholder paragraph reserved nothing.
   expect(screen.queryByText("Reading Codex activity…")).toBeNull();
 
+  // The window reading below it holds its own shape for the same read.
+  const reading = await screen.findByTestId("stats-plan-reading");
+  expect(
+    within(reading).getByTestId("stats-reading-skeleton"),
+  ).toBeTruthy();
+
   release.releaseAccountUsage("codex");
   expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
   expect(screen.queryByTestId("stats-analytics-skeleton")).toBeNull();
-  release.releaseAll();
-});
-
-it("holds both of a plan's panels on shaped skeletons during its first read", async () => {
-  const release = registerDeferredDispatch();
-
-  render(createElement(StatsView, { visible: true }));
-
-  fireEvent.mouseDown(await screen.findByTestId("stats-tab-zai"));
-  fireEvent.click(screen.getByTestId("stats-tab-zai"));
-
-  const analytics = await screen.findByTestId("stats-plan-analytics");
-  expect(
-    within(analytics).getByTestId("stats-analytics-skeleton"),
-  ).toBeTruthy();
-
-  // The reading skeleton mirrors the reading: freshness pill, the plan's
-  // metric cards (plan plus its two windows), and the source line.
-  const reading = await screen.findByTestId("stats-reading-skeleton");
-  within(reading).getByTestId("stats-reading-skeleton-pill");
-  const cards = within(reading).getByTestId("stats-reading-skeleton-cards");
-  expect(cards.children.length).toBe(3);
-  within(reading).getByTestId("stats-reading-skeleton-source");
-
-  release.releaseAccountUsage("zai");
-  release.releaseUsageFor("zai");
-  expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
-  expect(screen.queryByTestId("stats-analytics-skeleton")).toBeNull();
-  expect(screen.queryByTestId("stats-reading-skeleton")).toBeNull();
   release.releaseAll();
 });
 
@@ -836,4 +818,27 @@ it("says a plan publishes no analytics before showing its local reading", () => 
   expect(reportsOwnAnalytics(localOnlyUsage())).toBe(false);
   expect(reportsOwnAnalytics(zaiAccountUsage())).toBe(true);
   expect(reportsOwnAnalytics(codexAccountUsage())).toBe(true);
+});
+
+
+it("lists every readable plan on the overview", async () => {
+  installDispatch();
+
+  render(createElement(StatsView, { visible: true }));
+
+  const tab = await screen.findByTestId("stats-tab-all");
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+
+  const overview = await screen.findByTestId("stats-all-plans");
+  expect(overview).toBeTruthy();
+
+  // Every readable plan is listed, each with its own numbers.
+  expect(screen.getByTestId("stats-plan-row-codex")).toBeTruthy();
+  expect(screen.getByTestId("stats-plan-row-zai")).toBeTruthy();
+
+  // The spans differ, so nothing is summed into a single headline.
+  expect(screen.queryByTestId("stats-all-plans-total")).toBeNull();
+  const note = screen.getByTestId("stats-all-plans-not-summed");
+  expect(note.textContent ?? "").toContain("window");
 });
