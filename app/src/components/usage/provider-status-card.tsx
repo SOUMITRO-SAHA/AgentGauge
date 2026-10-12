@@ -16,14 +16,27 @@ const INSTALL_COMMANDS: Record<Ipc.CliToolStatus["tool"], string> = {
   openCode: "npm install -g opencode-ai",
 };
 
+const INITIAL_CLI_SKELETON_ROWS: ReadonlyArray<
+  Pick<Ipc.CliToolStatus, "tool" | "installed">
+> = [
+  { tool: "codex", installed: true },
+  { tool: "openCode", installed: true },
+];
+
 export function ProviderStatusCard() {
   const result = useAtomValue(cliDetectionAtom);
   const refresh = useAtomRefresh(cliDetectionAtom);
+  const isLoading = AsyncResult.match(result, {
+    onInitial: () => true,
+    onSuccess: (success) => success.waiting,
+    onFailure: () => false,
+  });
 
   return (
     <section
       data-testid="provider-status"
       aria-label="CLI detection"
+      aria-busy={isLoading}
       className={`relative ${PANEL}`}
     >
       <Button
@@ -31,52 +44,33 @@ export function ProviderStatusCard() {
         size="icon"
         className="absolute top-2 right-2 size-7 text-muted-foreground hover:text-foreground"
         onClick={() => refresh()}
+        disabled={isLoading}
         data-testid="refresh-provider"
         aria-label="Re-check installed CLIs"
       >
-        <ArrowClockwise aria-hidden="true" />
+        <ArrowClockwise
+          className={cn(isLoading && "motion-safe:animate-spin")}
+          aria-hidden="true"
+        />
       </Button>
       <div className="flex flex-col gap-4 pr-8">
         <h2 className="font-display text-sm font-semibold text-foreground">CLI detection</h2>
         {AsyncResult.match(result, {
-          onInitial: () => (
-            <div
-              className="flex flex-col gap-3"
-              data-testid="status-loading"
-              role="status"
-              aria-label="Checking installed CLIs"
-            >
-              <div className="flex items-start gap-3">
-                <Skeleton className="mt-0.5 size-4 rounded-full" aria-hidden="true" />
-                <div className="flex min-w-0 flex-1 flex-col gap-2">
-                  <Skeleton className="h-4 w-36" aria-hidden="true" />
-                  <Skeleton className="h-3 w-3/4" aria-hidden="true" />
-                </div>
+          onInitial: () => <CliDetectionLoading />,
+          onSuccess: (success) =>
+            success.waiting ? (
+              <CliDetectionLoading statuses={success.value} />
+            ) : (
+              <div className="flex flex-col gap-3">
+                {success.value.map((tool) => (
+                  <CliStatusRow key={tool.tool} status={tool} />
+                ))}
+                <p className="border-t border-border/60 pt-3 text-xs text-muted-foreground">
+                  AgentGauge currently reads usage from Codex only. Detecting
+                  another CLI does not enable its usage integration.
+                </p>
               </div>
-              <div className="flex items-start gap-3">
-                <Skeleton className="mt-0.5 size-4 rounded-full" aria-hidden="true" />
-                <div className="flex min-w-0 flex-1 flex-col gap-2">
-                  <Skeleton className="h-4 w-40" aria-hidden="true" />
-                  <Skeleton className="h-3 w-2/3" aria-hidden="true" />
-                </div>
-              </div>
-              <Skeleton
-                className="h-3 w-full border-t border-border/60 pt-3"
-                aria-hidden="true"
-              />
-            </div>
-          ),
-          onSuccess: (success) => (
-            <div className="flex flex-col gap-3">
-              {success.value.map((tool) => (
-                <CliStatusRow key={tool.tool} status={tool} />
-              ))}
-              <p className="border-t border-border/60 pt-3 text-xs text-muted-foreground">
-                AgentGauge currently reads usage from Codex only. Detecting
-                another CLI does not enable its usage integration.
-              </p>
-            </div>
-          ),
+            ),
           onFailure: () => (
             <div className="flex items-center gap-3" data-testid="status-error">
               <Warning className="size-4 text-critical" aria-hidden="true" />
@@ -88,6 +82,51 @@ export function ProviderStatusCard() {
         })}
       </div>
     </section>
+  );
+}
+
+function CliDetectionLoading({
+  statuses = INITIAL_CLI_SKELETON_ROWS,
+}: {
+  readonly statuses?: ReadonlyArray<
+    Pick<Ipc.CliToolStatus, "tool" | "installed">
+  >;
+}) {
+  return (
+    <div
+      className="flex flex-col gap-3"
+      data-testid="status-loading"
+      role="status"
+      aria-label="Checking installed CLIs"
+    >
+      {statuses.map((status) => (
+        <div
+          className="flex min-w-0 items-start gap-3"
+          data-testid="status-loading-row"
+          key={status.tool}
+        >
+          <Skeleton className="mt-0.5 size-4 rounded-full" aria-hidden="true" />
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <Skeleton
+              className={`h-5 ${status.tool === "codex" ? "w-36" : "w-40"}`}
+              aria-hidden="true"
+            />
+            <Skeleton className="h-4 w-3/4" aria-hidden="true" />
+            {status.installed ? null : (
+              <Skeleton
+                className="h-6 w-56 max-w-full rounded-md"
+                data-testid="status-loading-install-command"
+                aria-hidden="true"
+              />
+            )}
+          </div>
+        </div>
+      ))}
+      <div className="flex flex-col border-t border-border/60 pt-3">
+        <Skeleton className="h-4 w-full" aria-hidden="true" />
+        <Skeleton className="h-4 w-4/5" aria-hidden="true" />
+      </div>
+    </div>
   );
 }
 

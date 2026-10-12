@@ -1,8 +1,9 @@
-import { expect, browser, $ } from "@wdio/globals";
+import { expect, browser, $, $$ } from "@wdio/globals";
 
 import {
   dashboardLive,
   dashboardUnavailable,
+  clickDisplayed,
   expectDisplayed,
   gotoView,
   clearSeededStores,
@@ -76,6 +77,62 @@ describe("dashboard", () => {
     expect(await $('[data-testid="home-watcher-loading"]').isExisting()).toBe(
       false,
     );
+  });
+
+  it("shows the CLI detection skeleton while a manual re-check is pending", async () => {
+    const heightBefore = await browser.execute(() => {
+      const card = document.querySelector(
+        '[data-testid="provider-status"]',
+      ) as HTMLElement | null;
+      return card?.getBoundingClientRect().height ?? 0;
+    });
+    expect(heightBefore).toBeGreaterThan(0);
+
+    await browser.execute(() => {
+      const w = window as unknown as {
+        __wdio_mocks__?: {
+          dispatch?: (args?: {
+            request?: Record<string, unknown>;
+          }) => Promise<Record<string, unknown>>;
+        };
+      };
+      const dispatch = w.__wdio_mocks__?.dispatch;
+      if (!dispatch || !w.__wdio_mocks__) {
+        throw new Error("The dispatch mock is not installed.");
+      }
+      let delayNextDetection = true;
+      w.__wdio_mocks__.dispatch = async (args) => {
+        if (delayNextDetection && args?.request?.type === "cliDetection") {
+          delayNextDetection = false;
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 800));
+        }
+        return dispatch(args);
+      };
+    });
+
+    await clickDisplayed('[data-testid="refresh-provider"]');
+    await expectDisplayed('[data-testid="status-loading"]');
+    expect(await $$('[data-testid="status-loading-row"]')).toHaveLength(2);
+    const heightDuring = await browser.execute(() => {
+      const card = document.querySelector(
+        '[data-testid="provider-status"]',
+      ) as HTMLElement | null;
+      return card?.getBoundingClientRect().height ?? 0;
+    });
+    expect(Math.abs(heightDuring - heightBefore)).toBeLessThan(1);
+    expect(
+      await $('[data-testid="provider-status"]').getAttribute("aria-busy"),
+    ).toBe("true");
+    expect(await $('[data-testid="cli-codex"]').isExisting()).toBe(false);
+
+    await expectDisplayed('[data-testid="cli-codex"]');
+    await expect($('[data-testid="codex-version"]')).toHaveText(
+      "codex-cli 0.159.0",
+    );
+    expect(await $('[data-testid="status-loading"]').isExisting()).toBe(false);
+    expect(
+      await $('[data-testid="provider-status"]').getAttribute("aria-busy"),
+    ).toBe("false");
   });
 
   it("renders both the 5-hour and weekly windows", async () => {
