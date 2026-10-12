@@ -122,9 +122,17 @@ describe("visual audit", () => {
           const nodes = Array.from(
             document.querySelectorAll(`[data-testid="nav-${wanted}"]`),
           );
-          return nodes
-            .filter((el) => getComputedStyle(el).display !== "none")
-            .some((el) => el.getAttribute("aria-current") === "page");
+          return nodes.some((el) => {
+            const style = getComputedStyle(el);
+            const bounds = el.getBoundingClientRect();
+            return (
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              bounds.width > 0 &&
+              bounds.height > 0 &&
+              el.getAttribute("aria-current") === "page"
+            );
+          });
         }, view);
         if (!active) {
           throw new Error(

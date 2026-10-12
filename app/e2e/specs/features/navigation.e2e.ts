@@ -21,6 +21,28 @@ after(() => {
   clearSeededStores();
 });
 
+async function currentDestinations(): Promise<string[]> {
+  return browser.execute(() =>
+    Array.from(
+      document.querySelectorAll(
+        '[data-testid^="nav-"][aria-current="page"]',
+      ),
+    )
+      .filter((element) => {
+        const style = getComputedStyle(element);
+        const bounds = element.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          bounds.width > 0 &&
+          bounds.height > 0
+        );
+      })
+      .map((element) => element.getAttribute("data-testid"))
+      .filter((testId): testId is string => testId !== null),
+  );
+}
+
 describe("navigation", () => {
   beforeEach(async () => {
     await dashboardLive();
@@ -90,18 +112,14 @@ describe("navigation", () => {
     for (const id of ["home", "automation", "stats", "processes", "settings"]) {
       await expectDisplayed(`[data-testid="nav-${id}"]`);
     }
-    await expect(
-      $('[data-testid="nav-home"]'),
-    ).toHaveAttribute("aria-current", "page");
+    expect(await currentDestinations()).toEqual(["nav-home"]);
     await expectDisplayed('[data-testid="view-home"]');
   });
 
   it("moves between destinations when the navigation is used", async () => {
     await gotoView("stats");
     await expectDisplayed('[data-testid="view-stats"]');
-    await expect(
-      $('[data-testid="nav-stats"]'),
-    ).toHaveAttribute("aria-current", "page");
+    expect(await currentDestinations()).toEqual(["nav-stats"]);
     // `reverse: true` is silently ignored by this wdio build, so absence is
     // asserted on the displayed state directly.
     expect(await $('[data-testid="view-home"]').isDisplayed()).toBe(false);
@@ -150,58 +168,42 @@ describe("navigation", () => {
         };
       });
 
-    // `setWindowRect` is not instantaneous, can be clamped by the work area
-    // (a wide request at a nonzero x runs off the screen edge and macOS
-    // shrinks it), and React swaps the nav a frame after the viewport agrees
-    // — so move to the screen origin, drive to a *range*, and poll until the
-    // nav POSITION matches it: a floating pill is anchored to the BOTTOM of
-    // the viewport; the sidebar is a narrow column flush with the LEFT edge.
-    // (Position, not height: `h-svh` in WKWebView reported an unstable height
-    // after programmatic window moves, which made height comparisons flaky.)
-    const resizeUntil = async (
-      width: number,
-      widthOk: (innerWidth: number) => boolean,
-      mode: "sidebar" | "tabBar",
-    ) => {
-      await browser.setWindowRect(60, 60, width, 700);
-      let last: Record<string, number> | null = null;
-      for (let waited = 0; waited < 8000; waited += 250) {
-        const shape = await navShape();
-        last = shape;
-        if (
-          shape &&
-          widthOk(shape.innerWidth) &&
-          (mode === "sidebar"
-            ? shape.left <= 1 && shape.width <= 300
-            : shape.bottom >= shape.innerHeight - 48)
-        ) {
-          return;
-        }
-        await browser.pause(250);
-      }
-      throw new Error(
-        `the window did not reach ${mode} mode; last shape: ${JSON.stringify(last)}`,
+    const widths = [360, 500, 768, 960, 1280];
+    for (const width of widths) {
+      await browser.setWindowSize(width, 700);
+      await browser.waitUntil(
+        async () => {
+          const shape = await navShape();
+          return Boolean(
+            shape &&
+              shape.innerWidth === width &&
+              (width < 768
+                ? shape.bottom >= shape.innerHeight - 48
+                : shape.left <= 1 && shape.width <= 300),
+          );
+        },
+        {
+          timeout: 8000,
+          timeoutMsg: `navigation did not reach its layout at ${width}px`,
+        },
       );
-    };
 
-    // Narrow: the floating pill. Wide: the sidebar.
-    await resizeUntil(500, (w) => w <= 600, "tabBar");
-    const pill = await navShape();
-    expect(pill).not.toBeNull();
-    expect(pill!.bottom).toBeGreaterThanOrEqual(pill!.innerHeight - 48);
-    // The pill floats: a visible gap below it, not flush with the window
-    // edge — but never so much that it reads as detached.
-    const pillGap = pill!.innerHeight - pill!.bottom;
-    expect(pillGap).toBeGreaterThanOrEqual(4);
-    expect(pillGap).toBeLessThanOrEqual(24);
+      const shape = await navShape();
+      expect(shape).not.toBeNull();
+      if (width < 768) {
+        const pillGap = shape!.innerHeight - shape!.bottom;
+        expect(pillGap).toBeGreaterThanOrEqual(4);
+        expect(pillGap).toBeLessThanOrEqual(24);
+      } else {
+        expect(shape!.left).toBeLessThanOrEqual(1);
+        expect(shape!.width).toBeLessThanOrEqual(300);
+      }
 
-    await resizeUntil(1200, (w) => w >= 900, "sidebar");
-    const sidebar = await navShape();
-    expect(sidebar).not.toBeNull();
-    expect(sidebar!.left).toBeLessThanOrEqual(1);
-    expect(sidebar!.width).toBeLessThanOrEqual(300);
+      await gotoView("stats");
+      await expectDisplayed('[data-testid="view-stats"]');
+      expect(await currentDestinations()).toEqual(["nav-stats"]);
+    }
 
-    // Leave the window where the reporter and later runs expect it.
-    await resizeUntil(960, (w) => w >= 768, "sidebar");
+    await browser.setWindowSize(960, 700);
   });
 });
