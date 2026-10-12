@@ -600,6 +600,15 @@ export interface DispatchFixtures {
    */
   readonly accountUsageByProvider?: Record<string, Record<string, unknown>>;
   /**
+   * The local-rollout reading the default Codex answer carries.
+   *
+   * It crosses as fixture data rather than as a call to `codexLocalUsage()`:
+   * the injected mock is closure-free by construction (a Node function does not
+   * survive serialization into the page), so naming the helper inside the mock
+   * threw a `ReferenceError` and the arm silently answered nothing.
+   */
+  readonly codexLocalUsage?: Record<string, unknown>;
+  /**
    * The scheduled-kickoff fixtures: whether the platform scheduler is
    * supported and installed, which kinds start opted in, and how far ahead
    * the next scheduled attempt sits. Absent means supported, not installed,
@@ -801,7 +810,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               },
               windowDays: null,
               models: [],
-              local: codexLocalUsage(),
+              local: f().codexLocalUsage ?? null,
               dailyUsageBuckets: [
                 { startDate: "2026-10-07", tokens: 2300 },
                 { startDate: "2026-10-08", tokens: 0 },
@@ -1426,6 +1435,7 @@ export async function dashboardLive(): Promise<void> {
     widgetEmbedded: true,
     widgetSupported: true,
     automationRunning: true,
+    codexLocalUsage: codexLocalUsage(),
   });
 }
 
@@ -1559,6 +1569,7 @@ export async function dashboardWithZaiAnalytics(): Promise<void> {
     widgetEmbedded: true,
     widgetSupported: true,
     automationRunning: true,
+    codexLocalUsage: codexLocalUsage(),
   });
 }
 
@@ -1605,6 +1616,7 @@ export async function dashboardWithSlowStats(): Promise<void> {
     widgetEmbedded: true,
     widgetSupported: true,
     automationRunning: true,
+    codexLocalUsage: codexLocalUsage(),
   });
 }
 
