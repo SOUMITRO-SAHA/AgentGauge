@@ -51,7 +51,10 @@ function group(id: string, overrides: Record<string, unknown> = {}) {
     displayName: id === "codex" ? "Codex" : "OpenCode",
     processes: [],
     totalMemoryBytes: 0,
-    storage: { state: "absent", reason: "has not created its data directory yet." },
+    storage: {
+      state: "absent",
+      reason: "has not created its data directory yet.",
+    },
     ports: { state: "checked", listening: [] },
     ...overrides,
   };
@@ -61,7 +64,10 @@ function installDispatch(groups: Array<Record<string, unknown>>): void {
   (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
     dispatch: ({ request }: { request: Request }) => {
       if (request.type === "processInsights") {
-        return { type: "processInsights", insights: { fetchedAt: Date.now(), groups } };
+        return {
+          type: "processInsights",
+          insights: { fetchedAt: Date.now(), groups },
+        };
       }
       return {
         type: "failure",
@@ -109,7 +115,9 @@ it("reserves the process panel shape while the first snapshot loads", async () =
   );
 
   const skeleton = await screen.findByTestId("process-loading-skeleton");
-  expect(skeleton.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(8);
+  expect(
+    skeleton.querySelectorAll('[data-slot="skeleton"]').length,
+  ).toBeGreaterThan(8);
 
   releaseProcessRead();
   expect(await screen.findByTestId("process-panel-codex")).toBeTruthy();
@@ -149,7 +157,10 @@ it("keeps the refresh-status slot mounted when a re-read completes", async () =>
   (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
     dispatch: ({ request }: { request: Request }) => {
       if (request.type !== "processInsights") {
-        return { type: "failure", error: { kind: "protocolMismatch", message: "x" } };
+        return {
+          type: "failure",
+          error: { kind: "protocolMismatch", message: "x" },
+        };
       }
       return new Promise((resolve) => {
         holder = resolve as (value: Record<string, unknown>) => void;
@@ -210,8 +221,18 @@ it("shows each process with its memory and uptime beside the group totals", asyn
         totalBytes: 3_000,
         totalFiles: 4,
         rows: [
-          { label: "Session transcripts", path: "/sessions", bytes: 2_000, fileCount: 3 },
-          { label: "Everything else", path: "/codex", bytes: 1_000, fileCount: 1 },
+          {
+            label: "Session transcripts",
+            path: "/sessions",
+            bytes: 2_000,
+            fileCount: 3,
+          },
+          {
+            label: "Everything else",
+            path: "/codex",
+            bytes: 1_000,
+            fileCount: 1,
+          },
         ],
       },
     }),
@@ -221,19 +242,29 @@ it("shows each process with its memory and uptime beside the group totals", asyn
 
   const panel = screen.getByTestId("process-panel-codex");
   expect(panel.contains(screen.getByTestId(`process-row-${pid}`))).toBe(true);
-  expect(screen.getByTestId(`process-memory-${pid}`)?.textContent).toBe("300 B");
-  expect(screen.getByTestId(`process-uptime-${pid}`)?.textContent).toContain("1h");
-  expect(screen.getByTestId("process-totals-codex")?.textContent).toContain("400 B");
-  expect(screen.getByTestId("process-totals-codex")?.textContent).toContain("3 kB");
+  expect(screen.getByTestId(`process-memory-${pid}`)?.textContent).toBe(
+    "300 B",
+  );
+  expect(screen.getByTestId(`process-uptime-${pid}`)?.textContent).toContain(
+    "1h",
+  );
+  expect(screen.getByTestId("process-totals-codex")?.textContent).toContain(
+    "400 B",
+  );
+  expect(screen.getByTestId("process-totals-codex")?.textContent).toContain(
+    "3 kB",
+  );
   expect(screen.getByTestId("process-storage-codex")?.textContent).toContain(
     "Session transcripts",
   );
-  expect(screen.getByTestId("process-storage-codex")?.textContent).toContain("2 kB");
+  expect(screen.getByTestId("process-storage-codex")?.textContent).toContain(
+    "2 kB",
+  );
 });
 
 it("renders listening ports per process and in the group totals", async () => {
   installDispatch([
-        group("codex"),
+    group("codex"),
     group("opencode", {
       processes: [
         summary({
@@ -257,6 +288,37 @@ it("renders listening ports per process and in the group totals", async () => {
   );
 });
 
+it("keeps every process fact in a compact shadcn table row", async () => {
+  const pid = 5309;
+  installDispatch([
+    group("codex"),
+    group("opencode", {
+      processes: [
+        summary({
+          pid,
+          name: "opencode",
+          command: "opencode serve --hostname 127.0.0.1",
+          listeningPorts: [49374],
+        }),
+      ],
+      ports: { state: "checked", listening: [{ pid, port: 49374 }] },
+    }),
+  ]);
+  await renderView();
+
+  const row = screen.getByTestId(`process-row-${pid}`);
+  const table = row.closest("table");
+  const compactDetails = row.querySelector(
+    `[data-testid="process-details-${pid}"]`,
+  );
+
+  expect(table?.className).toContain("table-fixed");
+  expect(compactDetails?.textContent).toContain(`PID ${pid}`);
+  expect(compactDetails?.textContent).toContain("Ports :49374");
+  expect(compactDetails?.textContent).toContain("Uptime");
+  expect(compactDetails?.className).toContain("2xl:hidden");
+});
+
 it("says none are listening when the scan checked and found nothing", async () => {
   installDispatch([group("codex"), group("opencode")]);
   await renderView();
@@ -269,7 +331,7 @@ it("says none are listening when the scan checked and found nothing", async () =
 
 it("carries the reason when ports cannot be inspected at all", async () => {
   installDispatch([
-        group("codex"),
+    group("codex"),
     group("opencode", {
       ports: {
         state: "unavailable",
@@ -282,14 +344,14 @@ it("carries the reason when ports cannot be inspected at all", async () => {
   expect(
     screen.getByTestId("process-ports-unavailable-opencode")?.textContent,
   ).toContain("could not be inspected");
-  expect(screen.getByTestId("process-totals-opencode")?.textContent).not.toContain(
-    "None listening",
-  );
+  expect(
+    screen.getByTestId("process-totals-opencode")?.textContent,
+  ).not.toContain("None listening");
 });
 
 it("names the databases inside the storage breakdown", async () => {
   installDispatch([
-        group("codex", {
+    group("codex", {
       storage: {
         state: "measured",
         totalBytes: 500_000_000,
@@ -301,7 +363,12 @@ it("names the databases inside the storage breakdown", async () => {
             bytes: 60_000_000,
             fileCount: 5,
           },
-          { label: "Everything else", path: "/Users/dev/.codex", bytes: 440_000_000, fileCount: 90 },
+          {
+            label: "Everything else",
+            path: "/Users/dev/.codex",
+            bytes: 440_000_000,
+            fileCount: 90,
+          },
         ],
       },
     }),
@@ -313,15 +380,33 @@ it("names the databases inside the storage breakdown", async () => {
   expect(storage.textContent).toContain("Databases (SQLite)");
   expect(storage.textContent).toContain("state_5.sqlite");
   expect(storage.textContent).toContain("60 MB");
+  const databasePath = screen
+    .getAllByTestId("process-storage-path-codex")
+    .find((element) => element.textContent?.includes("state_5.sqlite"));
+  expect(databasePath).toBeTruthy();
+  expect(databasePath?.className).toContain("break-words");
+  expect(databasePath?.className).not.toContain("truncate");
+
+  const databaseRow = screen
+    .getAllByTestId("process-storage-row-codex")
+    .find((element) => element.textContent?.includes("Databases (SQLite)"));
+  const value = databaseRow?.querySelector(
+    '[data-testid="process-storage-value-codex"]',
+  );
+  expect(databaseRow?.className).toContain("grid");
+  expect(value?.className).toContain("shrink-0");
+  expect(value?.className).toContain("text-right");
+  expect(value?.className).toContain("whitespace-nowrap");
 });
 
 it("renders an absent footprint as its reason, never as zero bytes", async () => {
   installDispatch([
-        group("codex"),
+    group("codex"),
     group("opencode", {
       storage: {
         state: "absent",
-        reason: "OpenCode has not created `/Users/dev/.local/share/opencode` yet.",
+        reason:
+          "OpenCode has not created `/Users/dev/.local/share/opencode` yet.",
       },
     }),
   ]);
@@ -336,8 +421,11 @@ it("renders an absent footprint as its reason, never as zero bytes", async () =>
 
 it("says explicitly when a group has nothing running", async () => {
   installDispatch([
-        group("codex"),
-    group("opencode", { processes: [], storage: { state: "measured", totalBytes: 5, totalFiles: 1, rows: [] } }),
+    group("codex"),
+    group("opencode", {
+      processes: [],
+      storage: { state: "measured", totalBytes: 5, totalFiles: 1, rows: [] },
+    }),
   ]);
   await renderView();
 
@@ -369,7 +457,9 @@ it("offers no control beyond refresh, because the capability has no write", asyn
   await renderView();
 
   const buttons = screen.getAllByRole("button");
-  const testids = buttons.map((button) => button.getAttribute("data-testid") ?? "");
+  const testids = buttons.map(
+    (button) => button.getAttribute("data-testid") ?? "",
+  );
   expect(testids.length).toBeGreaterThan(0);
   for (const testid of testids) {
     expect(testid.startsWith("refresh-processes-")).toBe(true);

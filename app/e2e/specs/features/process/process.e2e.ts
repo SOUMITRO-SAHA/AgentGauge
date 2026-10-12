@@ -7,7 +7,7 @@ import {
   processScreenSlow,
   processScreenWithPorts,
   clearSeededStores,
-} from "../fixtures.js";
+} from "../../fixtures.js";
 
 /**
  * Processes-view coverage: the read-only process and storage screen.
@@ -37,7 +37,8 @@ describe("processes", () => {
       ),
     );
     const ids = order.filter((id) => id !== null);
-    const at = (needle: string) => ids.findIndex((id) => id === `nav-${needle}`);
+    const at = (needle: string) =>
+      ids.findIndex((id) => id === `nav-${needle}`);
     expect(at("stats")).toBeGreaterThanOrEqual(0);
     expect(at("processes")).toBeGreaterThan(at("stats"));
     expect(at("settings")).toBeGreaterThan(at("processes"));
@@ -57,7 +58,9 @@ describe("processes", () => {
 
     const pid = 4242;
     await expectDisplayed(`[data-testid="process-row-${pid}"]`);
-    await expect($(`[data-testid="process-memory-${pid}"]`)).toHaveText("432 MB");
+    await expect($(`[data-testid="process-memory-${pid}"]`)).toHaveText(
+      "432 MB",
+    );
     await expect($(`[data-testid="process-uptime-${pid}"]`)).toHaveText(
       expect.stringContaining("1h"),
     );
@@ -103,10 +106,12 @@ describe("processes", () => {
   it("renders an absent footprint as its reason, never as zero bytes", async () => {
     await gotoView("processes");
     await expectDisplayed('[data-testid="process-storage-absent-opencode"]');
-    await expect($('[data-testid="process-storage-absent-opencode"]')).toHaveText(
-      expect.stringContaining("has not created"),
+    await expect(
+      $('[data-testid="process-storage-absent-opencode"]'),
+    ).toHaveText(expect.stringContaining("has not created"));
+    expect(await $$('[data-testid="process-storage-opencode"]')).toHaveLength(
+      0,
     );
-    expect(await $$('[data-testid="process-storage-opencode"]')).toHaveLength(0);
   });
 
   it("says explicitly when a group has nothing running", async () => {
@@ -149,8 +154,8 @@ describe("processes loading flow", () => {
     // text can never shift the panels when it appears or clears.
     const statusClass = await browser.execute(
       () =>
-        document.querySelector('[data-testid="process-refreshing"]')?.className ??
-        null,
+        document.querySelector('[data-testid="process-refreshing"]')
+          ?.className ?? null,
     );
     expect(statusClass).toContain("invisible");
 
@@ -170,7 +175,9 @@ describe("processes loading flow", () => {
           ?.getBoundingClientRect().top ?? null,
     )) as number | null;
     expect(topAfter).not.toBeNull();
-    expect(Math.abs((topAfter as number) - (topBefore as number))).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs((topAfter as number) - (topBefore as number)),
+    ).toBeLessThanOrEqual(1);
   });
 });
 
@@ -183,7 +190,12 @@ describe("processes with a listening server", () => {
     await gotoView("processes");
 
     await expectDisplayed('[data-testid="process-row-5309"]');
-    await expect($('[data-testid="process-ports-5309"]')).toHaveText(":49374");
+    const rowText = await browser.execute(
+      () =>
+        document.querySelector('[data-testid="process-row-5309"]')
+          ?.textContent ?? "",
+    );
+    expect(rowText).toContain(":49374");
     await expect($('[data-testid="process-totals-opencode"]')).toHaveText(
       expect.stringContaining("49374"),
     );
@@ -193,9 +205,9 @@ describe("processes with a listening server", () => {
     await gotoView("processes");
 
     await expectDisplayed('[data-testid="process-ports-unavailable-codex"]');
-    await expect($('[data-testid="process-ports-unavailable-codex"]')).toHaveText(
-      expect.stringContaining("could not be inspected"),
-    );
+    await expect(
+      $('[data-testid="process-ports-unavailable-codex"]'),
+    ).toHaveText(expect.stringContaining("could not be inspected"));
     // An unaskable question must not render as its answered-empty form.
     await expect($('[data-testid="process-totals-codex"]')).toHaveText(
       expect.not.stringContaining("None listening"),

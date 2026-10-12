@@ -25,6 +25,14 @@ import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { processInsightsAtom } from "~/atoms";
 import { Skeleton } from "~/components/ui/skeleton";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "~/components/ui/table";
+import {
   ProcessGroupPanel,
   ProcessInsightsError,
 } from "~/components/process/process-group-panel";
@@ -47,16 +55,15 @@ export function ProcessView({ visible }: { readonly visible: boolean }) {
     }
   }, [visible, refresh]);
 
-  const refreshing =
-    AsyncResult.match(insights, {
-      onInitial: () => false,
-      onFailure: () => false,
-      onSuccess: (result) => result.waiting,
-    });
+  const refreshing = AsyncResult.match(insights, {
+    onInitial: () => false,
+    onFailure: () => false,
+    onSuccess: (result) => result.waiting,
+  });
 
   return (
     <div
-      className={visible ? "flex flex-col gap-4" : "hidden"}
+      className={visible ? "flex min-w-0 flex-col gap-4" : "hidden min-w-0"}
       data-testid="view-processes"
     >
       <ViewHeader
@@ -111,7 +118,12 @@ const SKELETON_PANELS = 2;
 
 function ProcessLoadingSkeleton() {
   return (
-    <div data-testid="process-loading-skeleton" role="status" aria-label="Loading process details">
+    <div
+      className="flex min-w-0 flex-col gap-4"
+      data-testid="process-loading-skeleton"
+      role="status"
+      aria-label="Loading process details"
+    >
       {Array.from({ length: SKELETON_PANELS }, (_, index) => (
         <SkeletonPanel key={index} />
       ))}
@@ -130,7 +142,7 @@ function ProcessLoadingSkeleton() {
 /** One group panel's shape at rest: header, totals, rows, storage. */
 function SkeletonPanel() {
   return (
-    <section className={PANEL} data-testid="process-loading-panel">
+    <section className={`${PANEL} min-w-0`} data-testid="process-loading-panel">
       <div className="mb-4 flex items-center justify-between gap-3">
         <Skeleton className="h-4 w-32" />
         <Skeleton className="size-8" />
@@ -142,35 +154,56 @@ function SkeletonPanel() {
           <SkeletonTotal className="w-12" valueClassName="w-24" />
           <SkeletonTotal className="w-12" valueClassName="w-16" />
         </div>
-        <div className="flex flex-col">
-          <div className="flex items-center gap-4 border-b border-border/60 px-0 py-2.5">
-            <Skeleton className="h-4 flex-1" />
-            <Skeleton className="h-3 w-10" />
-            <Skeleton className="h-3 w-12" />
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-4 w-14" />
-          </div>
-          <div className="flex items-center gap-4 border-b border-border/60 px-0 py-3">
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <Skeleton className="h-4 w-2/5" />
-              <Skeleton className="h-3 w-3/5" />
-            </div>
-            <Skeleton className="h-3 w-10" />
-            <Skeleton className="h-4 w-12" />
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-4 w-14" />
-          </div>
-          <div className="flex items-center gap-4 px-0 py-3">
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <Skeleton className="h-4 w-1/3" />
-              <Skeleton className="h-3 w-2/5" />
-            </div>
-            <Skeleton className="h-3 w-10" />
-            <Skeleton className="h-4 w-12" />
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-4 w-14" />
-          </div>
-        </div>
+        <Table className="table-fixed min-w-full">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[68%] pl-0 pr-1 lg:w-[54%] 2xl:w-[36%]">
+                <Skeleton className="h-4 w-2/5" />
+              </TableHead>
+              <TableHead className="hidden w-[12%] text-right 2xl:table-cell">
+                <Skeleton className="ml-auto h-3 w-10" />
+              </TableHead>
+              <TableHead className="hidden w-[14%] text-right 2xl:table-cell">
+                <Skeleton className="ml-auto h-3 w-12" />
+              </TableHead>
+              <TableHead className="w-[32%] px-1 text-right lg:w-[26%] 2xl:w-[18%]">
+                <Skeleton className="ml-auto h-3 w-12" />
+              </TableHead>
+              <TableHead className="hidden w-[20%] pr-0 text-right lg:table-cell 2xl:w-[20%]">
+                <Skeleton className="ml-auto h-3 w-14" />
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {[0, 1].map((row) => (
+              <TableRow key={row}>
+                <TableCell className="min-w-0 overflow-hidden pl-0 pr-1 whitespace-normal">
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <Skeleton className="h-4 w-2/5" />
+                    <Skeleton className="h-3 w-3/5" />
+                    <div className="flex min-w-0 flex-wrap gap-2 2xl:hidden">
+                      <Skeleton className="h-3 w-16" />
+                      <Skeleton className="h-3 w-20" />
+                      <Skeleton className="h-3 w-12 lg:hidden" />
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell className="hidden text-right 2xl:table-cell">
+                  <Skeleton className="ml-auto h-3 w-10" />
+                </TableCell>
+                <TableCell className="hidden text-right 2xl:table-cell">
+                  <Skeleton className="ml-auto h-4 w-12" />
+                </TableCell>
+                <TableCell className="px-1 text-right">
+                  <Skeleton className="ml-auto h-4 w-14" />
+                </TableCell>
+                <TableCell className="hidden text-right lg:table-cell">
+                  <Skeleton className="ml-auto h-4 w-14" />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
         <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
           <Skeleton className="h-3 w-20" />
           <div className="flex items-center justify-between gap-3">

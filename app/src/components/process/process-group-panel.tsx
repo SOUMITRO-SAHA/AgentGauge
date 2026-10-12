@@ -34,14 +34,17 @@ export function ProcessGroupPanel({
   const refresh = useAtomRefresh(processInsightsAtom);
 
   return (
-    <section className={PANEL} data-testid={`process-panel-${group.id}`}>
+    <section
+      className={`${PANEL} min-w-0`}
+      data-testid={`process-panel-${group.id}`}
+    >
       <PanelHeader
         title={group.displayName}
         testId={`refresh-processes-${group.id}`}
         onRefresh={() => refresh()}
       />
 
-      <div className="flex flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-4">
         <Totals group={group} />
         <Processes group={group} nowMs={nowMs} />
         <Storage group={group} />
@@ -79,9 +82,7 @@ function uniquePorts(group: Ipc.ProcessGroup): number[] {
   if (group.ports.state !== "checked") {
     return [];
   }
-  const ports = [
-    ...new Set(group.ports.listening.map((entry) => entry.port)),
-  ];
+  const ports = [...new Set(group.ports.listening.map((entry) => entry.port))];
   ports.sort((a, b) => a - b);
   return ports;
 }
@@ -101,11 +102,19 @@ function PortsUnavailable({ group }: { readonly group: Ipc.ProcessGroup }) {
   );
 }
 
-function Total({ label, value }: { readonly label: string; readonly value: string }) {
+function Total({
+  label,
+  value,
+}: {
+  readonly label: string;
+  readonly value: string;
+}) {
   return (
     <span className="flex items-baseline gap-2">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium tabular text-foreground">{value}</span>
+      <span className="text-sm font-medium tabular text-foreground">
+        {value}
+      </span>
     </span>
   );
 }
@@ -129,21 +138,40 @@ function Processes({
   }
 
   return (
-    <Table>
+    <Table className="table-fixed min-w-full">
       <TableHeader>
         <TableRow>
-          <TableHead className="pl-0">Process</TableHead>
-          <TableHead className="text-right">PID</TableHead>
-          <TableHead className="text-right">Ports</TableHead>
-          <TableHead className="text-right">Memory</TableHead>
-          <TableHead className="pr-0 text-right">Uptime</TableHead>
+          <TableHead className="w-[68%] pl-0 pr-1 whitespace-normal lg:w-[54%] 2xl:w-[36%]">
+            Process
+          </TableHead>
+          <TableHead className="hidden w-[12%] text-right 2xl:table-cell">
+            PID
+          </TableHead>
+          <TableHead className="hidden w-[14%] text-right 2xl:table-cell">
+            Ports
+          </TableHead>
+          <TableHead
+            className="w-[32%] px-1 text-right whitespace-normal lg:w-[26%] 2xl:w-[18%]"
+            aria-label="Memory"
+          >
+            <span className="sm:hidden" aria-hidden="true">
+              Mem
+            </span>
+            <span className="hidden sm:inline">Memory</span>
+          </TableHead>
+          <TableHead className="hidden w-[20%] pr-0 text-right lg:table-cell 2xl:w-[20%]">
+            Uptime
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {group.processes.map((process) => (
-          <TableRow key={process.pid} data-testid={`process-row-${process.pid}`}>
-            <TableCell className="max-w-[24rem] pl-0">
-              <div className="flex min-w-0 flex-col">
+          <TableRow
+            key={process.pid}
+            data-testid={`process-row-${process.pid}`}
+          >
+            <TableCell className="min-w-0 overflow-hidden pl-0 pr-1 whitespace-normal">
+              <div className="flex min-w-0 flex-col gap-1">
                 <span className="truncate text-sm font-medium text-foreground">
                   {process.name}
                 </span>
@@ -152,25 +180,38 @@ function Processes({
                     {process.command}
                   </span>
                 )}
+                <span
+                  className="flex min-w-0 flex-wrap gap-x-2 text-xs text-muted-foreground 2xl:hidden"
+                  data-testid={`process-details-${process.pid}`}
+                >
+                  <span>PID {process.pid}</span>
+                  <span>Ports {compactPorts(group, process)}</span>
+                  <span className="lg:hidden">
+                    Uptime{" "}
+                    {formatCountdown(uptimeMs(process, nowMs)) ?? "Unknown"}
+                  </span>
+                </span>
               </div>
             </TableCell>
-            <TableCell className="text-right text-xs tabular text-muted-foreground">
+            <TableCell className="hidden text-right text-xs tabular text-muted-foreground 2xl:table-cell">
               {process.pid}
             </TableCell>
             <TableCell
-              className="text-right text-sm tabular text-foreground"
+              className="hidden text-right text-sm tabular text-foreground 2xl:table-cell"
               data-testid={`process-ports-${process.pid}`}
             >
               {process.listeningPorts.map((port) => `:${port}`).join(" ")}
             </TableCell>
             <TableCell
-              className="text-right text-sm tabular text-foreground"
+              className="px-1 text-right text-xs tabular text-foreground sm:text-sm"
               data-testid={`process-memory-${process.pid}`}
             >
-              {process.memoryBytes === null ? "Unknown" : formatBytes(process.memoryBytes)}
+              {process.memoryBytes === null
+                ? "Unknown"
+                : formatBytes(process.memoryBytes)}
             </TableCell>
             <TableCell
-              className="pr-0 text-right text-sm tabular text-foreground"
+              className="hidden pr-0 text-right text-xs tabular text-foreground lg:table-cell sm:text-sm"
               data-testid={`process-uptime-${process.pid}`}
             >
               {formatCountdown(uptimeMs(process, nowMs)) ?? "Unknown"}
@@ -180,6 +221,17 @@ function Processes({
       </TableBody>
     </Table>
   );
+}
+
+function compactPorts(
+  group: Ipc.ProcessGroup,
+  process: Ipc.ProcessSummary,
+): string {
+  if (process.listeningPorts.length > 0) {
+    return process.listeningPorts.map((port) => `:${port}`).join(" ");
+  }
+
+  return group.ports.state === "checked" ? "None" : "Unavailable";
 }
 
 /** The process's age at the rendered instant, or nothing when unknown. */
@@ -198,7 +250,10 @@ function Storage({ group }: { readonly group: Ipc.ProcessGroup }) {
         className="flex items-start gap-3 border-t border-border/60 pt-4"
         data-testid={`process-storage-absent-${group.id}`}
       >
-        <HardDrive className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <HardDrive
+          className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
         <p className="text-sm text-muted-foreground">{group.storage.reason}</p>
       </div>
     );
@@ -213,14 +268,22 @@ function Storage({ group }: { readonly group: Ipc.ProcessGroup }) {
       {group.storage.rows.map((row) => (
         <div
           key={`${row.label}-${row.path}`}
-          className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5"
+          className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3"
           data-testid={`process-storage-row-${group.id}`}
         >
-          <span className="min-w-0 truncate text-sm text-muted-foreground">
+          <span className="min-w-0 max-w-[70%] break-words text-sm text-muted-foreground">
             {row.label}
-            <span className="ml-2 text-xs text-muted-foreground/70">{row.path}</span>
+            <span
+              className="ml-2 break-words text-xs text-muted-foreground/70"
+              data-testid={`process-storage-path-${group.id}`}
+            >
+              {row.path}
+            </span>
           </span>
-          <span className="text-sm tabular text-foreground">
+          <span
+            className="shrink-0 whitespace-nowrap text-right text-sm tabular text-foreground"
+            data-testid={`process-storage-value-${group.id}`}
+          >
             {formatBytes(row.bytes)}
             <span className="ml-2 text-xs text-muted-foreground">
               {row.fileCount} files
