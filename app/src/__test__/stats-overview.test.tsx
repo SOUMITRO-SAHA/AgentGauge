@@ -290,6 +290,26 @@ it("lists every readable plan with its own window, tokens and cost", async () =>
     screen.getByTestId("stats-plan-row-zai-window").textContent,
   ).toContain("Pro");
 
+  // A provider-reported plan is priced from its own model mix, so a plan whose
+  // numbers come from the vendor is not left with a bare dash beside a dollar
+  // figure on the row above. Both are estimates of the same kind and are
+  // labelled the same way.
+  const zaiCost = screen.getByTestId("stats-plan-row-zai-cost").textContent;
+  expect(zaiCost).not.toBe("—");
+  expect(zaiCost).toMatch(/\$|tokens/);
+  expect(screen.getByTestId("stats-plan-row-zai-cost-basis").textContent).toMatch(
+    /price list|estimate/i,
+  );
+
+  // Both rows state where they were read from in the same shape, so the two
+  // plans are comparable at a glance rather than by decoding two conventions.
+  expect(
+    screen.getByTestId("stats-plan-row-codex-source").textContent,
+  ).toMatch(/local sessions/);
+  expect(screen.getByTestId("stats-plan-row-zai-source").textContent).toMatch(
+    /provider window/,
+  );
+
   // Nothing is summed across spans that do not match.
   expect(screen.queryByTestId("stats-all-plans-total")).toBeNull();
   const note = screen.getByTestId("stats-all-plans-not-summed");

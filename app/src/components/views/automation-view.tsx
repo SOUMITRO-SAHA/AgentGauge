@@ -281,7 +281,7 @@ function MonitorCard({
         </div>
       )}
 
-      <div className="border-t border-border/60 pt-4">
+      <div className="mt-4 border-t border-border/60 pt-4">
         <KickoffSection kind={kind} nowMs={nowMs} />
       </div>
     </section>

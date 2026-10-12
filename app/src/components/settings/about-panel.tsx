@@ -1,9 +1,8 @@
 /**
  * The Settings About panel: what this build is, and where it lives.
  *
- * The identity row mirrors the sidebar's own brand composition — the one mark
- * the app has, at a larger size, on an ink tile with the version badge beside
- * the name — so the screen opens by saying whose settings these are. The
+ * The identity row uses the sidebar's monochrome brand mark at a larger size,
+ * with the version badge beside the name. The
  * version, platform, and every outbound link arrive from the backend's
  * `appInfo`, so the panel states only what the running build reported — no
  * copy in here can drift from the packaged version. A failed read is named
@@ -26,7 +25,7 @@ export function AboutPanel() {
   const info = useAtomValue(appInfoAtom);
 
   return (
-    <section className={PANEL} data-testid="about-panel">
+    <section className={`${PANEL} flex flex-col`} data-testid="about-panel">
       <PanelHeader title="About" />
       {AsyncResult.match(info, {
         onInitial: () => <AboutSkeleton />,
@@ -48,14 +47,14 @@ function Facts({ info }: { readonly info: AppInfo }) {
   ].join(" · ");
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-1 flex-col justify-between gap-4">
       <div className="flex items-center gap-3">
         <span
           aria-hidden="true"
           data-testid="about-mark"
-          className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary"
+          className="flex size-10 shrink-0 items-center justify-center"
         >
-          <BrandMark className="size-6 text-[var(--brand-teal)]" />
+          <BrandMark className="size-8" />
         </span>
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -94,7 +93,9 @@ function AboutSkeleton() {
       role="status"
       aria-label="Reading the build facts"
     >
-      <Skeleton className="size-10 rounded-lg" aria-hidden="true" />
+      <span className="flex size-10 shrink-0 items-center justify-center">
+        <Skeleton className="size-8 rounded-md" aria-hidden="true" />
+      </span>
       <div className="flex flex-col gap-2">
         <Skeleton className="h-4 w-36 max-w-full" aria-hidden="true" />
         <Skeleton className="h-3 w-44 max-w-full" aria-hidden="true" />

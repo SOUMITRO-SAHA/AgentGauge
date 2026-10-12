@@ -442,6 +442,11 @@ describe("stats", () => {
         codexSource: read("stats-plan-row-codex-source"),
         codexCost: read("stats-plan-row-codex-cost"),
         zaiSource: read("stats-plan-row-zai-source"),
+        zaiCost: read("stats-plan-row-zai-cost"),
+        zaiBasis: read("stats-plan-row-zai-cost-basis"),
+        codexBasis: read("stats-plan-row-codex-cost-basis"),
+        zaiRequests: read("stats-plan-row-zai-requests"),
+        zaiPeak: read("stats-plan-row-zai-peak"),
         note: read("stats-all-plans-not-summed"),
         totalExists:
           document.querySelector('[data-testid="stats-all-plans-total"]') !==
@@ -454,6 +459,16 @@ describe("stats", () => {
     expect(overview.codexSource).toContain("local sessions");
     expect(overview.codexCost).toContain("$");
     expect(overview.zaiSource).toContain("30 days");
+
+    // Both plans are priced and both say how, rather than one plan carrying a
+    // dollar figure and the other a bare dash that reads as "free".
+    expect(overview.zaiCost).not.toBe("—");
+    expect(overview.zaiCost).toContain("$");
+    expect(overview.zaiBasis).toContain("price list");
+    expect(overview.codexBasis).toContain("not a bill");
+    // Basic figures every plan has, shown the same way on every row.
+    expect(overview.zaiRequests).toContain("requests");
+    expect(overview.zaiPeak).toContain("peak");
     expect(overview.totalExists).toBe(false);
     expect(overview.note).toContain("summed");
   });

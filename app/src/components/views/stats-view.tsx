@@ -55,6 +55,7 @@ import {
   planPriceUsd,
   PRICING_PROVIDER_IDS,
   valueRatio,
+  type ModelCostEstimate,
   type ModelCostRow,
   type PriceList,
 } from "~/lib/pricing";
@@ -202,6 +203,7 @@ function PlanSummaryRow({
 }) {
   const snapshotRead = useAtomValue(usageForAtom(kind));
   const accountRead = useAtomValue(accountUsageForAtom(kind));
+  const priceList = useAtomValue(priceListAtom);
 
   const accountPending = AsyncResult.isInitial(accountRead);
   const snapshot = AsyncResult.match(snapshotRead, {
@@ -222,6 +224,29 @@ function PlanSummaryRow({
   const tokens = account?.summary.totalTokens ?? null;
   const local = account?.local ?? null;
   const coverage = coverageOf(account, kind);
+  const list = AsyncResult.match(priceList, {
+    onInitial: () => null,
+    onSuccess: (result) => result.value,
+    onFailure: () => null,
+  });
+  const estimate =
+    account !== null &&
+    account.local === null &&
+    account.models.length > 0 &&
+    list !== null
+      ? estimateModelCosts(account.models, list, PRICING_PROVIDER_IDS[kind])
+      : null;
+  const cost = costOf(account, estimate);
+  const requests = account?.summary.totalRequests ?? null;
+  const peakDay = account?.summary.peakDailyTokens ?? null;
+  const peakBucket = (account?.dailyUsageBuckets ?? []).reduce<
+    { startDate: string; tokens: number | null } | null
+  >(
+    (best, bucket) =>
+      best === null || (bucket.tokens ?? 0) > (best.tokens ?? 0) ? bucket : best,
+    null,
+  );
+  const peakDayDate = peakBucket?.startDate ?? null;
 
   return (
     <div
@@ -273,9 +298,33 @@ function PlanSummaryRow({
           className="font-medium tabular text-foreground"
           data-testid={`stats-plan-row-${kind}-cost`}
         >
-          {accountPending ? "Reading…" : costOf(account)}
+          {accountPending ? "Reading…" : cost.cost}
         </span>
+        {requests !== null ? (
+          <span
+            className="text-muted-foreground"
+            data-testid={`stats-plan-row-${kind}-requests`}
+          >
+            {formatCompactCount(requests)} requests
+          </span>
+        ) : null}
+        {peakDay !== null ? (
+          <span
+            className="text-muted-foreground"
+            data-testid={`stats-plan-row-${kind}-peak`}
+          >
+            peak {formatCompactCount(peakDay)} on {peakDayDate}
+          </span>
+        ) : null}
       </div>
+      {accountPending || cost.basis === null ? null : (
+        <p
+          className="-mt-1 text-[11px] text-muted-foreground"
+          data-testid={`stats-plan-row-${kind}-cost-basis`}
+        >
+          {cost.basis} · not a bill
+        </p>
+      )}
     </div>
   );
 }
@@ -321,17 +370,50 @@ function coverageOf(
  * What a plan's usage would have cost at API prices, or the honest reason
  * there is no figure: an unpriced plan, or one that has reported nothing.
  */
-function costOf(account: Ipc.AccountUsage | null): string {
-  if (account === null) return "—";
+/**
+ * A plan's cost, and where that number came from.
+ *
+ * Both kinds of plan end up with a figure, because a dash beside a dollar
+ * amount on the row above reads as "this plan is free" when it really means
+ * "nobody has priced it yet". A provider-reported plan is priced from the
+ * model mix it reports, which is an estimate against the bundled list; a plan
+ * read from this machine's logs is priced exactly, per response.
+ */
+function costOf(
+  account: Ipc.AccountUsage | null,
+  estimate: ModelCostEstimate | null,
+): { cost: string; basis: string | null } {
+  if (account === null) return { cost: "—", basis: null };
   if (account.local !== null) {
-    return account.local.costUsd > 0
-      ? `≈ ${formatUsd(account.local.costUsd)}`
-      : account.local.unpricedTokens > 0
-        ? "Not priced"
-        : "No cost recorded";
+    if (account.local.costUsd > 0) {
+      return {
+        cost: `≈ ${formatUsd(account.local.costUsd)}`,
+        basis: "exact per-response rates",
+      };
+    }
+    return {
+      cost:
+        account.local.unpricedTokens > 0
+          ? "Not priced"
+          : "No cost recorded",
+      basis:
+        account.local.unpricedTokens > 0
+          ? `${formatCompactCount(account.local.unpricedTokens)} tokens on models the price list does not carry`
+          : null,
+    };
   }
-  if (account.summary.totalTokens === null) return "—";
-  return "—";
+  if (estimate === null) return { cost: "—", basis: null };
+  if (estimate.unpricedTokens > 0) {
+    return {
+      cost: "Not priced",
+      basis: `${formatCompactCount(estimate.unpricedTokens)} tokens on models the price list does not carry`,
+    };
+  }
+  if (estimate.estimatedTotalUsd <= 0) return { cost: "No cost recorded", basis: null };
+  return {
+    cost: `≈ ${formatUsd(estimate.estimatedTotalUsd)}`,
+    basis: `estimated from the bundled price list`,
+  };
 }
 
 /** What one plan's tab shows: its stats, or the honest reason there are none. */

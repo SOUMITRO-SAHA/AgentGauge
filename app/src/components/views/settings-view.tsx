@@ -34,7 +34,7 @@ export function SettingsView({ visible }: { readonly visible: boolean }) {
       />
 
       <div
-        className="grid items-start gap-4 md:grid-cols-2"
+        className="grid gap-4 md:grid-cols-2"
         data-testid="settings-info-row"
       >
         <AboutPanel />
@@ -45,8 +45,6 @@ export function SettingsView({ visible }: { readonly visible: boolean }) {
 
       <SupportPanel />
 
-      {/* Footnote, not loose text: the panels above are cards, and this needs
-          the same visual separation or it reads as an orphaned sentence. */}
       <p
         className="border-t border-border/60 pt-4 text-xs text-muted-foreground"
         data-testid="settings-about"

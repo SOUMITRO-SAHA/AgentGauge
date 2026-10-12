@@ -302,6 +302,16 @@ it("labels a connection with no monitor result unavailable", async () => {
   );
 });
 
+it("gives the kickoff divider the same 16px separation used elsewhere", async () => {
+  installDispatch({ running: {} });
+  await renderView();
+
+  await userEvent.setup().click(screen.getByTestId("automation-connection-tab-zai"));
+
+  const kickoff = screen.getByTestId("kickoff-section-zai");
+  expect(kickoff.parentElement?.className.split(/\s+/)).toContain("mt-4");
+});
+
 it("keeps each connection's kickoff controls inside its monitor card", async () => {
   installDispatch({ running: { codex: true } });
   await renderView();
