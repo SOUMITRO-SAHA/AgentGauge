@@ -47,6 +47,9 @@ describe("system widget", () => {
     const status = $('[data-testid="widget-status"]');
     await expectDisplayed('[data-testid="widget-status"]');
     await expect(status).toHaveAttribute("data-state", "ready");
+    expect(await $('[data-testid="widget-loading-skeleton"]').isExisting()).toBe(
+      false,
+    );
     await expectDisplayed('[data-testid="widget-setup-steps"]');
     await expect($('[data-testid="widget-setup-steps"]')).toHaveText(
       expect.stringContaining("widget gallery"),

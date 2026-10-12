@@ -18,6 +18,7 @@ import { useEffect } from "react";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 
 import { processInsightsAtom } from "~/atoms";
+import { Skeleton } from "~/components/ui/skeleton";
 import {
   ProcessGroupPanel,
   ProcessInsightsError,
@@ -51,14 +52,7 @@ export function ProcessView({ visible }: { readonly visible: boolean }) {
       />
 
       {AsyncResult.match(insights, {
-        onInitial: () => (
-          <section className={PANEL} data-testid="process-loading">
-            <div className="flex flex-col gap-3">
-              <div className="h-4 w-40 animate-pulse rounded bg-muted" />
-              <div className="h-4 w-64 animate-pulse rounded bg-muted" />
-            </div>
-          </section>
-        ),
+        onInitial: () => <ProcessLoadingSkeleton />,
         onFailure: () => <ProcessInsightsError />,
         onSuccess: (result) => (
           <>
@@ -85,5 +79,60 @@ export function ProcessView({ visible }: { readonly visible: boolean }) {
         ),
       })}
     </div>
+  );
+}
+
+function ProcessLoadingSkeleton() {
+  return (
+    <section className={PANEL} data-testid="process-loading">
+      <div
+        className="flex flex-col gap-4"
+        data-testid="process-loading-skeleton"
+        role="status"
+        aria-label="Loading process details"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <Skeleton className="h-4 w-32" aria-hidden="true" />
+          <Skeleton className="size-8" aria-hidden="true" />
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-4">
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-3 w-14" aria-hidden="true" />
+            <Skeleton className="h-4 w-20" aria-hidden="true" />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-3 w-16" aria-hidden="true" />
+            <Skeleton className="h-4 w-12" aria-hidden="true" />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-3 w-12" aria-hidden="true" />
+            <Skeleton className="h-4 w-24" aria-hidden="true" />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-3 w-12" aria-hidden="true" />
+            <Skeleton className="h-4 w-16" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <Skeleton className="h-4 w-2/5" aria-hidden="true" />
+            <Skeleton className="h-3 w-16" aria-hidden="true" />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <Skeleton className="h-4 w-1/3" aria-hidden="true" />
+            <Skeleton className="h-3 w-16" aria-hidden="true" />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <Skeleton className="h-4 w-1/2" aria-hidden="true" />
+            <Skeleton className="h-3 w-16" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+          <Skeleton className="h-3 w-20" aria-hidden="true" />
+          <Skeleton className="h-4 w-3/4" aria-hidden="true" />
+          <Skeleton className="h-4 w-1/2" aria-hidden="true" />
+        </div>
+      </div>
+    </section>
   );
 }

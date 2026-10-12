@@ -42,6 +42,13 @@ describe("dashboard", () => {
       }, view);
 
       expect(rowGap).toBe(16);
+
+      if (view === "processes") {
+        await expectDisplayed('[data-testid="process-panel-codex"]');
+        expect(await $('[data-testid="process-loading-skeleton"]').isExisting()).toBe(
+          false,
+        );
+      }
     }
 
     await gotoView("home");
@@ -62,11 +69,19 @@ describe("dashboard", () => {
       "data-freshness",
       "live",
     );
+    expect(await $('[data-testid="status-loading"]').isExisting()).toBe(false);
+    await expect($('[data-testid="home-watcher"]')).toHaveText(
+      "1 rollover monitor is running.",
+    );
+    expect(await $('[data-testid="home-watcher-loading"]').isExisting()).toBe(
+      false,
+    );
   });
 
   it("renders both the 5-hour and weekly windows", async () => {
     const bars = await $$('[data-testid="window-bar"]');
     expect(bars).toHaveLength(2);
+    expect(await $('[data-testid="window-skeleton"]').isExisting()).toBe(false);
     await expect($('[data-testid="usage-panel"]')).toHaveText(
       expect.stringContaining("5-hour window"),
     );

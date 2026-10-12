@@ -11,6 +11,7 @@
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 
+import { Skeleton } from "~/components/ui/skeleton";
 import * as Ipc from "~/lib/ipc";
 import { cn } from "~/lib/utils";
 import {
@@ -121,9 +122,9 @@ export function UsageWindowRow({
 export function UsageWindowSkeleton() {
   return (
     <div className="flex flex-col gap-2" data-testid="window-skeleton">
-      <div className="h-4 w-28 animate-pulse rounded bg-muted" />
-      <div className="h-2 w-full animate-pulse rounded-full bg-muted" />
-      <div className="h-3 w-40 animate-pulse rounded bg-muted" />
+      <Skeleton className="h-4 w-28" aria-hidden="true" />
+      <Skeleton className="h-2 w-full rounded-full" aria-hidden="true" />
+      <Skeleton className="h-3 w-40" aria-hidden="true" />
     </div>
   );
 }

@@ -18,6 +18,7 @@ import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 
 import { automationAtom } from "~/atoms";
 import { PANEL } from "~/components/dashboard/panel";
+import { Skeleton } from "~/components/ui/skeleton";
 import { ProviderStatusCard } from "~/components/usage/provider-status-card";
 import { UsageTabs } from "~/components/usage/usage-tabs";
 import { ViewHeader } from "~/components/views/view-header";
@@ -51,11 +52,7 @@ export function HomeView({ visible }: { readonly visible: boolean }) {
       </section>
 
       <MonitorGlance
-        monitors={AsyncResult.match(automation, {
-          onInitial: () => null,
-          onSuccess: (result) => result.value,
-          onFailure: () => null,
-        })}
+        result={automation}
       />
     </div>
   );
@@ -67,23 +64,49 @@ export function HomeView({ visible }: { readonly visible: boolean }) {
  * was just shown, not another panel.
  */
 function MonitorGlance({
-  monitors,
+  result,
 }: {
-  readonly monitors: readonly Ipc.AutomationState[] | null;
+  readonly result: AsyncResult.AsyncResult<
+    readonly Ipc.AutomationState[],
+    Ipc.AppError
+  >;
 }) {
-  const running = monitors?.filter((monitor) => monitor.running).length ?? null;
   return (
-    <p
-      className="border-t border-border/60 pt-4 text-xs text-muted-foreground"
-      data-testid="home-watcher"
-    >
-      {running === null
-        ? "The rollover monitors could not be reached."
-        : running === 0
-          ? "No rollover monitors are running."
-          : running === 1
-            ? "1 rollover monitor is running."
-            : `${running} rollover monitors are running.`}
-    </p>
+    <div className="border-t border-border/60 pt-4">
+      {AsyncResult.match(result, {
+        onInitial: () => (
+          <div
+            className="flex items-center"
+            data-testid="home-watcher-loading"
+            role="status"
+            aria-label="Loading rollover monitor status"
+          >
+            <Skeleton className="h-3 w-48" aria-hidden="true" />
+          </div>
+        ),
+        onFailure: () => (
+          <p className="text-xs text-muted-foreground" data-testid="home-watcher">
+            The rollover monitor status is unavailable.
+          </p>
+        ),
+        onSuccess: (result) => {
+          const running = result.value.filter(
+            (monitor) => monitor.running,
+          ).length;
+          return (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="home-watcher"
+            >
+              {running === 0
+                ? "No rollover monitors are running."
+                : running === 1
+                  ? "1 rollover monitor is running."
+                  : `${running} rollover monitors are running.`}
+            </p>
+          );
+        },
+      })}
+    </div>
   );
 }

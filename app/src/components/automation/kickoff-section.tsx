@@ -17,6 +17,7 @@ import { Play, Stop } from "@phosphor-icons/react";
 
 import { kickoffAtom, kickoffViewOf } from "~/atoms";
 import { Button } from "~/components/ui/button";
+import { Skeleton } from "~/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -59,7 +60,7 @@ export function KickoffSection({
   };
 
   return AsyncResult.match(overview, {
-    onInitial: () => null,
+    onInitial: () => <KickoffLoadingSkeleton kind={kind} />,
     onFailure: () => (
       <p
         className="text-xs text-muted-foreground"
@@ -88,6 +89,44 @@ export function KickoffSection({
       );
     },
   });
+}
+
+function KickoffLoadingSkeleton({ kind }: { readonly kind: Ipc.ProviderKind }) {
+  return (
+    <div
+      className="flex flex-col gap-3"
+      data-testid={`kickoff-loading-${kind}`}
+      role="status"
+      aria-label={`Loading scheduled kickoff for ${kind}`}
+    >
+      <Skeleton className="h-3 w-32" aria-hidden="true" />
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <Skeleton className="h-4 w-40 max-w-full" aria-hidden="true" />
+          <Skeleton className="h-3 w-full max-w-lg" aria-hidden="true" />
+          <Skeleton className="h-3 w-4/5" aria-hidden="true" />
+        </div>
+        <Skeleton className="size-8 shrink-0 rounded-md" aria-hidden="true" />
+      </div>
+      <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Skeleton className="h-4 w-28" aria-hidden="true" />
+          <Skeleton
+            className="h-9 w-full max-w-56 rounded-md"
+            aria-hidden="true"
+          />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Skeleton className="h-4 w-24" aria-hidden="true" />
+          <Skeleton
+            className="h-9 w-full max-w-56 rounded-md"
+            aria-hidden="true"
+          />
+        </div>
+        <Skeleton className="h-3 w-full max-w-md" aria-hidden="true" />
+      </div>
+    </div>
+  );
 }
 
 function KickoffControls({

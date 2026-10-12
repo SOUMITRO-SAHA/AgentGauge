@@ -1,4 +1,4 @@
-import { expect, $ } from "@wdio/globals";
+import { expect, $, $$ } from "@wdio/globals";
 
 import {
   boot,
@@ -55,6 +55,10 @@ describe("automation", () => {
     await expect($('[data-testid="automation-panel-zai"] h2')).toHaveText(
       "Z.AI · Automation",
     );
+    expect(await $$('[data-testid="automation-loading-skeleton"]')).toHaveLength(
+      0,
+    );
+    expect(await $$('[data-testid^="kickoff-loading-"]')).toHaveLength(0);
     await expect($('[data-testid="automation-panel-kimi"]')).not.toExist();
   });
 

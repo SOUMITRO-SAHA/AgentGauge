@@ -56,6 +56,7 @@ describe("scheduled kickoff", () => {
     );
     await expectDisplayed('[data-testid="kickoff-model-codex"]');
     await expectDisplayed('[data-testid="kickoff-model-zai"]');
+    expect(await $$('[data-testid^="kickoff-loading-"]')).toHaveLength(0);
     await expect($('[data-testid="kickoff-toggle-codex"]')).toHaveAttribute(
       "aria-pressed",
       "false",

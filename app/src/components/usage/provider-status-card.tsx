@@ -7,6 +7,7 @@ import { ArrowClockwise, CheckCircle, Terminal, Warning } from "@phosphor-icons/
 import { cliDetectionAtom } from "~/atoms";
 import { PANEL } from "~/components/dashboard/panel";
 import { Button } from "~/components/ui/button";
+import { Skeleton } from "~/components/ui/skeleton";
 import { cn } from "~/lib/utils";
 import type * as Ipc from "~/lib/ipc";
 
@@ -39,9 +40,30 @@ export function ProviderStatusCard() {
         <h2 className="font-display text-sm font-semibold text-foreground">CLI detection</h2>
         {AsyncResult.match(result, {
           onInitial: () => (
-            <div className="flex flex-col gap-3" data-testid="status-loading">
-              <div className="h-4 w-40 animate-pulse rounded bg-muted" />
-              <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+            <div
+              className="flex flex-col gap-3"
+              data-testid="status-loading"
+              role="status"
+              aria-label="Checking installed CLIs"
+            >
+              <div className="flex items-start gap-3">
+                <Skeleton className="mt-0.5 size-4 rounded-full" aria-hidden="true" />
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  <Skeleton className="h-4 w-36" aria-hidden="true" />
+                  <Skeleton className="h-3 w-3/4" aria-hidden="true" />
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Skeleton className="mt-0.5 size-4 rounded-full" aria-hidden="true" />
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  <Skeleton className="h-4 w-40" aria-hidden="true" />
+                  <Skeleton className="h-3 w-2/3" aria-hidden="true" />
+                </div>
+              </div>
+              <Skeleton
+                className="h-3 w-full border-t border-border/60 pt-3"
+                aria-hidden="true"
+              />
             </div>
           ),
           onSuccess: (success) => (

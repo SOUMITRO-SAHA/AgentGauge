@@ -23,6 +23,7 @@ import { Play, Stop } from "@phosphor-icons/react";
 
 import { automationAtom, kickoffAtom, subscriptionsAtom } from "~/atoms";
 import { Button } from "~/components/ui/button";
+import { Skeleton } from "~/components/ui/skeleton";
 import { KickoffSection } from "~/components/automation/kickoff-section";
 import { ViewHeader } from "~/components/views/view-header";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
@@ -71,13 +72,7 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
       />
 
       {AsyncResult.match(automation, {
-        onInitial: () => (
-          <section className={PANEL} data-testid="automation-loading">
-            <p className="text-sm text-muted-foreground">
-              Checking the monitors…
-            </p>
-          </section>
-        ),
+        onInitial: () => <AutomationLoadingSkeleton />,
         onFailure: () => (
           <p className="text-sm text-destructive" data-testid="automation-error">
             The app could not be reached.
@@ -104,6 +99,64 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
         window. Monitor choices are remembered and resume when AgentGauge opens.
       </p>
     </div>
+  );
+}
+
+function AutomationLoadingSkeleton() {
+  return (
+    <section className={PANEL} data-testid="automation-loading">
+      <div
+        className="flex flex-col gap-4"
+        data-testid="automation-loading-skeleton"
+        role="status"
+        aria-label="Loading automation settings"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <Skeleton className="h-4 w-36" aria-hidden="true" />
+          <Skeleton className="size-8" aria-hidden="true" />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Skeleton className="h-4 w-20" aria-hidden="true" />
+          <Skeleton className="h-8 w-20 rounded-md" aria-hidden="true" />
+        </div>
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-3 w-20" aria-hidden="true" />
+          <div className="flex justify-between gap-3">
+            <Skeleton className="h-4 w-32" aria-hidden="true" />
+            <Skeleton className="h-4 w-24" aria-hidden="true" />
+          </div>
+          <div className="flex justify-between gap-3">
+            <Skeleton className="h-4 w-36" aria-hidden="true" />
+            <Skeleton className="h-4 w-24" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+          <Skeleton className="h-3 w-12" aria-hidden="true" />
+          <div className="flex justify-between gap-3">
+            <Skeleton className="h-4 w-20" aria-hidden="true" />
+            <Skeleton className="h-4 w-24" aria-hidden="true" />
+          </div>
+          <div className="flex justify-between gap-3">
+            <Skeleton className="h-4 w-16" aria-hidden="true" />
+            <Skeleton className="h-4 w-24" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+          <Skeleton className="h-3 w-32" aria-hidden="true" />
+          <Skeleton className="h-4 w-full" aria-hidden="true" />
+          <div className="flex flex-wrap gap-3">
+            <Skeleton
+              className="h-9 w-full max-w-56 rounded-md"
+              aria-hidden="true"
+            />
+            <Skeleton
+              className="h-9 w-full max-w-56 rounded-md"
+              aria-hidden="true"
+            />
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 

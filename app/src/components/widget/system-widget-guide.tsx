@@ -4,6 +4,7 @@ import { CheckCircle, WarningCircle } from "@phosphor-icons/react";
 
 import { systemWidgetAtom } from "~/atoms";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
+import { Skeleton } from "~/components/ui/skeleton";
 
 import type { SystemWidgetStatus } from "~/lib/ipc";
 
@@ -42,11 +43,7 @@ export function SystemWidgetGuide() {
       />
 
       {AsyncResult.match(widget, {
-        onInitial: () => (
-          <p className="text-sm text-muted-foreground">
-            Checking this Mac for widget support…
-          </p>
-        ),
+        onInitial: () => <WidgetGuideSkeleton />,
         onFailure: () => (
           <p className="text-sm text-destructive">
             The app could not be reached.
@@ -55,6 +52,45 @@ export function SystemWidgetGuide() {
         onSuccess: (result) => <Steps status={result.value} />,
       })}
     </section>
+  );
+}
+
+function WidgetGuideSkeleton() {
+  return (
+    <div
+      className="flex flex-col gap-4"
+      data-testid="widget-loading-skeleton"
+      role="status"
+      aria-label="Checking system widget support"
+    >
+      <div className="flex items-start gap-3">
+        <Skeleton className="mt-0.5 size-4 rounded-full" aria-hidden="true" />
+        <Skeleton className="h-4 w-3/4" aria-hidden="true" />
+      </div>
+      <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+        <div className="flex items-start gap-3">
+          <Skeleton className="mt-0.5 size-5 rounded-full" aria-hidden="true" />
+          <div className="flex flex-1 flex-col gap-2">
+            <Skeleton className="h-4 w-40 max-w-full" aria-hidden="true" />
+            <Skeleton className="h-3 w-full max-w-lg" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="flex items-start gap-3">
+          <Skeleton className="mt-0.5 size-5 rounded-full" aria-hidden="true" />
+          <div className="flex flex-1 flex-col gap-2">
+            <Skeleton className="h-4 w-32 max-w-full" aria-hidden="true" />
+            <Skeleton className="h-3 w-4/5" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="flex items-start gap-3">
+          <Skeleton className="mt-0.5 size-5 rounded-full" aria-hidden="true" />
+          <div className="flex flex-1 flex-col gap-2">
+            <Skeleton className="h-4 w-36 max-w-full" aria-hidden="true" />
+            <Skeleton className="h-3 w-2/3" aria-hidden="true" />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

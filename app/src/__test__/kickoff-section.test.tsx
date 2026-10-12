@@ -17,12 +17,15 @@ import { createElement, type ComponentType } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 type Request = { readonly type: string; readonly kind?: string };
+let kickoffReadRelease: (() => void) | undefined;
 
 beforeEach(() => {
   vi.resetModules();
 });
 
 afterEach(() => {
+  kickoffReadRelease?.();
+  kickoffReadRelease = undefined;
   delete (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__;
   cleanup();
 });
@@ -124,6 +127,27 @@ it("renders opted out with a model picker but no scheduled attempt", async () =>
   expect(screen.getByTestId("kickoff-effort-zai").hasAttribute("disabled")).toBe(
     false,
   );
+});
+
+it("holds the scheduled-kickoff layout while its first read is pending", async () => {
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: () =>
+      new Promise((resolve: (value: unknown) => void) => {
+        kickoffReadRelease = () => resolve(kickoffState({ enabled: false }));
+      }),
+  };
+  const { KickoffSection } = await import("~/components/automation/kickoff-section");
+  render(createElement(KickoffSection as ComponentType<{ kind: string; nowMs: number }>, {
+    kind: "zai",
+    nowMs: Date.now(),
+  }));
+
+  const skeleton = await screen.findByTestId("kickoff-loading-zai");
+  expect(skeleton.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(8);
+
+  kickoffReadRelease?.();
+  expect(await screen.findByTestId("kickoff-section-zai")).toBeTruthy();
+  expect(screen.queryByTestId("kickoff-loading-zai")).toBeNull();
 });
 
 it("renders the schedule, selected model, and countdown once enabled", async () => {

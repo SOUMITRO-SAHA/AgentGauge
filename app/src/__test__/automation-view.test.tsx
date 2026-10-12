@@ -21,6 +21,15 @@ type Request = {
 };
 
 let calls: Array<Record<string, unknown>>;
+let automationReadResolvers: Array<(value: unknown) => void> = [];
+
+function releaseAutomationReads(): void {
+  const reply = {
+    type: "automation",
+    monitors: [monitor("codex"), monitor("zai"), monitor("minimax"), monitor("kimi")],
+  };
+  for (const resolve of automationReadResolvers.splice(0)) resolve(reply);
+}
 
 function monitor(
   kind: string,
@@ -196,8 +205,49 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  releaseAutomationReads();
   delete (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__;
   cleanup();
+});
+
+it("uses a shaped monitor-card skeleton until the first read completes", async () => {
+  automationReadResolvers = [];
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: ({ request }: { request: Request }) => {
+      if (request.type === "openCodeSubscriptions") {
+        return { type: "openCodeSubscriptions", subscriptions: [] };
+      }
+      if (request.type === "automationState") {
+        return new Promise((resolve: (value: unknown) => void) => {
+          automationReadResolvers.push(resolve);
+        });
+      }
+      if (request.type === "kickoffState") {
+        return {
+          type: "kickoff",
+          state: { subscriptions: [], scheduler: { supported: false, installed: false } },
+        };
+      }
+      return {
+        type: "failure",
+        error: { kind: "protocolMismatch", message: `unexpected request ${request.type}` },
+      };
+    },
+  };
+  const { AutomationView } = await import("~/components/views/automation-view");
+  render(
+    createElement(AutomationView as ComponentType<{ visible: boolean }>, {
+      visible: true,
+    }),
+  );
+
+  const skeleton = await screen.findByTestId("automation-loading-skeleton");
+  expect(skeleton.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(8);
+  expect(screen.queryByText("Checking the monitors…")).toBeNull();
+
+  releaseAutomationReads();
+  expect(await screen.findByTestId("automation-panel-codex")).toBeTruthy();
+  expect(screen.queryByTestId("automation-loading-skeleton")).toBeNull();
 });
 
 it("gives every connected sub its own monitor card with its own status", async () => {
