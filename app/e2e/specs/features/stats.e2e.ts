@@ -529,4 +529,41 @@ describe("stats", () => {
     // Exactly one activity view per tab.
     expect(reading.heatmaps).toBe(1);
   });
+
+  it("ranks the projects the tokens went to, without pricing what it cannot", async () => {
+    await dashboardLive();
+    await gotoView("stats");
+
+    await clickDisplayed('[data-testid="stats-tab-codex"]');
+    await expectDisplayed('[data-testid="stats-projects"]');
+
+    const rows = await browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid="stats-project-row"]')).map(
+        (row) =>
+          (row as HTMLElement).textContent?.replace(/\s+/g, " ").trim() ?? "",
+      ),
+    );
+
+    // Ranked heaviest first, by the directory the turns ran in.
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toContain("ai-sub-stats-widget");
+    expect(rows[1]).toContain("maximize-app-mono");
+    expect(rows[2]).toContain("bookmark-hub");
+
+    // A priced project carries its cost.
+    expect(rows[0]).toContain("$96.40");
+    // An unpriced one shows tokens instead — never a $0 that reads as free.
+    expect(rows[2]).not.toContain("$0");
+    expect(rows[2]).toContain("tokens");
+
+    // No absolute path anywhere: the label is the directory's basename, so no
+    // account name reaches the screen.
+    const panel = await browser.execute(
+      () =>
+        document
+          .querySelector('[data-testid="stats-projects"]')
+          ?.textContent ?? "",
+    );
+    expect(panel).not.toContain("/Users/");
+  });
 });

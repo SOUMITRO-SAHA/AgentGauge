@@ -25,8 +25,8 @@ use std::path::Path;
 use rusqlite::{params_from_iter, Connection, OpenFlags};
 
 use crate::shared::domain::{
-    bundled_price_catalog, price_local_model_with_catalog, LocalDayUsage, LocalModelUsage,
-    LocalUsage,
+    bundled_price_catalog, price_local_model_with_catalog, project_name, LocalDayUsage,
+    LocalModelUsage, LocalProjectUsage, LocalUsage, NO_PROJECT,
 };
 
 /// The table this module prefers. Discovered by shape, so a rename degrades
@@ -58,6 +58,9 @@ struct SessionRow {
     cache_read: u64,
     cache_write: u64,
     created_ms: i64,
+    /// The working directory as stored, or empty when the database predates
+    /// the column.
+    directory: String,
 }
 
 impl SessionRow {
@@ -87,10 +90,19 @@ pub fn read_local_usage(path: &Path, provider_ids: &[&str]) -> Option<LocalUsage
 /// same shape and never touch a developer's real OpenCode data.
 fn read_from(connection: &Connection, provider_ids: &[&str]) -> Option<LocalUsage> {
     let table = discover_sessions_table(connection)?;
+    // The directory column is how a session names its working directory, and
+    // an older database does not have one. Reading it is then impossible and
+    // the leaderboard is simply absent, which is a fact about the data — the
+    // rest of the reading is unaffected.
+    let directory = if has_column(connection, &table, "directory") {
+        "directory"
+    } else {
+        "''"
+    };
     let sql = format!(
         "SELECT json_extract(model, '$.providerID'), json_extract(model, '$.id'), \
          tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, \
-         tokens_cache_write, time_created \
+         tokens_cache_write, time_created, {directory} \
          FROM {table} \
          WHERE json_valid(model) \
            AND json_extract(model, '$.providerID') IN ({})",
@@ -125,6 +137,9 @@ fn read_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         cache_read: non_negative(row, 5),
         cache_write: non_negative(row, 6),
         created_ms: row.get(7)?,
+        // The full path, because two directories can share a basename and
+        // merging them would be a dishonest row. Only the basename is shown.
+        directory: row.get(8).unwrap_or_default(),
     })
 }
 
@@ -202,8 +217,11 @@ fn summarize(rows: Vec<SessionRow>) -> LocalUsage {
 
     let first_day = days.first().map(|(day, _)| day.clone());
     let last_day = days.last().map(|(day, _)| day.clone());
+
+    let projects = rank_projects(&rows, catalog.as_ref());
     LocalUsage {
         models,
+        projects,
         days: days
             .into_iter()
             .map(|(day, tokens)| LocalDayUsage { day, tokens })
@@ -217,6 +235,99 @@ fn summarize(rows: Vec<SessionRow>) -> LocalUsage {
         first_day,
         last_day,
     }
+}
+
+/// Folds sessions into one row per working directory, ranked by tokens.
+///
+/// A project's cost is priced per `(directory, provider, model)` group rather
+/// than by splitting a project's total across models, because a share of an
+/// exact total is an estimate wearing an exact number's clothes. One unpriced
+/// model leaves that project's cost `None`.
+///
+/// Grouping keys on the full directory while displaying only its basename, so
+/// two projects that happen to share a name stay two rows.
+fn rank_projects(
+    rows: &[SessionRow],
+    catalog: Option<&serde_json::Value>,
+) -> Vec<LocalProjectUsage> {
+    // Keyed by project, provider and model, because pricing needs the provider
+    // and two models inside one project are two prices, not one.
+    let mut grouped: Vec<(String, String, LocalModelUsage)> = Vec::new();
+    for row in rows {
+        let project = project_name(row.directory.trim())
+            .unwrap_or(NO_PROJECT)
+            .to_string();
+        match grouped
+            .iter_mut()
+            .find(|(existing_project, provider, model)| {
+                existing_project == &project
+                    && provider == &row.provider_id
+                    && model.id == row.model_id
+            }) {
+            Some((_, _, model)) => {
+                model.input += row.input;
+                model.cached_input += row.cache_read.min(row.input);
+                model.cache_write += row.cache_write;
+                model.output += row.output;
+                model.reasoning += row.reasoning.min(row.output);
+                model.responses += 1;
+            }
+            None => grouped.push((
+                project,
+                row.provider_id.clone(),
+                LocalModelUsage {
+                    id: row.model_id.clone(),
+                    display_name: row.model_id.clone(),
+                    input: row.input,
+                    cached_input: row.cache_read.min(row.input),
+                    cache_write: row.cache_write,
+                    output: row.output,
+                    reasoning: row.reasoning.min(row.output),
+                    responses: 1,
+                    cost_usd: None,
+                },
+            )),
+        }
+    }
+
+    let mut projects: Vec<LocalProjectUsage> = Vec::new();
+    for (project, provider, mut model) in grouped {
+        let priced = match catalog {
+            Some(catalog) => price_local_model_with_catalog(&mut model, &provider, catalog),
+            None => false,
+        };
+        let entry = match projects.iter_mut().find(|entry| entry.name == project) {
+            Some(entry) => entry,
+            None => {
+                projects.push(LocalProjectUsage {
+                    name: project.clone(),
+                    input: 0,
+                    output: 0,
+                    responses: 0,
+                    cost_usd: Some(0.0),
+                });
+                projects.last_mut().expect("just pushed")
+            }
+        };
+        entry.input += model.input;
+        entry.output += model.output;
+        entry.responses += model.responses;
+        if priced {
+            entry.cost_usd =
+                Some(entry.cost_usd.unwrap_or_default() + model.cost_usd.unwrap_or_default());
+        } else {
+            // One unpriced model makes the whole row unknown rather than low.
+            entry.cost_usd = None;
+        }
+    }
+
+    projects.sort_by(|left, right| {
+        right
+            .total_tokens()
+            .cmp(&left.total_tokens())
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    projects
 }
 
 /// The first table carrying every column the aggregation needs.
@@ -246,6 +357,24 @@ fn discover_sessions_table(connection: &Connection) -> Option<String> {
 }
 
 /// Whether a table has every pinned column. Extra columns are fine.
+/// Whether a table carries one named column.
+fn has_column(connection: &Connection, table: &str, column: &str) -> bool {
+    let Ok(mut statement) = connection.prepare(&format!("PRAGMA table_info(\"{table}\")")) else {
+        return false;
+    };
+    let Ok(mut rows) = statement.query([]) else {
+        return false;
+    };
+    while let Ok(Some(row)) = rows.next() {
+        if let Ok(present) = row.get::<_, String>(1) {
+            if present == column {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn table_has_columns(connection: &Connection, table: &str) -> bool {
     let Ok(mut statement) = connection.prepare(&format!("PRAGMA table_info(\"{table}\")")) else {
         return false;
@@ -316,7 +445,8 @@ mod tests {
                     tokens_cache_write INTEGER,
                     model TEXT,
                     time_created INTEGER,
-                    time_updated INTEGER
+                    time_updated INTEGER,
+                    directory TEXT
                 );"
             ))
             .expect("sessions table");
@@ -337,6 +467,8 @@ mod tests {
         reasoning: i64,
         cache_read: i64,
         created_ms: i64,
+        /// The working directory, as the sessions table stores it.
+        directory: &'a str,
     }
 
     fn insert_into(connection: &Connection, table: &str, row: Session<'_>) {
@@ -345,8 +477,8 @@ mod tests {
                 &format!(
                     "INSERT INTO {table} (id, cost, tokens_input, tokens_output,
                  tokens_reasoning, tokens_cache_read, tokens_cache_write, model,
-                 time_created, time_updated)
-                 VALUES (?1, 0.0, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?7)"
+                 time_created, time_updated, directory)
+                 VALUES (?1, 0.0, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?7, ?8)"
                 ),
                 rusqlite::params![
                     format!("{}-{}-{}", row.provider, row.model, row.created_ms),
@@ -359,9 +491,79 @@ mod tests {
                         row.model, row.provider
                     ),
                     row.created_ms,
+                    row.directory,
                 ],
             )
             .expect("insert session");
+    }
+
+    #[test]
+    fn sessions_fold_into_one_ranked_row_per_working_directory() {
+        let connection = sessions_db(SESSIONS_TABLE);
+        for (directory, created_ms) in [
+            ("/Users/dev/code/app", 1_790_000_000_000_i64),
+            ("/Users/dev/code/app", 1_790_100_000_000),
+            ("/Users/dev/code/app/libryva", 1_790_200_000_000),
+            ("/Users/dev/code/other", 1_790_300_000_000),
+        ] {
+            insert(
+                &connection,
+                Session {
+                    provider: "minimax-coding-plan",
+                    model: "MiniMax-M3",
+                    input: 100,
+                    output: 10,
+                    reasoning: 0,
+                    cache_read: 0,
+                    created_ms,
+                    directory,
+                },
+            );
+        }
+
+        let usage = read_from(&connection, &["minimax-coding-plan"]).expect("usage");
+
+        // Ranked by tokens, labelled by the directory's basename so no
+        // absolute path or account name reaches the screen.
+        assert_eq!(
+            usage
+                .projects
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["app", "libryva", "other"]
+        );
+        assert_eq!(usage.projects[0].input, 200);
+        assert_eq!(usage.projects[0].responses, 2);
+        // Two directories that share a basename would otherwise merge into
+        // one dishonest row, so the full path keys the grouping even though
+        // only the basename is displayed.
+        assert_eq!(usage.projects[1].input, 100);
+        assert_eq!(usage.projects[2].input, 100);
+    }
+
+    #[test]
+    fn a_session_with_no_directory_still_counts_against_somewhere() {
+        let connection = sessions_db(SESSIONS_TABLE);
+        insert(
+            &connection,
+            Session {
+                provider: "minimax-coding-plan",
+                model: "MiniMax-M3",
+                input: 500,
+                output: 50,
+                reasoning: 0,
+                cache_read: 0,
+                created_ms: 1_790_000_000_000,
+                directory: "",
+            },
+        );
+
+        let usage = read_from(&connection, &["minimax-coding-plan"]).expect("usage");
+
+        assert_eq!(usage.projects.len(), 1);
+        assert_eq!(usage.projects[0].name, NO_PROJECT);
+        assert_eq!(usage.projects[0].input, 500);
     }
 
     #[test]
@@ -377,6 +579,7 @@ mod tests {
                 reasoning: 50,
                 cache_read: 800,
                 created_ms: 1_790_000_000_000,
+                directory: "/Users/dev/code/app",
             },
         );
         insert(
@@ -389,6 +592,7 @@ mod tests {
                 reasoning: 100,
                 cache_read: 900,
                 created_ms: 1_790_100_000_000,
+                directory: "/Users/dev/code/app",
             },
         );
         insert(
@@ -401,6 +605,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 0,
                 created_ms: 1_790_200_000_000,
+                directory: "/Users/dev/code/app",
             },
         );
 
@@ -431,6 +636,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 0,
                 created_ms: 1_790_000_000_000,
+                directory: "/Users/dev/code/app",
             },
         );
         insert(
@@ -443,6 +649,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 0,
                 created_ms: 1_790_000_000_000,
+                directory: "/Users/dev/code/app",
             },
         );
 
@@ -466,6 +673,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 0,
                 created_ms: 1_790_000_000_000,
+                directory: "/Users/dev/code/app",
             },
         );
 
@@ -486,6 +694,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 1_000_000,
                 created_ms: 1_790_000_000_000,
+                directory: "/Users/dev/code/app",
             },
         );
 
@@ -514,6 +723,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 0,
                 created_ms: 1_790_000_000_000,
+                directory: "/Users/dev/code/app",
             },
         );
 
@@ -538,6 +748,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 0,
                 created_ms: 1_790_000_000_000,
+                directory: "/Users/dev/code/app",
             },
         );
 
@@ -574,6 +785,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 0,
                 created_ms: 1_790_000_000_000,
+                directory: "/Users/dev/code/app",
             },
         );
         connection
@@ -606,6 +818,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 0,
                 created_ms: 1_767_225_600_000,
+                directory: "/Users/dev/code/app",
             },
         );
         insert(
@@ -618,6 +831,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 0,
                 created_ms: 1_791_709_057_570,
+                directory: "/Users/dev/code/app",
             },
         );
         insert(
@@ -630,6 +844,7 @@ mod tests {
                 reasoning: 0,
                 cache_read: 0,
                 created_ms: 0,
+                directory: "/Users/dev/code/app",
             },
         );
 

@@ -336,6 +336,23 @@ export const LocalModelUsage = Schema.Struct({
 });
 export type LocalModelUsage = typeof LocalModelUsage.Type;
 
+/**
+ * One project's usage, from the working directory its turns ran in.
+ *
+ * `name` is the directory's basename: an absolute path would put the account
+ * name on screen. `costUsd` is null when the price list could not price every
+ * model the project used, so the view shows token counts rather than a $0 that
+ * reads as free.
+ */
+export const LocalProjectUsage = Schema.Struct({
+  name: Schema.String,
+  input: Schema.Number,
+  output: Schema.Number,
+  responses: Schema.Number,
+  costUsd: Schema.NullOr(Schema.Number),
+});
+export type LocalProjectUsage = typeof LocalProjectUsage.Type;
+
 /** One calendar day of local activity, ISO `YYYY-MM-DD` in UTC. */
 export const LocalDayUsage = Schema.Struct({
   day: Schema.String,
@@ -353,6 +370,8 @@ export type LocalDayUsage = typeof LocalDayUsage.Type;
  */
 export const LocalUsage = Schema.Struct({
   models: Schema.Array(LocalModelUsage),
+  /** Ranked by tokens. Empty when the source records no working directory. */
+  projects: Schema.Array(LocalProjectUsage),
   days: Schema.Array(LocalDayUsage),
   /** API-equivalent cost of every priced model. Exact: the logs carry a real
    * per-response split, so no blended average is involved. */

@@ -121,6 +121,7 @@ function codexAccountUsage() {
     dailyUsageBuckets: [{ startDate: "2026-10-07", tokens: 2300 }],
     models: [],
     local: {
+      projects: [],
       models: [
         {
           id: "gpt-5.5",
@@ -393,4 +394,52 @@ it("does not stack two heatmaps on a tab that has both series", async () => {
   expect(
     document.querySelectorAll("[data-testid='stats-activity-heatmap']").length,
   ).toBe(1);
+});
+
+it("ranks projects by tokens and shows cost only where it is known", () => {
+  render(
+    createElement(LocalLogPanel, {
+      usage: {
+        ...codexAccountUsage().local,
+        projects: [
+          {
+            name: "widget",
+            input: 400,
+            output: 40,
+            responses: 8,
+            costUsd: 1.25,
+          },
+          {
+            name: "bookmark-hub",
+            input: 900,
+            output: 100,
+            responses: 20,
+            costUsd: null,
+          },
+        ],
+      },
+      source: "Codex",
+    }),
+  );
+
+  const rows = screen.getAllByTestId("stats-project-row");
+  // Ranked by tokens, so the heavier project leads regardless of input order.
+  expect(rows[0].textContent ?? "").toContain("bookmark-hub");
+  expect(rows[1].textContent ?? "").toContain("widget");
+
+  // An unpriced project shows tokens, never a $0 that reads as free.
+  expect(rows[0].textContent ?? "").not.toContain("$0");
+  expect(rows[0].textContent ?? "").toContain("1,000 tokens");
+  expect(rows[1].textContent ?? "").toContain("$1.25");
+});
+
+it("shows no leaderboard when the source records no working directory", () => {
+  render(
+    createElement(LocalLogPanel, {
+      usage: { ...codexAccountUsage().local, projects: [] },
+      source: "Codex",
+    }),
+  );
+
+  expect(screen.queryByTestId("stats-projects")).toBeNull();
 });

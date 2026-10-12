@@ -216,6 +216,54 @@ impl LocalModelUsage {
     }
 }
 
+/// One project's token totals, from the directory its turns ran in.
+///
+/// The name is the directory's **basename**, never the full path: an absolute
+/// path leaks the account name and is unreadable in a ranked list. `cost_usd`
+/// is `None` when the price list could not price every model the project used,
+/// so the caller shows token counts instead of a `$0` that means "unknown".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalProjectUsage {
+    pub name: String,
+    /// Prompt tokens, cache reads included.
+    pub input: u64,
+    /// Completion tokens, reasoning included.
+    pub output: u64,
+    pub responses: u64,
+    #[serde(rename = "costUsd")]
+    pub cost_usd: Option<f64>,
+}
+
+impl LocalProjectUsage {
+    pub fn total_tokens(&self) -> u64 {
+        self.input + self.output
+    }
+}
+
+/// The project name for usage whose source recorded no working directory.
+///
+/// Shown as a visible row rather than dropped: the usage is real, and a
+/// leaderboard whose total disagrees with the panel above it is the worse lie.
+pub const NO_PROJECT: &str = "No project recorded";
+
+/// The label for a working directory: its last path segment.
+///
+/// An absolute path would put the account name on screen and read badly in a
+/// ranked list, so only the basename travels. Grouping still keys on the full
+/// path, because two unrelated projects can share a basename and merging them
+/// would be a dishonest row.
+///
+/// `None` when the directory is empty or is a filesystem root, which has no
+/// name to show.
+pub fn project_name(directory: &str) -> Option<&str> {
+    let trimmed = directory.trim_end_matches('/');
+    trimmed
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty() && *name != trimmed)
+}
+
 /// One calendar day's total tokens across every model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -239,6 +287,10 @@ pub struct LocalDayUsage {
 #[serde(rename_all = "camelCase")]
 pub struct LocalUsage {
     pub models: Vec<LocalModelUsage>,
+    /// Ranked by tokens. Empty when the source records no working directory,
+    /// which is a fact about the data rather than a failure to read it.
+    #[serde(default)]
+    pub projects: Vec<LocalProjectUsage>,
     pub days: Vec<LocalDayUsage>,
     /// API-equivalent cost of every priced model, summed. Zero when nothing
     /// could be priced — paired with `unpriced_tokens` so the two read
@@ -968,6 +1020,7 @@ mod tests {
             daily_usage_buckets: Vec::new(),
             models: Vec::new(),
             local: Some(LocalUsage {
+                projects: Vec::new(),
                 models: vec![LocalModelUsage {
                     id: "gpt-6-luna".to_string(),
                     display_name: "GPT-6 Luna".to_string(),

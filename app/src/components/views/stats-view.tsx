@@ -495,6 +495,10 @@ export function LocalLogPanel({
           />
         ))}
       </div>
+      <ProjectLeaderboard
+        projects={usage.projects}
+        totalTokens={totalTokens}
+      />
       <ActivityHeatmap
         days={usage.days}
         firstDay={usage.firstDay}
@@ -711,6 +715,93 @@ function LocalModelRow({
           />
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The project leaderboard: which working directory the tokens went to.
+ *
+ * Ranked by tokens, with the cost share beside it where it is known. A
+ * project whose models the catalog could not price shows its token share
+ * alone — a `$0` there would read as free rather than as unknown, which is the
+ * same lie the model mix avoids.
+ */
+export function ProjectLeaderboard({
+  projects,
+  totalTokens,
+}: {
+  readonly projects: readonly Ipc.LocalProjectUsage[];
+  readonly totalTokens: number;
+}) {
+  // Re-sorted rather than trusting the caller's order. Both readers already
+  // rank their rows, but a leaderboard that silently showed whatever order it
+  // was handed would be wrong in a way nobody would notice.
+  const ranked = useMemo(
+    () =>
+      [...projects].sort(
+        (left, right) =>
+          right.input + right.output - (left.input + left.output) ||
+          left.name.localeCompare(right.name),
+      ),
+    [projects],
+  );
+
+  if (ranked.length === 0) return null;
+
+  const pricedTotal = projects.reduce(
+    (sum, project) => sum + (project.costUsd ?? 0),
+    0,
+  );
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="stats-projects">
+      <h4 className="text-xs font-medium text-foreground">Which project</h4>
+      {ranked.map((project) => {
+        const tokens = project.input + project.output;
+        const tokenSharePct =
+          totalTokens > 0 ? Math.round((tokens / totalTokens) * 100) : 0;
+        const costSharePct =
+          project.costUsd !== null && pricedTotal > 0
+            ? Math.round((project.costUsd / pricedTotal) * 100)
+            : null;
+        return (
+          <div
+            key={project.name}
+            className="flex flex-col gap-1.5"
+            data-testid="stats-project-row"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="truncate text-sm text-foreground">
+                {project.name}
+              </span>
+              <span className="text-xs text-muted-foreground tabular">
+                {project.costUsd !== null
+                  ? `≈ ${formatUsd(project.costUsd)}`
+                  : `${formatCompactCount(tokens)} tokens`}
+              </span>
+            </div>
+            <ShareBar
+              label="Tokens"
+              widthPercent={tokenSharePct}
+              caption={`${tokenSharePct}% of tokens · ${formatCompactCount(tokens)} · ${project.responses} responses`}
+              barClassName="bg-chart-1"
+            />
+            {costSharePct !== null ? (
+              <ShareBar
+                label="Est. cost"
+                widthPercent={costSharePct}
+                caption={`${costSharePct}% of est. cost`}
+                barClassName="bg-chart-2"
+              />
+            ) : null}
+          </div>
+        );
+      })}
+      <p className="text-xs text-muted-foreground">
+        Ranked by tokens, from the directory each turn ran in. A project with
+        no reference price shows its token share alone.
+      </p>
     </div>
   );
 }

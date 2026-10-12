@@ -20,7 +20,10 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use crate::shared::domain::{price_local_models, LocalDayUsage, LocalModelUsage, LocalUsage};
+use crate::shared::domain::{
+    price_local_models, project_name, LocalDayUsage, LocalModelUsage, LocalProjectUsage,
+    LocalUsage, NO_PROJECT,
+};
 
 /// The price-list provider Codex's model slugs are priced against. Codex
 /// reports its own slugs, which are the catalog's OpenAI ids.
@@ -28,6 +31,21 @@ const CODEX_PRICE_PROVIDER: &str = "openai";
 
 /// The model bucket for responses whose turn never received a `turn_context`.
 const UNKNOWN_MODEL: &str = "unknown";
+
+/// What one turn's `turn_context` said about where and how it ran.
+#[derive(Debug, Default)]
+struct TurnRecord {
+    model: Option<String>,
+    /// The directory's basename, already reduced from the full path.
+    project: Option<String>,
+}
+
+/// Per-project token totals, kept as one split per model.
+///
+/// The split is what makes the cost exact rather than an estimate: a project
+/// that used two models is priced by summing two priced models, not by
+/// applying one blended rate to a total.
+type ProjectModels = BTreeMap<String, ModelTokens>;
 
 /// How deep the rollout walk descends. Sessions nest `YYYY/MM/DD` under
 /// `sessions/`; the cap only exists so a pathological tree cannot spin.
@@ -82,6 +100,9 @@ struct TurnContextPayload {
     turn_id: Option<String>,
     #[serde(default)]
     model: Option<String>,
+    /// The working directory the turn ran in.
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -110,6 +131,7 @@ struct TokenUsagePayload {
 #[derive(Debug, Default)]
 struct Scanner {
     models: BTreeMap<String, ModelTokens>,
+    projects: BTreeMap<String, ProjectModels>,
     days: BTreeMap<String, u64>,
     files_scanned: u64,
     files_unreadable: u64,
@@ -124,7 +146,9 @@ impl Scanner {
             return;
         };
         // Turn ids are thread-scoped, so the join table belongs to one file.
-        let mut turn_models: HashMap<String, String> = HashMap::new();
+        // A turn's model and its directory arrive in the same record, so they
+        // travel together.
+        let mut turns: HashMap<String, TurnRecord> = HashMap::new();
         // Most lines in a rollout are conversation content, not accounting.
         // Checking for the two record kinds first keeps a multi-hundred-
         // megabyte history from paying full JSON parse for every line.
@@ -144,8 +168,18 @@ impl Scanner {
                     if let Ok(context) =
                         serde_json::from_value::<TurnContextPayload>(envelope.payload)
                     {
-                        if let (Some(turn_id), Some(model)) = (context.turn_id, context.model) {
-                            turn_models.insert(turn_id, model);
+                        if let Some(turn_id) = context.turn_id {
+                            turns.insert(
+                                turn_id,
+                                TurnRecord {
+                                    model: context.model,
+                                    project: context
+                                        .cwd
+                                        .as_deref()
+                                        .and_then(project_name)
+                                        .map(str::to_string),
+                                },
+                            );
                         }
                     }
                 }
@@ -154,13 +188,17 @@ impl Scanner {
                         serde_json::from_value::<TokenUsagePayload>(envelope.payload)
                     {
                         if let Some(usage) = payload.usage {
-                            let model = payload
+                            let turn = payload
                                 .turn_id
                                 .as_ref()
-                                .and_then(|turn_id| turn_models.get(turn_id))
-                                .cloned()
+                                .and_then(|turn_id| turns.get(turn_id));
+                            let model = turn
+                                .and_then(|turn| turn.model.clone())
                                 .unwrap_or_else(|| UNKNOWN_MODEL.to_string());
-                            self.record_usage(&envelope.timestamp, &model, &usage);
+                            let project = turn
+                                .and_then(|turn| turn.project.clone())
+                                .unwrap_or_else(|| NO_PROJECT.to_string());
+                            self.record_usage(&envelope.timestamp, &model, &project, &usage);
                         }
                     }
                 }
@@ -187,6 +225,41 @@ impl Scanner {
         });
         let pricing = price_local_models(&mut models, CODEX_PRICE_PROVIDER);
 
+        let mut projects: Vec<LocalProjectUsage> = self
+            .projects
+            .into_iter()
+            .map(|(name, per_model)| {
+                let mut splits: Vec<LocalModelUsage> = per_model
+                    .into_iter()
+                    .map(|(model, tokens)| tokens.into_usage(&model))
+                    .collect();
+                // A project's cost is exact only when the catalog priced every
+                // model it used. One unpriced model leaves the whole row
+                // `None`, because a partial sum beside a token total reads as
+                // a complete number that is quietly too low.
+                let project_pricing = price_local_models(&mut splits, CODEX_PRICE_PROVIDER);
+                let fully_priced = project_pricing.unpriced_tokens == 0;
+                let cost_usd = if fully_priced {
+                    Some(project_pricing.total_cost_usd)
+                } else {
+                    None
+                };
+                LocalProjectUsage {
+                    name,
+                    input: splits.iter().map(|split| split.input).sum(),
+                    output: splits.iter().map(|split| split.output).sum(),
+                    responses: splits.iter().map(|split| split.responses).sum(),
+                    cost_usd,
+                }
+            })
+            .collect();
+        projects.sort_by(|left, right| {
+            right
+                .total_tokens()
+                .cmp(&left.total_tokens())
+                .then_with(|| left.name.cmp(&right.name))
+        });
+
         let days: Vec<LocalDayUsage> = self
             .days
             .into_iter()
@@ -194,6 +267,7 @@ impl Scanner {
             .collect();
         LocalUsage {
             models,
+            projects,
             first_day: days.first().map(|day| day.day.clone()),
             last_day: days.last().map(|day| day.day.clone()),
             days,
@@ -206,7 +280,7 @@ impl Scanner {
         }
     }
 
-    fn record_usage(&mut self, timestamp: &str, model: &str, usage: &ResponseUsage) {
+    fn record_usage(&mut self, timestamp: &str, model: &str, project: &str, usage: &ResponseUsage) {
         let tokens = self.models.entry(model.to_string()).or_default();
         tokens.input += usage.input_tokens;
         tokens.cached_input += usage.cached_input_tokens.min(usage.input_tokens);
@@ -214,6 +288,19 @@ impl Scanner {
         tokens.output += usage.output_tokens;
         tokens.reasoning += usage.reasoning_output_tokens.min(usage.output_tokens);
         tokens.responses += 1;
+
+        let split = self
+            .projects
+            .entry(project.to_string())
+            .or_default()
+            .entry(model.to_string())
+            .or_default();
+        split.input += usage.input_tokens;
+        split.cached_input += usage.cached_input_tokens.min(usage.input_tokens);
+        split.cache_write += usage.cache_write_input_tokens;
+        split.output += usage.output_tokens;
+        split.reasoning += usage.reasoning_output_tokens.min(usage.output_tokens);
+        split.responses += 1;
 
         let day = day_of(timestamp);
         *self.days.entry(day).or_insert(0) += usage.input_tokens + usage.output_tokens;
@@ -472,12 +559,16 @@ mod tests {
     }
 
     fn turn_context(timestamp: &str, turn_id: &str, model: &str) -> String {
+        turn_context_in(timestamp, turn_id, model, "/tmp/project")
+    }
+
+    fn turn_context_in(timestamp: &str, turn_id: &str, model: &str, cwd: &str) -> String {
         record(
             timestamp,
             "turn_context",
             serde_json::json!({
                 "turn_id": turn_id,
-                "cwd": "/tmp/project",
+                "cwd": cwd,
                 "model": model,
                 "effort": "high"
             }),
@@ -697,6 +788,65 @@ mod tests {
         );
         assert_eq!(scan.first_day.as_deref(), Some("2026-09-28"));
         assert_eq!(scan.last_day.as_deref(), Some("2026-10-03"));
+    }
+
+    #[test]
+    fn responses_are_ranked_by_the_project_their_turn_worked_in() {
+        let tree = TempTree::new("projects");
+        tree.write(
+            "sessions/2026/10/01/rollout-a.jsonl",
+            &[
+                turn_context("2026-10-01T10:00:00.000Z", "t1", "gpt-6-luna"),
+                turn_context("2026-10-01T11:00:00.000Z", "t2", "gpt-6-luna"),
+                usage_record("2026-10-01T11:00:10.000Z", "t1", 100, 0, 10, 0),
+                usage_record("2026-10-01T11:00:20.000Z", "t2", 400, 0, 40, 0),
+                String::new(),
+            ]
+            .join("\n"),
+        );
+        tree.write(
+            "archived_sessions/rollout-b.jsonl",
+            &[
+                turn_context_in(
+                    "2026-09-28T08:00:00.000Z",
+                    "t9",
+                    "gpt-5.5",
+                    "/Users/dev/code/widget",
+                ),
+                usage_record("2026-09-28T08:00:10.000Z", "t9", 250, 0, 25, 0),
+                // A response whose turn never got a context is still usage, so
+                // it still belongs somewhere. Dropping it would make the
+                // leaderboard's total disagree with the panel above it.
+                usage_record("2026-09-28T08:00:20.000Z", "t8", 70, 0, 7, 0),
+                String::new(),
+            ]
+            .join("\n"),
+        );
+
+        let usage = scan_codex_home(&tree.0);
+
+        // Ranked by tokens, labelled by the directory's basename so no
+        // absolute path reaches the screen.
+        assert_eq!(
+            usage
+                .projects
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["project", "widget", NO_PROJECT]
+        );
+        assert_eq!(usage.projects[0].input, 500);
+        assert_eq!(usage.projects[0].output, 50);
+        assert_eq!(usage.projects[0].responses, 2);
+        assert_eq!(usage.projects[1].input, 250);
+        assert_eq!(usage.projects[2].input, 70);
+
+        // Priced rows carry their cost; the row whose model the catalog does
+        // not cover carries none, so the UI shows tokens instead of a $0 that
+        // means "unknown".
+        assert!(usage.projects[0].cost_usd.is_some());
+        assert!(usage.projects[1].cost_usd.is_some());
+        assert_eq!(usage.projects[2].cost_usd, None);
     }
 
     #[test]

@@ -93,6 +93,7 @@ function codexAccountUsage() {
     dailyUsageBuckets: [{ startDate: "2026-10-07", tokens: 2300 }],
     models: [],
     local: {
+      projects: [],
       models: [
         {
           id: "gpt-5.5",
@@ -735,6 +736,7 @@ function localOnlyUsage() {
     dailyUsageBuckets: [],
     models: [],
     local: {
+      projects: [],
       models: [
         {
           id: "MiniMax-M3",
