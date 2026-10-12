@@ -180,7 +180,9 @@ Two rules are binding on every change, with no exceptions for small or low-risk 
 
 **Prefer TDD for everything.** Start from the smallest focused test that states the desired behaviour or reproduces the defect. Confirm it fails for the intended reason, then make it pass with the smallest production change, then refactor while it stays green. This applies to UI work, IPC commands, provider modules, and pure helpers alike — not only to "testable" logic.
 
-**A UI change requires e2e coverage.** Any change to what the user sees or does — layout, copy, state rendering, navigation, interaction, or data display — ships with an e2e spec in `app/e2e/specs/features/` asserting the rendered result, not merely that it compiles. Asserting that the change type-checks is not coverage. A UI change without a passing e2e run is unfinished, and the run must actually have been executed. Per task, run only the e2e spec(s) tied to that task's change — the full suite is not required:
+**A UI change requires e2e coverage.** Any change to what the user sees or does — layout, copy, state rendering, navigation, interaction, or data display — ships with an e2e spec in `app/e2e/specs/features/` asserting the rendered result, not merely that it compiles. Asserting that the change type-checks is not coverage. A UI change without a passing e2e run is unfinished, and the run must actually have been executed. Per task, run only the e2e spec(s) tied to that task's change — the full suite is not required.
+
+**One feature, one targeted spec.** Every spec file boots the real binary, so spec count is e2e cost — keep each spec scoped to exactly the feature it covers, and keep it small: a small feature gets a small spec. Never grow an existing spec into a shared dumping ground or assert one feature inside another feature's spec; a new concern gets its own file. When a surface accumulates several specs, group them in a sub-folder under `features/` and register the files under their new paths in the ordered group in `wdio.conf.ts`.
 
 ```sh
 cd app

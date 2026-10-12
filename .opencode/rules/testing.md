@@ -112,10 +112,24 @@ binary** through its native webview.
 - Read the `tauri-e2e-testing` skill before extending the suite; it holds the
   build constraint, mocking, and screenshot details.
   `specs/features/dashboard.e2e.ts` is the pattern.
-- Feature coverage lives in `app/e2e/specs/features/<feature>.e2e.ts`, one file
-  per feature. Every one of those files is listed in the **single ordered
-  group** in `wdio.conf.ts` — the group is what keeps them sequential in one
-  worker. Adding a feature file means adding it to that group, not globbing it.
+- **One targeted spec per feature, kept small.** Feature coverage lives under
+  `app/e2e/specs/features/`, one file per feature or surface, covering only
+  that feature: a small feature gets a small spec. Every file boots the real
+  binary, so spec count is suite cost — never grow an existing file with
+  unrelated coverage and never assert one feature inside another feature's
+  spec. A new concern gets its own file.
+- **Sub-folders under `features/` group related specs.** Once a surface
+  accumulates several specs, move them into a sub-folder (e.g.
+  `features/onboarding/`) rather than flattening ever more files into
+  `features/`; keep the files registered under their new paths.
+- Every feature file is listed in the **single ordered group** in
+  `wdio.conf.ts` — the group is what keeps them sequential in one worker.
+  Adding or moving a feature file means updating that group's paths, never
+  globbing: a glob runs files as parallel instances and the fixtures race.
+- Run only the spec(s) the task touched, **one `--spec` value per
+  invocation** — multiple `--spec` flags run wdio files as racing parallel
+  instances. The full `bun run e2e` is for changes that cut across the suite
+  (boot, fixtures, harness, config) and for harness-level edits.
 - `capabilities.e2e.ts` is a **harness self-test**. If it fails, the harness is
   broken and no other result in that run can be trusted.
 - Always go through `bun run e2e` (it owns the build); `--spec` filtering still
