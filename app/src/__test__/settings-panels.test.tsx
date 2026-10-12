@@ -122,19 +122,30 @@ it("the feedback panel files through the prefilled urls and copies diagnostics",
   );
 });
 
-it("the support panel lists the live funding destinations as links", async () => {
+it("the support panel leads with the minimum and a highlighted primary action", async () => {
   mockDispatch();
   const { SupportPanel } = await import("~/components/settings/support-panel");
   render(createElement(SupportPanel));
 
-  const sponsors = await screen.findByTestId("support-link-github-sponsors");
-  expect(sponsors.textContent).toContain("GitHub Sponsors");
+  const message = await screen.findByTestId("support-message");
+  expect(message.textContent).toContain("$1");
+
+  const sponsors = screen.getByTestId("support-link-github-sponsors");
+  expect(sponsors.textContent).toContain("Sponsor");
+  expect(sponsors.getAttribute("data-variant")).toBe("default");
   const patreon = screen.getByTestId("support-link-patreon");
   expect(patreon.textContent).toContain("Patreon");
+  expect(patreon.getAttribute("data-variant")).toBe("outline");
 
   fireEvent.click(patreon);
   expect(await lastCall()).toEqual({
     type: "openLink",
     url: "https://www.patreon.com/SOUMITROSAHA",
+  });
+
+  fireEvent.click(sponsors);
+  expect(await lastCall()).toEqual({
+    type: "openLink",
+    url: "https://github.com/sponsors/SOUMITRO-SAHA",
   });
 });
