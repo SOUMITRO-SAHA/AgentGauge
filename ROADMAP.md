@@ -1,104 +1,98 @@
 # AgentGauge Roadmap
 
-This roadmap summarizes the product direction in the [Product Requirements Document](docs/PRD.md). It is a sequence of goals and release gates, **not a dated delivery commitment**. Harness capabilities and platform support will be advertised only after they are verified.
+This roadmap summarizes the product direction in the [Product Requirements Document](docs/PRD.md); it is not a dated delivery commitment. The repository's current application version is **0.1.0**. Its launch scope and the rules for keeping new feature work out of that release are recorded in the [v0.1.0 feature lock](docs/releases/v0.1.0-feature-lock.md). An implemented feature is not automatically release-verified.
 
 ## Product direction
 
-AgentGauge is a local-first desktop companion for AI coding harnesses. Its two pillars are:
+AgentGauge is a local-first desktop companion for AI coding harnesses and the coding plans they expose. It presents usage and reset information only where a supported source reports it, keeps source and freshness visible, and provides optional user-controlled kickoff actions where implemented.
 
-- **Subscription observability:** Show trustworthy usage windows, reset information, freshness, and capability gaps from supported local harness interfaces.
-- **User-controlled kickoff:** Optionally send one minimal `Hi` through a selected harness and user-selected model one minute after a verified rollover.
+Codex usage comes from the local `codex app-server`. For the currently supported OpenCode-connected coding plans, AgentGauge discovers plan configuration through OpenCode and reads supported plan data from documented provider coding-plan endpoints using credentials managed by OpenCode. The app does not ask the user to enter credentials or perform sign-in.
 
-The app integrates with coding harnesses, not model-provider APIs. Harnesses own authentication, provider configuration, subscriptions, and credentials. A kickoff consumes quota; it does **not** cause, reset, or extend a provider's usage window.
+A kickoff consumes quota. It does not create, restart, reset, or extend a provider's usage window. The current scheduler follows the latest reported reset and does **not** verify that a rollover occurred; it must not be described as verified-rollover automation.
 
-## Current status
+## Current release: 0.1.0
 
-**In progress — Codex monitoring foundation.** Codex is the only implemented harness. The app reads reported five-hour and weekly usage windows through the local `codex app-server`, tracks freshness, and observes `resetsAt` changes as a rollover-related signal. A manually initiated ping capability exists and consumes quota. Automatic kickoff, model selection, other harness integrations, local activity analytics, and multi-account support are not implemented.
+**Implementation status: feature set recorded and frozen; launch verification and release-policy decisions remain open.** See the [feature lock](docs/releases/v0.1.0-feature-lock.md) for the full implemented-scope inventory, explicit exclusions, and release gates.
 
-macOS is the only platform exercised so far. Windows and Linux support must be verified independently.
+The current implementation includes:
 
-## Integration order
+- Codex five-hour and weekly usage readings, reset timestamps, freshness/status states, and observed changes to reported `resetsAt` values.
+- Supported OpenCode-connected Z.AI, MiniMax, and Kimi coding-plan readings; unsupported or unavailable data is kept distinct from zero.
+- Persisted, read-only rollover monitors per readable connection, with a Home status glance.
+- Per-connection opt-in scheduled kickoff for supported connections, with available model/effort selection, history/status, and macOS background scheduling. Scheduling is based on reported resets, not a positively verified rollover.
+- Local usage analytics and estimated API-equivalent costs with source/coverage distinctions. These are not provider invoices or a unified subscription-usage total.
+- A read-only Processes screen for tracked toolchain process and local-storage information.
+- A macOS WidgetKit extension built separately and manually placed by the user. Gallery availability has not yet been confirmed in the documented verification environment.
+- Onboarding, settings, and durable local state.
 
-1. **Codex** — current integration and first kickoff target.
-2. **OpenCode** — next harness.
-3. **Pi** — third harness.
-4. **Claude Code, Kilo Code, Kimi Code, and other compatible harnesses** — evaluated individually afterward.
+macOS is the only exercised desktop platform. Windows and Linux are not verified. Release readiness is not implied by this feature inventory: native packaging, focused end-to-end checks, the outstanding suite failures, and the policy questions in the feature lock must be closed or explicitly accepted before publishing.
 
-ACP or another prompt interface is not proof that a harness exposes subscription limits or reset times. Each capability is assessed separately. See the PRD for detailed integration requirements.
+## Next roadmap work
 
-## Roadmap phases
+### 1. Release hardening and truthful capability boundaries — In progress
 
-### 0. Codex monitoring foundation — In progress
+- Close the v0.1.0 release gates without adding new features to the locked scope.
+- Reconcile implementation with the PRD on local-history analytics permission, provider coding-plan endpoint use, and kickoff eligibility semantics.
+- Verify whether the embedded macOS widget appears in the system gallery; advertise it only to the degree actually verified.
+- Keep unsupported, stale, unavailable, and unverified states explicit.
 
-- Harden Codex app-server usage reads, five-hour and weekly windows, freshness, and widget behavior.
-- Validate active-context detection and candidate `resetsAt` transitions.
-- Keep unsupported fields and manual ping behavior accurately represented.
+**Gate:** A release owner accepts or resolves each policy question; required checks pass; package and release claims match the tested artifacts.
 
-**Release gate:** Accurate Codex-only status, with no automatic prompts.
+### 2. Verified rollover and automation safety — Planned
 
-### 1. Codex model selection and post-rollover kickoff — Planned
+- Only describe a rollover as verified when fresh source snapshots prove a transition to a new provider-reported window.
+- If scheduled kickoff is brought into alignment with the PRD, send only after that proof, with durable once-per-rollover deduplication and a clear skip/failure record.
+- Preserve per-connection explicit opt-in. Never test against a real account by sending a prompt unless the user explicitly authorizes the quota-consuming action.
 
-- Discover models through the harness and let users select a model for kickoff.
-- Verify model selection on the exact minimal Codex session before sending.
-- Confirm real, fresh rollovers and persist once-per-rollover deduplication.
-- If explicitly enabled, send exactly one `Hi` one minute after a verified rollover.
-- Add enable/pause controls, reset timeline, audit history, skip/failure reasons, and offline handling.
-- Keep automation off by default; skip ambiguous or missed rollovers rather than sending speculative catch-up prompts.
+**Gate:** No early, duplicate, speculative, or unverified sends; otherwise the feature remains clearly labeled as following reported reset times or is disabled.
 
-**Release gate:** Correct model targeting, no duplicate sends, and no early or unverified sends.
+### 3. Broader OpenCode harness integration — Planned
 
-### 2. OpenCode integration — Planned
+- Evaluate OpenCode's documented harness interfaces for connection, model/session discovery, and capability reporting independently from the existing connected-plan readers.
+- Keep session/context usage distinct from subscription allowance. Do not infer reset times or entitlement from ACP/session telemetry.
+- Add automation only if the exact connection exposes verifiable reset semantics and enforces the selected model.
 
-- Add supported ACP connectivity, model/session discovery, and any authorized local status interface needed for usage visibility.
-- Clearly separate session/context usage from subscription allowance.
-- Reuse kickoff only where the subscription window, rollover, and model selection are verified.
-- Provide a truthful partial integration when reset information is unavailable.
+**Gate:** A documented OpenCode capability report and regression coverage; unsupported subscription fields remain explicit.
 
-**Release gate:** OpenCode works within demonstrated capabilities; unsupported subscription statistics are never inferred.
+### 4. Pi integration — Planned
 
-### 3. Pi integration — Planned
+- Evaluate Pi's supported local RPC and any maintained ACP adapter.
+- Add only capabilities verified against supported versions and platforms.
 
-- Evaluate Pi's supported local RPC interface and compatible ACP adapters.
-- Discover verified model, session, and usage capabilities.
-- Add reset monitoring or kickoff only if trustworthy window semantics and model enforcement are proven.
+**Gate:** Tested integration with documented capability and unsupported-state coverage.
 
-**Release gate:** A tested Pi integration with a documented capability report and explicit unsupported states.
+### 5. Additional coding harnesses — Future
 
-### 4. Additional coding harnesses — Future
+- Evaluate Claude Code, Kilo Code, Kimi Code, and other compatible coding harnesses individually, after the integration priorities above.
+- Treat an adapter or model catalog as an integration path, not proof of subscription monitoring or kickoff eligibility.
 
-- Evaluate Claude Code, Kilo Code, Kimi Code, then other qualifying harnesses individually.
-- Prefer maintained, documented ACP or comparably safe local interfaces.
-- Ship only verified capabilities; an adapter alone does not establish subscription monitoring or kickoff eligibility.
+**Gate:** Each integration has authorized interfaces, documented limits, platform evidence, and regression tests.
 
-**Release gate:** Each harness has documented limits, platform verification, and regression coverage.
+### 6. Analytics expansion and permission model — Research-gated
 
-### 5. Permissioned local activity analytics — Research-gated
+- Improve the existing local analytics only with explicit decisions on local-history access, data coverage, retention/deletion, and permission revocation.
+- Preserve provenance and distinguish observed tokens, estimates, provider-reported usage, and billed cost.
+- Never combine readings with incompatible time spans into a misleading total.
 
-- Research what local activity metadata each harness exposes and its coverage.
-- Require separate, explicit user permission before reading local histories or workspace metadata.
-- Prefer on-device processing; provide source/coverage information, exclusions, export, deletion, and permission revocation.
-- Consider token summaries and dated API-equivalent estimates only when source fields and pricing semantics are defensible.
+**Gate:** The permission model is explicit, coverage and pricing assumptions are visible, and user-controlled exclusion/deletion is defined.
 
-**Release gate:** Clear consent, trustworthy calculations, visible coverage limits, and user-controlled data deletion.
+### 7. Multiple accounts — Final phase
 
-### 6. Multiple accounts — Final phase
+- Defer account profiles and switching until harness-owned isolation and exact action targeting are proven.
+- Keep credentials owned by the harness and require independent action authorization per profile.
 
-- Evaluate harness-owned profiles and account isolation without taking ownership of credentials.
-- Add separately identified profiles only when the harness can target them reliably.
-- Require independent opt-in and durable per-profile action tracking for kickoff.
-
-**Release gate:** No cross-profile actions or silent identity changes; account-scoped deduplication is proven.
+**Gate:** No cross-profile actions or silent identity changes; account-scoped deduplication is proven.
 
 ## Principles and exclusions
 
-- Never call a model-provider API directly or manage provider credentials.
-- Do not invent reset windows, usage values, model-to-entitlement mappings, or cost data.
-- Treat missing, stale, unsupported, and unavailable information as distinct states.
-- Keep inference-consuming actions explicitly opt-in, visible, bounded, and stoppable.
-- Do not optimize for prompts sent or quota consumed.
-- Do not claim Windows/Linux or widget support without platform-specific evidence.
+- Do not invent usage, model-to-entitlement mappings, reset windows, or costs.
+- A prompt cannot open or restart a provider's usage window; `sendPing` and kickoff consume quota.
+- Do not imply AgentGauge installs or detects placement of the macOS system widget.
+- Do not claim Windows/Linux or non-macOS widget support without target-specific evidence.
+- Do not treat connected-plan readers as a complete native OpenCode harness integration.
 - Cloud synchronization and a hosted backend are not currently planned.
+- Do not add features to a locked release silently. Versioned changes require the change-control process in the feature lock.
 
 ## Updating this roadmap
 
-The PRD is the source of truth for requirements, acceptance criteria, and technical feasibility. Update this summary when roadmap priorities or release gates change. Record shipped work as complete only after its gate is met; do not add dates unless the project commits to them.
+The PRD remains the source for product requirements and acceptance criteria, but its implementation inventory must be reconciled when product decisions change. The feature lock is authoritative for the exact scope and exceptions of a named release. Mark work complete only when implementation evidence exists; mark release verification separately. Use status labels rather than dates unless a delivery date is explicitly committed.
