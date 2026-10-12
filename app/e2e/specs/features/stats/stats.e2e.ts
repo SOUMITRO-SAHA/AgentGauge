@@ -12,7 +12,7 @@ import {
   expectDisplayed,
   gotoView,
   clearSeededStores,
-} from "../fixtures.js";
+} from "../../fixtures.js";
 
 /**
  * The Stats view: local analytics that is simply on, one tab per connected

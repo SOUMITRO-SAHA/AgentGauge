@@ -7,7 +7,7 @@ import {
   dashboardWithZaiWeek,
   expectDisplayed,
   gotoView,
-} from "../fixtures.js";
+} from "../../fixtures.js";
 
 /**
  * The activity heatmap, on its own.
