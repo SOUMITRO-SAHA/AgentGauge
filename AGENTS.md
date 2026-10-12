@@ -76,7 +76,7 @@ If a task is primarily research (spike, investigation, literature review, librar
 
 This is an early-stage Tauri 2 desktop app and native-widget project named **AgentGauge**, for AI coding-harness usage and status. The primary platform goals are macOS, Windows, and Linux.
 
-The current UI and Rust backend implement **Codex only**: real usage reads via `codex app-server`, rollover detection, onboarding, the dashboard, and a frameless desktop widget. The app's executable is `agentgauge`; the polling backend runs inside that same desktop process and is not a separately installed service. Do not describe other harnesses as integrated unless the code actually implements them, and do not claim Windows or Linux verification — only macOS has been exercised.
+The app reads Codex through `codex app-server` and connected Z.AI, MiniMax, and Kimi coding-plan usage through OpenCode. Rollover detection and opt-in kickoff are Codex-only. The native widget is a macOS WidgetKit extension that switches among providers with readable 5-hour or weekly quotas; macOS owns its placement. The app's executable is `agentgauge`; polling runs inside that desktop process and is not a separately installed service. Do not describe other harnesses as integrated unless the code actually implements them, and do not claim Windows or Linux verification — only macOS has been exercised.
 
 ## A 5-hour window cannot be restarted by a prompt
 
@@ -99,15 +99,20 @@ things make this fragile and each has bitten already — see
 - macOS has **no** `accessory*` widget families; they are iOS/watchOS only. Use
   `systemSmall` / `systemMedium` / `systemLarge`.
 
-The app must never imply it installed the widget. macOS exposes no API for a host
-app to add one or to ask whether the user placed it, so `SystemWidgetStatus` only
-ever reports facts about the build.
+The app must never imply it installed or placed the widget. macOS owns placement,
+but `WidgetCenter.getCurrentConfigurations` lets the host query configured widget
+kinds. `SystemWidgetStatus` keeps that result separate from build facts and reports
+unknown when the system query is unavailable; only a successful query with no
+matching AgentGauge widget means it is not configured. Setup actions must lead to
+the system's gallery instructions, not pretend to add the widget.
 
-The widget and the app are separate processes and share data through a JSON
-snapshot written atomically to the legacy-compatible path
-`~/Library/Application Support/AI Sub Stats/`. The
-window list carries an explicit `kind`, never a label the Swift side has to
-pattern-match on.
+The widget and the app are separate processes. They share a versioned JSON
+snapshot of provider-keyed 5-hour and weekly quotas under
+`~/Library/Application Support/AgentGauge/`; provider selection is in a sibling
+file. The previous `AI Sub Stats` folder is migration input only: copy files
+forward atomically, retain the originals, and never write new data there unless
+the migration itself fails. Debug files are separate from release files. The
+widget schema never asks Swift to infer quota identity from a display label.
 
 ## Project structure and conventions
 
