@@ -40,6 +40,7 @@ import {
 import { useIsMobile } from "~/hooks/use-mobile";
 import { DEV_TEST_SCREEN_ENABLED } from "~/lib/dev-test-screen";
 import { routesNeedingNavigation, type Route } from "~/lib/navigation";
+import { cn } from "~/lib/utils";
 
 export function Navigation({
   onNavigate,
@@ -78,16 +79,17 @@ function useNavigate(onNavigate: (route: Route) => void) {
  * appearance — the app UI followed the system into dark while the mark kept
  * its dark ink and vanished into the sidebar. `fill="currentColor"` under the
  * `text-foreground` token makes the mark follow the app's own theme, which is
- * the one source of truth the webview cannot second-guess.
+ * the one source of truth the webview cannot second-guess. Callers may
+ * override the colour through `className`; the fill follows `currentColor`.
  */
-function BrandMark() {
+export function BrandMark({ className }: { readonly className?: string }) {
   return (
     <svg
       viewBox="0 0 512 512"
       role="img"
       aria-label="AgentGauge brand mark"
       data-testid="brand-mark"
-      className="size-5 shrink-0 fill-current text-foreground"
+      className={cn("size-5 shrink-0 fill-current text-foreground", className)}
     >
       <path
         fillRule="evenodd"

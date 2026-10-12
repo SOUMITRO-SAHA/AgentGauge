@@ -1,12 +1,15 @@
 /**
  * Settings: this build, the system widget, and reaching the project.
  *
- * Four panels, each answering one question. About states what this build is —
- * version, platform, and its outbound links, all read from the backend so the
- * renderer cannot drift from the packaged binary. The widget guide explains
- * the system's own widget. Feedback opens the project's issue forms with the
- * build facts prefilled, and Support lists where the project accepts
- * contributions.
+ * The screen reads as one composition rather than four cards in a pile: the
+ * two short panels — About (identity) and Feedback (utility) — pair in a
+ * two-up row that sets the rhythm, the widget guide holds the middle as the
+ * full-width core a visitor came for, and the Support accent closes the screen
+ * with the one call to action. Each panel answers one question; About states
+ * what this build is from the backend's `appInfo` so the renderer cannot drift
+ * from the packaged binary, the widget guide explains the system's own widget,
+ * Feedback opens the project's issue forms with build facts prefilled, and
+ * Support lists where the project accepts contributions.
  *
  * The only durable preference so far — which destination reopens on launch —
  * is chosen by using the navigation itself, so there is no toggle to render
@@ -30,11 +33,15 @@ export function SettingsView({ visible }: { readonly visible: boolean }) {
         subtitle="This build, the widget, and reaching the project."
       />
 
-      <AboutPanel />
+      <div
+        className="grid items-start gap-4 md:grid-cols-2"
+        data-testid="settings-info-row"
+      >
+        <AboutPanel />
+        <FeedbackPanel />
+      </div>
 
       <SystemWidgetGuide />
-
-      <FeedbackPanel />
 
       <SupportPanel />
 
