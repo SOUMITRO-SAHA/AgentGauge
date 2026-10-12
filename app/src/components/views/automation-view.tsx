@@ -17,13 +17,14 @@
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import * as Effect from "effect/Effect";
-import { useEffect, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { Play, Stop } from "@phosphor-icons/react";
 
 import { automationAtom, kickoffAtom, subscriptionsAtom } from "~/atoms";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { KickoffSection } from "~/components/automation/kickoff-section";
 import { ViewHeader } from "~/components/views/view-header";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
@@ -32,6 +33,7 @@ import * as Ipc from "~/lib/ipc";
 import { tabsFrom, type UsageTab } from "~/lib/usage";
 
 export function AutomationView({ visible }: { readonly visible: boolean }) {
+  const [selectedTab, setSelectedTab] = useState<string | null>(null);
   const automation = useAtomValue(automationAtom);
   const refreshAutomation = useAtomRefresh(automationAtom);
   const refreshKickoff = useAtomRefresh(kickoffAtom);
@@ -78,19 +80,77 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
             The app could not be reached.
           </p>
         ),
-        onSuccess: (result) =>
-          tabs.map((tab) => (
-            <MonitorCard
-              key={tab.value}
-              tab={tab}
-              monitor={
-                result.value.find((monitor) => monitor.kind === tab.kind) ??
-                null
-              }
-              onChanged={refreshAutomation}
-              nowMs={nowMs}
-            />
-          )),
+        onSuccess: (result) => {
+          if (tabs.length === 0) {
+            return (
+              <p className="text-sm text-muted-foreground">
+                No readable connections are available for automation.
+              </p>
+            );
+          }
+
+          const connections = tabs.map((tab) => {
+            const monitor =
+              result.value.find((item) => item.kind === tab.kind) ?? null;
+
+            return {
+              tab,
+              monitor,
+              status:
+                monitor === null
+                  ? "Unavailable"
+                  : monitor.running
+                    ? "Running"
+                    : "Stopped",
+            };
+          });
+          const activeTab =
+            tabs.find((tab) => tab.value === selectedTab)?.value ??
+            tabs[0].value;
+
+          return (
+            <Tabs
+              value={activeTab}
+              onValueChange={setSelectedTab}
+              className="flex flex-col gap-4"
+              data-testid="automation-connections"
+            >
+              <TabsList
+                aria-label="Automation connections"
+                className="!grid !h-auto w-full grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-1 rounded-lg border border-border/70 bg-surface-raised/60 p-1"
+              >
+                {connections.map(({ tab, status }) => (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    className="!h-auto min-w-0 flex-col items-start gap-1 px-3 py-2 text-left whitespace-normal"
+                    data-testid={`automation-connection-tab-${tab.kind}`}
+                  >
+                    <span className="max-w-full break-words">{tab.label}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {status}
+                    </span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+
+              {connections.map(({ tab, monitor }) => (
+                <TabsContent
+                  key={tab.value}
+                  value={tab.value}
+                  className="mt-0"
+                >
+                  <MonitorCard
+                    tab={tab}
+                    monitor={monitor}
+                    onChanged={refreshAutomation}
+                    nowMs={nowMs}
+                  />
+                </TabsContent>
+              ))}
+            </Tabs>
+          );
+        },
       })}
 
       <p className="text-xs leading-relaxed text-muted-foreground">
@@ -177,25 +237,27 @@ function MonitorCard({
   return (
     <section className={PANEL} data-testid={`automation-panel-${kind}`}>
       <PanelHeader
-        title={`${tab.label} · Automation`}
+        title={tab.label}
         testId={`refresh-automation-${kind}`}
         onRefresh={onChanged}
       />
 
       {monitor === null ? (
         <p className="text-sm text-muted-foreground">
-          Checking rollover monitor…
+          Monitor status is unavailable for this connection.
         </p>
       ) : (
         <div className="flex flex-col gap-4">
-          <DetailGroupLabel>Rollover monitor</DetailGroupLabel>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span
-              className="text-sm text-foreground"
-              data-testid={`automation-status-${kind}`}
-            >
-              {running ? "Running" : "Stopped"}
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface/60 p-3">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium">Rollover monitor</span>
+              <span
+                className="text-xs text-muted-foreground"
+                data-testid={`automation-status-${kind}`}
+              >
+                {running ? "Running" : "Stopped"}
+              </span>
+            </div>
             <AutomationToggle
               kind={kind}
               running={running}
@@ -212,8 +274,10 @@ function MonitorCard({
             />
           </div>
 
-          <RolloverDetails kind={kind} monitor={monitor} onChanged={onChanged} />
-          <WatchSchedule kind={kind} monitor={monitor} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <RolloverDetails kind={kind} monitor={monitor} onChanged={onChanged} />
+            <WatchSchedule kind={kind} monitor={monitor} />
+          </div>
         </div>
       )}
 
@@ -244,12 +308,12 @@ function RolloverDetails({
       <DetailRow
         testId={`automation-observed-reset-${kind}`}
         label="Last reported reset"
-        value={formatTime(monitor.observedResetsAt)}
+        value={formatTime(monitor.observedResetsAt, "Not reported")}
       />
       <DetailRow
         testId={`automation-rolled-over-at-${kind}`}
         label="Rollover detected at"
-        value={formatTime(monitor.rolledOverAt)}
+        value={formatTime(monitor.rolledOverAt, "Not detected")}
       />
 
       {monitor.rolledOver && (
@@ -291,12 +355,12 @@ function WatchSchedule({
       <DetailRow
         testId={`automation-last-polled-${kind}`}
         label="Last checked"
-        value={formatTime(monitor.lastPolledAt)}
+        value={formatTime(monitor.lastPolledAt, "Not checked")}
       />
       <DetailRow
         testId={`automation-next-poll-${kind}`}
         label="Next check"
-        value={formatTime(monitor.nextPollAt)}
+        value={formatTime(monitor.nextPollAt, "Not scheduled")}
       />
     </div>
   );
@@ -362,10 +426,9 @@ function AutomationToggle({
   );
 }
 
-/** Epoch ms → a short local time; `null` (never polled) reads as a dash. */
-function formatTime(ms: number | null): string {
+function formatTime(ms: number | null, missing: string): string {
   if (ms === null) {
-    return "—";
+    return missing;
   }
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "short",

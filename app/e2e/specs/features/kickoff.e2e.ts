@@ -38,7 +38,7 @@ async function bootOnAutomation(): Promise<void> {
 }
 
 describe("scheduled kickoff", () => {
-  it("keeps kickoff controls off Home and groups them by sub in Automation", async () => {
+  it("keeps kickoff controls off Home and organized by connection in Automation", async () => {
     await bootOnHome();
 
     expect(
@@ -47,20 +47,22 @@ describe("scheduled kickoff", () => {
 
     await gotoView("automation");
     await expectDisplayed('[data-testid="kickoff-section-codex"]');
-    await expectDisplayed('[data-testid="kickoff-section-zai"]');
     await expect($('[data-testid="automation-panel-codex"] h2')).toHaveText(
-      "Codex · Automation",
-    );
-    await expect($('[data-testid="automation-panel-zai"] h2')).toHaveText(
-      "Z.AI · Automation",
+      "Codex",
     );
     await expectDisplayed('[data-testid="kickoff-model-codex"]');
-    await expectDisplayed('[data-testid="kickoff-model-zai"]');
     expect(await $$('[data-testid^="kickoff-loading-"]')).toHaveLength(0);
     await expect($('[data-testid="kickoff-toggle-codex"]')).toHaveAttribute(
       "aria-pressed",
       "false",
     );
+
+    await clickDisplayed('[data-testid="automation-connection-tab-zai"]');
+    await expectDisplayed('[data-testid="kickoff-section-zai"]');
+    await expect($('[data-testid="automation-panel-zai"] h2')).toHaveText(
+      "Z.AI",
+    );
+    await expectDisplayed('[data-testid="kickoff-model-zai"]');
     await expect($('[data-testid="kickoff-toggle-zai"]')).toHaveAttribute(
       "aria-pressed",
       "false",
@@ -95,6 +97,9 @@ describe("scheduled kickoff", () => {
     );
     await expect($('[data-testid="kickoff-model-codex"]')).toBeDisabled();
     await expect($('[data-testid="kickoff-effort-codex"]')).toBeDisabled();
+    await expect($('[data-testid="kickoff-locked-note-codex"]')).toHaveText(
+      "Stop this kickoff to change its model or effort.",
+    );
     const lockExplanations = await browser.execute(() =>
       ["model", "effort"].map((control) =>
         document
@@ -128,6 +133,7 @@ describe("scheduled kickoff", () => {
   it("selects a model for one sub without asserting access or cost", async () => {
     await bootOnAutomation();
 
+    await clickDisplayed('[data-testid="automation-connection-tab-zai"]');
     await clickDisplayed('[data-testid="kickoff-model-zai"]');
     await browser.pause(500);
 
@@ -176,6 +182,7 @@ describe("scheduled kickoff", () => {
     await expect($('[data-testid="kickoff-model-zai"]')).toHaveText(
       expect.stringContaining("GLM-5.3"),
     );
+    await clickDisplayed('[data-testid="automation-connection-tab-codex"]');
     await expect($('[data-testid="kickoff-model-codex"]')).toHaveText(
       expect.stringContaining("GPT-6 Luna"),
     );

@@ -10,6 +10,7 @@
  */
 
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createElement, type ComponentType } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -50,6 +51,7 @@ function monitor(
 function installDispatch(options: {
   running: Record<string, boolean>;
   rolledOver?: string;
+  missingMonitor?: string;
 }): void {
   calls = [];
   const kickoffEnabled: Record<string, boolean> = {};
@@ -134,14 +136,18 @@ function installDispatch(options: {
           };
         case "automationState":
           return {
-            type: "automation",
-            monitors: [
-              monitor("codex", { running: options.running.codex === true }),
-              monitor("zai", {
-                running: options.running.zai === true,
-                rolledOver: options.rolledOver === "zai",
-                rolledOverAt: options.rolledOver === "zai" ? 1_000 : null,
-              }),
+          type: "automation",
+          monitors: [
+            monitor("codex", { running: options.running.codex === true }),
+            ...(options.missingMonitor === "zai"
+              ? []
+              : [
+                  monitor("zai", {
+                    running: options.running.zai === true,
+                    rolledOver: options.rolledOver === "zai",
+                    rolledOverAt: options.rolledOver === "zai" ? 1_000 : null,
+                  }),
+                ]),
               monitor("minimax"),
               monitor("kimi"),
             ],
@@ -197,7 +203,7 @@ async function renderView(): Promise<void> {
   }>, { visible: true });
   render(createElementResult);
   // The tab set arrives with the subscriptions read; wait for it to settle.
-  await screen.findByTestId("automation-panel-zai");
+  await screen.findByTestId("automation-connection-tab-zai");
 }
 
 beforeEach(() => {
@@ -250,34 +256,74 @@ it("uses a shaped monitor-card skeleton until the first read completes", async (
   expect(screen.queryByTestId("automation-loading-skeleton")).toBeNull();
 });
 
-it("gives every connected sub its own monitor card with its own status", async () => {
+it("keeps each connection status visible while showing one detail panel at a time", async () => {
+  installDispatch({ running: { codex: true } });
+  await renderView();
+
+  const codexTab = screen.getByTestId("automation-connection-tab-codex");
+  const zaiTab = screen.getByTestId("automation-connection-tab-zai");
+
+  expect(codexTab.textContent).toContain("Codex");
+  expect(codexTab.textContent).toContain("Running");
+  expect(zaiTab.textContent).toContain("Z.AI");
+  expect(zaiTab.textContent).toContain("Stopped");
+  expect(screen.getByTestId("automation-panel-codex")).toBeTruthy();
+  expect(screen.getByTestId("automation-observed-reset-codex").textContent).toBe(
+    "Not reported",
+  );
+  expect(screen.getByTestId("automation-rolled-over-at-codex").textContent).toBe(
+    "Not detected",
+  );
+  expect(screen.getByTestId("automation-last-polled-codex").textContent).toBe(
+    "Not checked",
+  );
+  expect(screen.getByTestId("automation-next-poll-codex").textContent).toBe(
+    "Not scheduled",
+  );
+  expect(screen.queryByTestId("automation-panel-zai")).toBeNull();
+
+  await userEvent.setup().click(zaiTab);
+
+  expect(await screen.findByTestId("automation-panel-zai")).toBeTruthy();
+  expect(screen.queryByTestId("automation-panel-codex")).toBeNull();
+});
+
+it("labels a connection with no monitor result unavailable", async () => {
+  installDispatch({ running: {}, missingMonitor: "zai" });
+  await renderView();
+
+  const zaiTab = screen.getByTestId("automation-connection-tab-zai");
+  expect(zaiTab.textContent).toContain("Unavailable");
+
+  await userEvent.setup().click(zaiTab);
+
+  expect(screen.getByTestId("automation-panel-zai").textContent).toContain(
+    "Monitor status is unavailable for this connection.",
+  );
+});
+
+it("keeps each connection's kickoff controls inside its monitor card", async () => {
   installDispatch({ running: { codex: true } });
   await renderView();
 
   expect(screen.getByTestId("automation-panel-codex")).toBeTruthy();
-  expect(screen.getByTestId("automation-panel-zai")).toBeTruthy();
   expect(screen.getByTestId("automation-panel-codex").contains(
     screen.getByTestId("kickoff-model-codex"),
   )).toBe(true);
+
+  await userEvent.setup().click(screen.getByTestId("automation-connection-tab-zai"));
+
+  expect(screen.getByTestId("automation-panel-zai")).toBeTruthy();
   expect(screen.getByTestId("automation-panel-zai").contains(
     screen.getByTestId("kickoff-model-zai"),
   )).toBe(true);
-
-  // The persisted choice: codex was enabled before this render, so its card
-  // says Running with no click — the Start button must not reappear for a
-  // sub the user already started.
-  expect(screen.getByTestId("automation-status-codex").textContent).toBe(
-    "Running",
-  );
-  expect(screen.getByTestId("automation-status-zai").textContent).toBe(
-    "Stopped",
-  );
 });
 
 it("toggling one sub records the choice for exactly that sub", async () => {
   installDispatch({ running: { codex: true } });
   await renderView();
 
+  await userEvent.setup().click(screen.getByTestId("automation-connection-tab-zai"));
   screen.getByTestId("automation-toggle-zai").click();
 
   const writes = calls.filter((request) =>
@@ -301,6 +347,8 @@ it("stopping the running sub records a stop for that kind", async () => {
 it("shows an unacknowledged rollover on its own sub with its own acknowledge", async () => {
   installDispatch({ running: { codex: true, zai: true }, rolledOver: "zai" });
   await renderView();
+
+  await userEvent.setup().click(screen.getByTestId("automation-connection-tab-zai"));
 
   expect(screen.getByTestId("automation-rolled-over-zai")).toBeTruthy();
   expect(screen.queryByTestId("automation-rolled-over-codex")).toBeNull();

@@ -158,10 +158,6 @@ function KickoffControls({
       className="flex flex-col gap-3"
       data-testid={`kickoff-section-${view.kind}`}
     >
-      <span className="text-xs font-medium text-muted-foreground">
-        Scheduled kickoff
-      </span>
-
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-0.5">
           <span className="text-sm font-medium">
@@ -293,6 +289,15 @@ function KickoffControls({
           does not guarantee plan access. Price ordering does not estimate
           subscription quota impact.
         </p>
+
+        {view.enabled && (
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid={`kickoff-locked-note-${view.kind}`}
+          >
+            Stop this kickoff to change its model or effort.
+          </p>
+        )}
 
         {view.modelError != null && (
           <p

@@ -162,6 +162,9 @@ it("renders the schedule, selected model, and countdown once enabled", async () 
   expect(screen.getByTestId("kickoff-effort-zai").hasAttribute("disabled")).toBe(
     true,
   );
+  expect(screen.getByTestId("kickoff-locked-note-zai").textContent).toBe(
+    "Stop this kickoff to change its model or effort.",
+  );
 
   const next = await screen.findByTestId("kickoff-next-zai");
   expect(next.textContent).toContain("1h");

@@ -1,4 +1,8 @@
-import { expect, $, $$ } from "@wdio/globals";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { expect, $, $$, browser } from "@wdio/globals";
 
 import {
   boot,
@@ -45,21 +49,83 @@ async function bootAutomation(
   await gotoView("automation");
 }
 
+async function captureAutomationScreenshot(
+  connection: "codex" | "zai",
+): Promise<void> {
+  const repoRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../..",
+  );
+  const directory = path.join(repoRoot, ".temp", "screenshots");
+  const file = path.join(directory, `automation-${connection}.png`);
+  fs.mkdirSync(directory, { recursive: true });
+  const screenshot = await browser.saveScreenshot(file);
+  expect(screenshot.subarray(1, 4).toString()).toBe("PNG");
+  expect(fs.statSync(file).size).toBeGreaterThan(1000);
+}
+
 describe("automation", () => {
-  it("gives every connected sub its own rollover monitor", async () => {
+  it("keeps every connection status visible and focuses one detail panel", async () => {
     await bootAutomation();
 
+    const codexTab = $('[data-testid="automation-connection-tab-codex"]');
+    const zaiTab = $('[data-testid="automation-connection-tab-zai"]');
+    await expect(codexTab).toHaveText(expect.stringContaining("Codex"));
+    await expect(codexTab).toHaveText(expect.stringContaining("Running"));
+    await expect(zaiTab).toHaveText(expect.stringContaining("Z.AI"));
+    await expect(zaiTab).toHaveText(expect.stringContaining("Stopped"));
     await expect($('[data-testid="automation-panel-codex"] h2')).toHaveText(
-      "Codex · Automation",
+      "Codex",
     );
-    await expect($('[data-testid="automation-panel-zai"] h2')).toHaveText(
-      "Z.AI · Automation",
-    );
+    await expect($('[data-testid="automation-panel-zai"]')).not.toExist();
     expect(await $$('[data-testid="automation-loading-skeleton"]')).toHaveLength(
       0,
     );
     expect(await $$('[data-testid^="kickoff-loading-"]')).toHaveLength(0);
     await expect($('[data-testid="automation-panel-kimi"]')).not.toExist();
+
+    const layout = await browser.execute(() => {
+      const list = document.querySelector(
+        '[data-testid="automation-connections"] [data-slot="tabs-list"]',
+      );
+      const trigger = document.querySelector(
+        '[data-testid="automation-connection-tab-codex"]',
+      );
+      const panel = document.querySelector(
+        '[data-testid="automation-panel-codex"]',
+      );
+      if (list === null || trigger === null || panel === null) return null;
+
+      return {
+        listBottom: list.getBoundingClientRect().bottom,
+        triggerBottom: trigger.getBoundingClientRect().bottom,
+        panelTop: panel.getBoundingClientRect().top,
+      };
+    });
+    expect(layout).not.toBeNull();
+    expect(layout?.triggerBottom).toBeLessThanOrEqual(
+      (layout?.listBottom ?? 0) + 1,
+    );
+    expect(layout?.panelTop).toBeGreaterThanOrEqual(layout?.listBottom ?? 0);
+
+    await captureAutomationScreenshot("codex");
+    await clickDisplayed('[data-testid="automation-connection-tab-zai"]');
+    await expect($('[data-testid="automation-panel-zai"] h2')).toHaveText(
+      "Z.AI",
+    );
+    await expect($('[data-testid="automation-observed-reset-zai"]')).toHaveText(
+      "Not reported",
+    );
+    await expect($('[data-testid="automation-rolled-over-at-zai"]')).toHaveText(
+      "Not detected",
+    );
+    await expect($('[data-testid="automation-last-polled-zai"]')).toHaveText(
+      "Not checked",
+    );
+    await expect($('[data-testid="automation-next-poll-zai"]')).toHaveText(
+      "Not scheduled",
+    );
+    await captureAutomationScreenshot("zai");
   });
 
   it("shows an enabled sub as Running before any click — the persisted choice", async () => {
@@ -68,12 +134,13 @@ describe("automation", () => {
     await expect($('[data-testid="automation-status-codex"]')).toHaveText(
       "Running",
     );
-    await expect($('[data-testid="automation-status-zai"]')).toHaveText(
-      "Stopped",
+    await expect($('[data-testid="automation-connection-tab-zai"]')).toHaveText(
+      expect.stringContaining("Stopped"),
     );
     await expect($('[data-testid="automation-toggle-codex"]')).toHaveText(
       expect.stringContaining("Stop"),
     );
+    await clickDisplayed('[data-testid="automation-connection-tab-zai"]');
     await expect($('[data-testid="automation-toggle-zai"]')).toHaveText(
       expect.stringContaining("Start"),
     );
@@ -98,6 +165,7 @@ describe("automation", () => {
     await expect(schedule).toHaveText(expect.stringContaining("Last checked"));
     await expect(schedule).toHaveText(expect.stringContaining("Next check"));
 
+    await clickDisplayed('[data-testid="automation-connection-tab-zai"]');
     const zaiSchedule = $('[data-testid="automation-schedule-zai"]');
     await expect(zaiSchedule).toHaveText(expect.stringContaining("Last checked"));
   });
@@ -105,13 +173,14 @@ describe("automation", () => {
   it("starting one sub records the choice for exactly that sub", async () => {
     await bootAutomation();
 
+    await clickDisplayed('[data-testid="automation-connection-tab-zai"]');
     await clickDisplayed('[data-testid="automation-toggle-zai"]');
 
     await expect($('[data-testid="automation-status-zai"]')).toHaveText(
       "Running",
     );
-    await expect($('[data-testid="automation-status-codex"]')).toHaveText(
-      "Running",
+    await expect($('[data-testid="automation-connection-tab-codex"]')).toHaveText(
+      expect.stringContaining("Running"),
     );
 
     const calls = await dispatchCalls();
@@ -145,6 +214,8 @@ describe("automation", () => {
       automationRunningByKind: { zai: true },
       automationRolledOver: "zai",
     });
+
+    await clickDisplayed('[data-testid="automation-connection-tab-zai"]');
 
     await expect(
       $('[data-testid="automation-rolled-over-zai"]'),
