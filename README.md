@@ -16,7 +16,7 @@ the previous product directory on first use.
 AgentGauge uses local harness interfaces such as app-server, CLI, ACP, SDK, or RPC for status and connected-plan discovery. For OpenCode-connected coding plans, it also calls documented provider coding-plan endpoints using credentials retrieved from OpenCode's local store. It does not perform sign-in or manage provider credentials.
 
 > [!IMPORTANT]
-> **Current implementation:** Codex usage is read through `codex app-server`; the app discovers OpenCode-connected coding plans and models through OpenCode's local CLI, then reads supported plan data from provider coding-plan endpoints. OpenCode supplies stored credentials but its own usage history is not read. Opt-in kickoff is available per connection for Codex and supported connected plans. Model choices are limited to harness-exposed models present in the bundled price list; that list only orders choices and does not verify subscription access or predict quota impact. The schedule follows reported reset times without verifying rollover. Pi, Claude Code, Kilo Code, and multi-account support are not implemented. macOS is the only platform exercised so far.
+> **Current implementation:** Codex usage is read through `codex app-server`; the app discovers OpenCode-connected coding plans and models through OpenCode's local CLI, then reads supported plan data from provider coding-plan endpoints. OpenCode supplies stored credentials and its local session database supplies the local Stats history for supported plans without provider token history. Opt-in kickoff is available per connection for Codex and supported connected plans. Model choices are limited to harness-exposed models present in the bundled price list; that list only orders choices and does not verify subscription access or predict quota impact. The schedule follows reported reset times without verifying rollover. Pi, Claude Code, Kilo Code, and multi-account support are not implemented. macOS is the only platform exercised so far.
 
 ## Product direction
 
@@ -34,7 +34,7 @@ The implementation roadmap is:
 3. **Pi** — third.
 4. **Claude Code, Kilo Code, Kimi Code, and other compatible coding harnesses** — evaluated individually afterward.
 
-An ACP connection or model catalog does not by itself provide subscription limits or prove that a model uses a particular subscription. Each harness capability must be verified independently. Multi-account support is deferred to the final roadmap phase; advanced activity analytics require separate research and explicit permission.
+An ACP connection or model catalog does not by itself provide subscription limits or prove that a model uses a particular subscription. Each harness capability must be verified independently. Multi-account support is deferred to the final roadmap phase. Local activity analytics are enabled by default without a separate consent prompt and remain distinct from provider-reported usage.
 
 See the [Product Requirements Document](docs/PRD.md) for the full scope, capability requirements, safety rules, acceptance criteria, and roadmap.
 
@@ -44,6 +44,7 @@ See the [Product Requirements Document](docs/PRD.md) for the full scope, capabil
 - The app displays the reported five-hour and weekly windows and freshness/status information.
 - The app observes changes in the reported `resetsAt` value as the rollover signal.
 - Usage tabs cover every connected coding plan: Codex plus the OpenCode-connected Z.AI, MiniMax, and Kimi plans (Z.AI live-verified; MiniMax/Kimi decode from vendor-documented endpoints and degrade to explicit unavailable).
+- **Stats analytics:** Provider-reported token history is available for Codex and Z.AI. Local Codex rollout and OpenCode session records supply session statistics and model-over-time breakdowns where provider history is unavailable. The Z.AI daily cost trajectory is an API-equivalent estimate based on the bundled price list, not a bill; unknown model prices and incomplete coverage remain explicit.
 - **Scheduled kickoff (opt-in, macOS):** per connection, the user can choose a harness-exposed model that also appears in the bundled price list, then choose an effort while stopped. The initial model is the lowest-ranked listed price; enabling resets effort to that model's lowest supported level and locks configuration until stopped. Price ranking is not a subscription-quota estimate and does not guarantee plan access. A scheduled "Hi" follows the latest reported reset without verifying rollover; it spends quota and cannot start or reset a window. A `launchd` LaunchAgent runs the same binary headless once a minute while the app is closed; the schedule file lives beside the widget snapshot in `~/Library/Application Support/AgentGauge/`.
 - A manually initiated `sendPing` capability exists and consumes quota.
 - A read-only **Processes** screen shows the running processes, memory, and listening TCP ports of Codex and OpenCode, plus each one's on-disk data footprint with a breakdown — Codex's session transcripts, archived transcripts, and SQLite databases (`state_5`, `thread_history`, goals, logs, memories, queue), OpenCode's session storage, logs, and `opencode.db`. Ports are shown when the platform can report them (macOS/Linux via `lsof`); a stdio server such as `codex app-server` is reported as listening on nothing, which is the true answer, and platforms without an inspector say so. Groups with nothing running and unreadable or not-yet-created data directories say so instead of showing a zero. The screen cannot stop, signal, or delete anything — the capability has no write.
@@ -51,7 +52,7 @@ See the [Product Requirements Document](docs/PRD.md) for the full scope, capabil
 
 The widget requires **macOS 14+ and Xcode 16+**. Build the macOS app and embed the extension with `bun run build:mac` from `app/`. See [`app/src-tauri/widget/README.md`](app/src-tauri/widget/README.md) before changing the extension or its build process.
 
-Pi, Claude Code, Kilo Code, multi-account support, and additional local usage-history analytics are **planned or under investigation**, not shipped integrations or features. Background scheduling on Windows and Linux is unimplemented.
+Pi, Claude Code, Kilo Code, multi-account support, and analytics beyond those described above are **planned or under investigation**, not shipped integrations or features. Background scheduling on Windows and Linux is unimplemented.
 
 ## Usage-window behavior
 
