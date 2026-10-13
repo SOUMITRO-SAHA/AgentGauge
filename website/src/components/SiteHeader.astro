@@ -1,0 +1,148 @@
+---
+import { site } from '../config/site';
+import Icon from './Icon.astro';
+import Logo from './Logo.astro';
+
+const nav = [
+	{ href: '#pillars', label: 'Product' },
+	{ href: '#how-it-works', label: 'How it works' },
+	{ href: '#integrations', label: 'Integrations' },
+	{ href: '#faq', label: 'FAQ' },
+];
+---
+
+<header class="glass sticky top-0 z-50 rounded-none">
+	<nav
+		class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4 sm:px-6"
+		aria-label="Main"
+	>
+		<a href="#top" class="flex shrink-0 items-center gap-2 text-foreground">
+			<Logo class="size-7" />
+			<span class="font-display text-lg font-bold tracking-tight">{site.name}</span>
+		</a>
+
+		<ul class="hidden items-center gap-1 lg:flex">
+			{
+				nav.map((item) => (
+					<li>
+						<a
+							href={item.href}
+							class="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+						>
+							{item.label}
+						</a>
+					</li>
+				))
+			}
+		</ul>
+
+		<div class="flex shrink-0 items-center gap-2">
+			<button
+				type="button"
+				data-theme-toggle
+				aria-label="Switch between light and dark mode"
+				class="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+			>
+				<Icon name="moon-stars" class="size-5 dark:hidden" />
+				<Icon name="sun" class="hidden size-5 dark:block" />
+			</button>
+
+			<a
+				href={site.repository}
+				class="hidden h-9 items-center rounded-md bg-brand-ink px-4 text-sm font-semibold text-background transition-opacity hover:opacity-90 sm:inline-flex dark:bg-foreground dark:text-background"
+			>
+				GitHub
+			</a>
+
+			<button
+				type="button"
+				data-menu-toggle
+				aria-expanded="false"
+				aria-controls="mobile-nav"
+				aria-label="Open navigation menu"
+				class="inline-flex size-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted lg:hidden"
+			>
+				<svg
+					class="size-5"
+					viewBox="0 0 256 256"
+					fill="currentColor"
+					aria-hidden="true"
+					data-menu-icon="open"
+				>
+					<path
+						d="M224 128a8 8 0 0 1-8 8H40a8 8 0 0 1 0-16h176a8 8 0 0 1 8 8ZM40 72h176a8 8 0 0 0 0-16H40a8 8 0 0 0 0 16Zm176 112H40a8 8 0 0 0 0 16h176a8 8 0 0 0 0-16Z"
+					></path>
+				</svg>
+				<svg
+					class="hidden size-5"
+					viewBox="0 0 256 256"
+					fill="currentColor"
+					aria-hidden="true"
+					data-menu-icon="close"
+				>
+					<path
+						d="M205.66 194.34a8 8 0 0 1-11.32 11.32L128 139.31 61.66 205.66a8 8 0 0 1-11.32-11.32L116.69 128 50.34 61.66a8 8 0 0 1 11.32-11.32L128 116.69l66.34-66.35a8 8 0 0 1 11.32 11.32L139.31 128Z"
+					></path>
+				</svg>
+			</button>
+		</div>
+	</nav>
+
+	<div id="mobile-nav" class="hidden border-t border-border lg:hidden" data-menu-panel>
+		<ul class="mx-auto flex w-full max-w-6xl flex-col gap-1 px-4 py-3 sm:px-6">
+			{
+				nav.map((item) => (
+					<li>
+						<a
+							href={item.href}
+							class="block rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+						>
+							{item.label}
+						</a>
+					</li>
+				))
+			}
+			<li class="sm:hidden">
+				<a
+					href={site.repository}
+					class="mt-1 block rounded-md bg-brand-ink px-3 py-2.5 text-center text-sm font-semibold text-background dark:bg-foreground dark:text-background"
+				>
+					View on GitHub
+				</a>
+			</li>
+		</ul>
+	</div>
+</header>
+
+<script>
+	const root = document.documentElement;
+	const themeToggle = document.querySelector('[data-theme-toggle]');
+	const menuToggle = document.querySelector<HTMLButtonElement>('[data-menu-toggle]');
+	const menuPanel = document.querySelector<HTMLElement>('[data-menu-panel]');
+
+	themeToggle?.addEventListener('click', () => {
+		const dark = root.classList.toggle('dark');
+		localStorage.setItem('theme', dark ? 'dark' : 'light');
+	});
+
+	const setMenu = (open: boolean) => {
+		if (!menuToggle || !menuPanel) return;
+		menuToggle.setAttribute('aria-expanded', String(open));
+		menuToggle.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
+		menuPanel.classList.toggle('hidden', !open);
+		menuToggle.querySelector('[data-menu-icon="open"]')?.classList.toggle('hidden', open);
+		menuToggle.querySelector('[data-menu-icon="close"]')?.classList.toggle('hidden', !open);
+	};
+
+	menuToggle?.addEventListener('click', () => {
+		setMenu(menuToggle.getAttribute('aria-expanded') !== 'true');
+	});
+
+	menuPanel?.querySelectorAll('a').forEach((link) => {
+		link.addEventListener('click', () => setMenu(false));
+	});
+
+	document.addEventListener('keydown', (event) => {
+		if (event.key === 'Escape') setMenu(false);
+	});
+</script>

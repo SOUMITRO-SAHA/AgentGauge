@@ -131,7 +131,19 @@ app/
 docs/PRD.md             Product requirements and roadmap
 ```
 
-Read [`AGENTS.md`](AGENTS.md) and the rules under [`.opencode/rules/`](.opencode/rules/) before making architectural or testing changes. `website/` is reserved for a future site and is not part of the app build.
+Read [`AGENTS.md`](AGENTS.md) and the rules under [`.opencode/rules/`](.opencode/rules/) before making architectural or testing changes.
+
+The marketing site lives in [`website/`](website/) and is a separate Astro project deployed to Cloudflare Workers. It is independent of the app: it never imports app code and is never part of the app build. Run its commands from `website/`:
+
+```sh
+cd website
+bun install
+bun run dev      # Local dev server on :4321
+bun run build    # Production build into dist/
+bun run deploy   # Build and deploy to Cloudflare
+```
+
+The site publishes at `agentgauge.soumitrasaha.com`. Its copy follows the same honesty rules as this README: macOS is the only shipped platform, and a harness is listed as supported only once it has actually been read.
 
 ## Contributing
 

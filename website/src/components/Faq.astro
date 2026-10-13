@@ -1,0 +1,39 @@
+---
+import { faqs } from '../data/content';
+import Icon from './Icon.astro';
+---
+
+<section id="faq" class="scroll-mt-24 py-16 sm:py-24">
+	<div class="mx-auto w-full max-w-6xl px-4 sm:px-6">
+		<div class="mx-auto max-w-2xl text-center">
+			<p class="text-sm font-semibold tracking-wide text-brand-teal uppercase">FAQ</p>
+			<h2
+				class="mt-3 font-display text-3xl font-bold tracking-tight text-balance text-foreground sm:text-4xl"
+			>
+				The questions people actually ask
+			</h2>
+		</div>
+
+		<div class="mx-auto mt-10 max-w-3xl">
+			{
+				faqs.map((faq, index) => (
+					<details
+						data-reveal
+						style={`--reveal-delay:${Math.min(index, 4) * 70}ms`}
+						class="group border-b border-border first:border-t"
+						name="faq"
+					>
+						<summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-5 text-left font-display text-base font-semibold text-foreground marker:content-none">
+							<span>{faq.question}</span>
+							<Icon
+								name="caret-down"
+								class="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+							/>
+						</summary>
+						<p class="pb-5 leading-relaxed text-muted-foreground">{faq.answer}</p>
+					</details>
+				))
+			}
+		</div>
+	</div>
+</section>

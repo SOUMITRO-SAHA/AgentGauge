@@ -1,0 +1,31 @@
+---
+import Base from '../layouts/Base.astro';
+import SiteHeader from '../components/SiteHeader.astro';
+import Hero from '../components/Hero.astro';
+import Concepts from '../components/Concepts.astro';
+import Pillars from '../components/Pillars.astro';
+import HowItWorks from '../components/HowItWorks.astro';
+import Features from '../components/Features.astro';
+import Integrations from '../components/Integrations.astro';
+import Principles from '../components/Principles.astro';
+import Faq from '../components/Faq.astro';
+import CallToAction from '../components/CallToAction.astro';
+import SiteFooter from '../components/SiteFooter.astro';
+import { site } from '../config/site';
+---
+
+<Base title={`${site.name} — know your AI coding quota before it runs out`} description={site.description}>
+	<SiteHeader />
+	<main id="main">
+		<Hero />
+		<Concepts />
+		<Pillars />
+		<HowItWorks />
+		<Features />
+		<Integrations />
+		<Principles />
+		<Faq />
+		<CallToAction />
+	</main>
+	<SiteFooter />
+</Base>

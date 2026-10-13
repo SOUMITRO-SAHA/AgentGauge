@@ -125,7 +125,7 @@ widget schema never asks Swift to infer quota identity from a display label.
 - `app/src-tauri/src/shared/`: Rust primitives shared by 2+ modules (domain types, error taxonomy, config, telemetry). Must not depend on `modules/`.
 - `app/src-tauri/crates/`: new independent Rust library crates, one bounded concern each, consumed as path dependencies.
 - Rust dependencies flow downward only: `lib.rs` (composition root) → `modules` → `shared` → `crates`. No cycles, no sideways imports between sibling modules.
-- `website/`: reserved for a future Astro landing page and documentation site. Do not add it to the app build.
+- `website/`: the Astro landing page, deployed to Cloudflare Workers. Independent of the app — it never imports app code and must never be added to the app build. Its own commands, deploy, and content rules live in [`website/README.md`](website/README.md).
 - Use the `~/` alias for imports from `app/src` (for example, `~/lib/utils`). Keep it aligned in `app/vite.config.ts`, `app/tsconfig.json`, and `app/components.json`.
 - Styling uses Tailwind CSS 4 through `@tailwindcss/vite`; do not add a Tailwind 3 config unless the project is deliberately migrated.
 - **shadcn-first, strictly.** If a component exists in the shadcn registry, it

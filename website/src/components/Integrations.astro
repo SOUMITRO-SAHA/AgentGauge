@@ -1,0 +1,157 @@
+---
+import { capabilityColumns, harnesses, platforms } from '../data/content';
+import type { CapabilityState } from '../data/content';
+import Icon from './Icon.astro';
+
+const stateStyles: Record<CapabilityState, string> = {
+	supported: 'bg-ok/10 text-ok',
+	partial: 'bg-warn/10 text-warn',
+	planned: 'bg-muted text-muted-foreground',
+};
+
+const stateLabels: Record<CapabilityState, string> = {
+	supported: 'Yes',
+	partial: 'Partial',
+	planned: 'Planned',
+};
+
+const platformStyles: Record<string, string> = {
+	available: 'bg-ok/10 text-ok',
+	planned: 'bg-muted text-muted-foreground',
+};
+---
+
+<section id="integrations" class="scroll-mt-24 py-16 sm:py-24">
+	<div class="mx-auto w-full max-w-6xl px-4 sm:px-6">
+		<div class="mx-auto max-w-2xl text-center">
+			<p class="text-sm font-semibold tracking-wide text-brand-teal uppercase">Integrations</p>
+			<h2
+				class="mt-3 font-display text-3xl font-bold tracking-tight text-balance text-foreground sm:text-4xl"
+			>
+				What is real, and what is not yet
+			</h2>
+			<p class="mt-3 text-lg leading-relaxed text-muted-foreground">
+				Each capability is verified on its own. A harness that can be monitored is not
+				automatically a harness that can be automated, so the matrix says both.
+			</p>
+		</div>
+
+		<div
+			data-reveal
+			class="mt-12 overflow-x-auto rounded-lg border border-border/70 bg-surface-raised/70 backdrop-blur-md"
+		>
+			<table class="w-full min-w-[56rem] border-collapse text-left">
+				<caption class="sr-only">
+					Verified capability matrix for each coding harness
+				</caption>
+				<thead>
+					<tr class="border-b border-border">
+						<th
+							scope="col"
+							class="sticky left-0 z-10 bg-surface-raised px-5 py-3 text-sm font-semibold text-foreground"
+							>Harness</th
+						>
+						{
+							capabilityColumns.map((column) => (
+								<th
+									scope="col"
+									class="px-3 py-3 text-xs leading-snug font-semibold text-foreground"
+								>
+									{column}
+								</th>
+							))
+						}
+					</tr>
+				</thead>
+				<tbody>
+					{
+						harnesses.map((harness) => (
+							<tr class="border-b border-border last:border-b-0">
+								<th
+									scope="row"
+									class="sticky left-0 z-10 bg-surface-raised px-5 py-4 align-top"
+								>
+									<span class="block font-display text-sm font-semibold text-foreground">
+										{harness.name}
+									</span>
+									<span class="mt-0.5 block text-xs font-normal text-muted-foreground">
+										{harness.role}
+									</span>
+									<span
+										class={`mt-2 inline-block rounded-md px-2 py-0.5 text-xs font-medium ${stateStyles[harness.state]}`}
+									>
+										{harness.stateLabel}
+									</span>
+									<span class="mt-2 block max-w-[16rem] font-mono text-xs leading-relaxed font-normal text-muted-foreground">
+										{harness.source}
+									</span>
+								</th>
+								{harness.capabilities.map((capability, index) => (
+									<td class="px-3 py-4 align-top">
+										<span
+											class={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${stateStyles[capability]}`}
+										>
+											{stateLabels[capability]}
+										</span>
+										<span class="mt-1.5 block max-w-[11rem] text-xs leading-relaxed font-normal text-muted-foreground">
+											{harness.capabilityLabels[index]}
+										</span>
+									</td>
+								))}
+							</tr>
+						))
+					}
+				</tbody>
+			</table>
+		</div>
+
+		<p class="mt-4 text-sm leading-relaxed text-muted-foreground">
+			A harness name here is a priority, not proof of support. An available adapter or model
+			catalog does not by itself establish subscription monitoring or automation eligibility.
+		</p>
+
+		<div class="mt-14">
+			<h3 class="text-center font-display text-2xl font-bold tracking-tight text-foreground">
+				Platforms
+			</h3>
+			<p class="mx-auto mt-2 max-w-2xl text-center text-muted-foreground">
+				AgentGauge ships on macOS. Windows and Linux are coming, and we would rather say so
+				plainly than imply coverage we have not proven.
+			</p>
+
+			<div class="mt-8 grid gap-4 sm:grid-cols-3">
+				{
+					platforms.map((platform, index) => (
+						<article
+							data-reveal
+							style={`--reveal-delay:${index * 90}ms`}
+							class="rounded-lg border border-border/70 bg-surface-raised/70 p-6 backdrop-blur-md"
+						>
+							<div class="flex items-center justify-between gap-3">
+								<span class="font-display text-lg font-semibold text-foreground">
+									{platform.name}
+								</span>
+								<span
+									class={`rounded-md px-2 py-0.5 text-xs font-medium ${platformStyles[platform.status]}`}
+								>
+									{platform.statusLabel}
+								</span>
+							</div>
+							<p class="mt-3 text-sm leading-relaxed text-muted-foreground">
+								{platform.note}
+							</p>
+						</article>
+					))
+				}
+			</div>
+
+			<p class="mt-4 flex items-start gap-2 text-sm text-muted-foreground">
+				<Icon name="desktop" class="mt-0.5 size-4 shrink-0 text-brand-teal" />
+				<span>
+					The desktop widget and background scheduling are macOS features. Nothing equivalent
+					is claimed for other platforms.
+				</span>
+			</p>
+		</div>
+	</div>
+</section>

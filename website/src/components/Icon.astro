@@ -1,0 +1,23 @@
+---
+import { iconPaths, type IconName } from '../data/icons';
+
+interface Props {
+	name: IconName;
+	class?: string;
+	label?: string;
+}
+
+const { name, class: className = 'size-5', label } = Astro.props;
+---
+
+<svg
+	class={className}
+	viewBox="0 0 256 256"
+	fill="currentColor"
+	aria-hidden={label ? undefined : 'true'}
+	aria-label={label}
+	role={label ? 'img' : undefined}
+	focusable="false"
+>
+	<path d={iconPaths[name]} />
+</svg>

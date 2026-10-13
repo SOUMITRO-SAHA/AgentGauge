@@ -1,0 +1,30 @@
+{
+  "name": "agentgauge-website",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "icons:generate": "bun run scripts/generate-icons.ts",
+    "deploy": "astro build && wrangler deploy",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@phosphor-icons/core": "^2.1.1",
+    "astro": "^7.3.8"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/bun": "^1.4.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6",
+    "wrangler": "^4.149.0"
+  }
+}

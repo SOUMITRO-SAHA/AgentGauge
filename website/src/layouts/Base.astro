@@ -1,0 +1,91 @@
+---
+import '../styles/global.css';
+
+interface Props {
+	title: string;
+	description: string;
+}
+
+const { title, description } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const ogImage = new URL('/brand_logo.png', Astro.site);
+
+/*
+ * Applied before first paint so a dark-mode visitor never sees a white flash.
+ * `matchMedia` decides the default; the stored override is the user's own choice.
+ */
+const themeInit = `(() => {
+	try {
+		const stored = localStorage.getItem('theme');
+		const dark = stored
+			? stored === 'dark'
+			: matchMedia('(prefers-color-scheme: dark)').matches;
+		document.documentElement.classList.toggle('dark', dark);
+	} catch {}
+})();`;
+
+const revealInit = `(() => {
+	const targets = document.querySelectorAll('[data-reveal]');
+	if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+	if (!('IntersectionObserver' in window)) {
+		targets.forEach((el) => el.setAttribute('data-revealed', ''));
+		return;
+	}
+	document.documentElement.classList.add('js');
+	const observer = new IntersectionObserver(
+		(entries) => {
+			for (const entry of entries) {
+				if (!entry.isIntersecting) continue;
+				entry.target.setAttribute('data-revealed', '');
+				observer.unobserve(entry.target);
+			}
+		},
+		{ rootMargin: '0px 0px -10% 0px', threshold: 0.05 },
+	);
+	targets.forEach((el) => observer.observe(el));
+})();`;
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>{title}</title>
+		<meta name="description" content={description} />
+		<link rel="canonical" href={canonical} />
+		<meta name="generator" content={Astro.generator} />
+
+		<meta property="og:type" content="website" />
+		<meta property="og:site_name" content="AgentGauge" />
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={description} />
+		<meta property="og:url" content={canonical} />
+		<meta property="og:image" content={ogImage} />
+		<meta name="twitter:card" content="summary" />
+
+		<meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)" />
+		<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+
+		<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+		<link rel="apple-touch-icon" href="/brand_logo.png" />
+
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			rel="stylesheet"
+			href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..700&family=Manrope:wght@400..800&display=swap"
+		/>
+
+		<script is:inline set:html={themeInit} />
+	</head>
+	<body>
+		<a
+			href="#main"
+			class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:bg-surface-raised focus:px-4 focus:py-2 focus:shadow-lg"
+			>Skip to content</a
+		>
+		<slot />
+		<script is:inline set:html={revealInit} />
+	</body>
+</html>

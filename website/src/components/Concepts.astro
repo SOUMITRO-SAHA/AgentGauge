@@ -1,0 +1,57 @@
+---
+import Icon from './Icon.astro';
+
+const concepts = [
+	{
+		icon: 'terminal-window' as const,
+		term: 'Coding harness',
+		body: 'The agent tool you type into — Codex, OpenCode, Pi. It is already installed, already signed in, and already knows which subscription it draws from.',
+	},
+	{
+		icon: 'clock-countdown' as const,
+		term: 'Usage window',
+		body: 'A limit interval your provider owns, such as a five-hour or a weekly allowance. It resets on the provider’s schedule, not on a timer in your app.',
+	},
+	{
+		icon: 'gauge' as const,
+		term: 'Why it matters',
+		body: 'Running into the wall mid-task is the expensive part. Seeing the window before it bites is the entire point of AgentGauge.',
+	},
+];
+---
+
+<section class="py-16 sm:py-20">
+	<div class="mx-auto w-full max-w-6xl px-4 sm:px-6">
+		<div class="mx-auto max-w-2xl text-center">
+			<h2
+				class="font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl"
+			>
+				New to this? Three words first
+			</h2>
+			<p class="mt-3 text-lg leading-relaxed text-muted-foreground">
+				You do not need to know how any of this works to use the app. But the vocabulary
+				explains why the screens look the way they do.
+			</p>
+		</div>
+
+		<div class="mt-10 grid gap-4 md:grid-cols-3">
+			{
+				concepts.map((concept, index) => (
+					<article
+						data-reveal
+						style={`--reveal-delay:${index * 90}ms`}
+						class="group rounded-lg border border-border/70 bg-surface-raised/70 p-6 backdrop-blur-md transition-colors hover:border-brand-teal/40"
+					>
+						<span class="inline-flex size-10 items-center justify-center rounded-md bg-brand-teal/10 text-brand-teal transition-transform group-hover:scale-105">
+							<Icon name={concept.icon} class="size-5" />
+						</span>
+						<h3 class="mt-4 font-display text-lg font-semibold text-foreground">
+							{concept.term}
+						</h3>
+						<p class="mt-2 leading-relaxed text-muted-foreground">{concept.body}</p>
+					</article>
+				))
+			}
+		</div>
+	</div>
+</section>

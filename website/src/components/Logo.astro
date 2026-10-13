@@ -1,0 +1,21 @@
+---
+interface Props {
+	class?: string;
+}
+
+const { class: className = 'size-8' } = Astro.props;
+---
+
+<svg
+	class={className}
+	viewBox="0 0 512 512"
+	role="img"
+	aria-labelledby="agentgauge-mark-title"
+	fill="currentColor"
+>
+	<title id="agentgauge-mark-title">AgentGauge</title>
+	<path
+		fill-rule="evenodd"
+		d="M256 64 456 432H344L256 300 168 432H56ZM256 145 322 300H190Z"></path>
+	<path d="M181 302h30v40h-30zM241 302h30v40h-30zM301 302h30v40h-30z"></path>
+</svg>

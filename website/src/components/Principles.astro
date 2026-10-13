@@ -1,0 +1,40 @@
+---
+import { principles } from '../data/content';
+import Icon from './Icon.astro';
+---
+
+<section id="principles" class="scroll-mt-24 border-y border-border bg-surface-sunken/40 py-16 sm:py-24">
+	<div class="mx-auto w-full max-w-6xl px-4 sm:px-6">
+		<div class="mx-auto max-w-2xl text-center">
+			<p class="text-sm font-semibold tracking-wide text-brand-teal uppercase">Principles</p>
+			<h2
+				class="mt-3 font-display text-3xl font-bold tracking-tight text-balance text-foreground sm:text-4xl"
+			>
+				Six rules we do not bend
+			</h2>
+			<p class="mt-3 text-lg leading-relaxed text-muted-foreground">
+				These decide what gets built, and what gets refused.
+			</p>
+		</div>
+
+		<div class="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+			{
+				principles.map((principle, index) => (
+					<article
+						data-reveal
+						style={`--reveal-delay:${(index % 3) * 90}ms`}
+						class="rounded-lg border border-border/70 bg-surface-raised/70 p-6 backdrop-blur-md"
+					>
+						<span class="inline-flex size-9 items-center justify-center rounded-md bg-brand-ink text-background dark:bg-foreground dark:text-background">
+							<Icon name={principle.icon} class="size-4" />
+						</span>
+						<h3 class="mt-4 font-display text-base font-semibold text-foreground">
+							{principle.title}
+						</h3>
+						<p class="mt-2 text-sm leading-relaxed text-muted-foreground">{principle.body}</p>
+					</article>
+				))
+			}
+		</div>
+	</div>
+</section>

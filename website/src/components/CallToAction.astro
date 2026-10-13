@@ -1,0 +1,46 @@
+---
+import { site } from '../config/site';
+import Icon from './Icon.astro';
+---
+
+<section class="py-16 sm:py-24">
+	<div class="mx-auto w-full max-w-6xl px-4 sm:px-6">
+		<div
+			data-reveal
+			class="relative isolate overflow-hidden rounded-xl border border-border/70 bg-surface-raised/70 px-6 py-14 text-center backdrop-blur-md sm:px-12"
+		>
+			<div
+				class="pointer-events-none absolute inset-0 -z-10"
+				style="background-image: radial-gradient(120% 100% at 50% 0%, color-mix(in oklch, var(--brand-teal) 16%, transparent), transparent 70%)"
+			>
+			</div>
+
+			<h2
+				class="mx-auto max-w-2xl font-display text-3xl font-bold tracking-tight text-balance text-foreground sm:text-4xl"
+			>
+				See your remaining quota before it runs out
+			</h2>
+			<p class="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
+				AgentGauge is in early access and macOS is the only platform we have shipped. The
+				repository carries the roadmap, the product requirements, and the open questions.
+			</p>
+
+			<div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+				<a
+					href={site.repository}
+					class="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-brand-ink px-7 text-sm font-semibold text-background transition-opacity hover:opacity-90 dark:bg-foreground dark:text-background"
+				>
+					<Icon name="github-logo" class="size-4" />
+					View on GitHub
+				</a>
+				<a
+					href={`${site.repository}#readme`}
+					class="inline-flex h-12 items-center justify-center gap-2 rounded-md border border-border bg-surface-raised px-7 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+				>
+					Read the docs
+					<Icon name="arrow-up-right" class="size-4" />
+				</a>
+			</div>
+		</div>
+	</div>
+</section>

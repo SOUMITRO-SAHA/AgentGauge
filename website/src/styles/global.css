@@ -1,0 +1,206 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Brand tokens mirror `app/src/index.css` so the site and the product read as
+ * one thing. Kept as its own copy rather than imported: `website/` is an
+ * independent deployable and must not build against the app's sources.
+ */
+@theme {
+	--font-sans: 'Manrope', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+		'Segoe UI', sans-serif;
+	--font-display: 'DM Sans', 'Manrope', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono',
+		monospace;
+
+	--shadow-glow: 0 0 0 1px color-mix(in oklch, var(--brand-teal) 22%, transparent),
+		0 18px 50px -24px color-mix(in oklch, var(--brand-teal) 45%, transparent);
+
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@theme inline {
+	--color-brand-ink: var(--brand-ink);
+	--color-brand-teal: var(--brand-teal);
+	--color-brand-amber: var(--brand-amber);
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-border: var(--border);
+	--color-ring: var(--ring);
+	--color-ok: var(--ok);
+	--color-warn: var(--warn);
+	--color-critical: var(--critical);
+	--color-unknown: var(--unknown);
+	--color-surface: var(--surface);
+	--color-surface-raised: var(--surface-raised);
+	--color-surface-sunken: var(--surface-sunken);
+	--color-accent-glass: var(--accent-glass);
+}
+
+:root {
+	font-synthesis: none;
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	color-scheme: light dark;
+
+	--radius: 0.625rem;
+	--brand-ink: #111827;
+	--brand-teal: #25c6b7;
+	--brand-amber: #f2b84b;
+
+	--background: oklch(1 0 0);
+	--foreground: oklch(0.145 0 0);
+	--card: oklch(1 0 0);
+	--card-foreground: oklch(0.145 0 0);
+	--muted: oklch(0.97 0 0);
+	--muted-foreground: oklch(0.556 0 0);
+	--border: oklch(0.922 0 0);
+	--ring: oklch(0.708 0 0);
+
+	--ok: oklch(0.62 0.15 155);
+	--warn: oklch(0.72 0.15 75);
+	--critical: oklch(0.58 0.21 25);
+	--unknown: oklch(0.62 0.02 260);
+
+	--surface: oklch(0.985 0.002 260);
+	--surface-raised: oklch(1 0 0);
+	--surface-sunken: oklch(0.96 0.003 260);
+	--accent-glass: oklch(1 0 0 / 70%);
+}
+
+.dark {
+	--background: oklch(0.145 0 0);
+	--foreground: oklch(0.985 0 0);
+	--card: oklch(0.205 0 0);
+	--card-foreground: oklch(0.985 0 0);
+	--muted: oklch(0.269 0 0);
+	--muted-foreground: oklch(0.708 0 0);
+	--border: oklch(1 0 0 / 10%);
+	--ring: oklch(0.556 0 0);
+
+	--ok: oklch(0.72 0.16 155);
+	--warn: oklch(0.78 0.15 78);
+	--critical: oklch(0.66 0.2 25);
+	--unknown: oklch(0.55 0.02 260);
+
+	--surface: oklch(0.16 0.006 265);
+	--surface-raised: oklch(0.21 0.008 265);
+	--surface-sunken: oklch(0.13 0.005 265);
+	--accent-glass: oklch(0.28 0.01 265 / 60%);
+}
+
+@layer base {
+	* {
+		border-color: var(--border);
+	}
+
+	html {
+		scroll-behavior: smooth;
+		scroll-padding-top: 6rem;
+		-webkit-tap-highlight-color: transparent;
+	}
+
+	body {
+		background-color: var(--background);
+		color: var(--foreground);
+		font-family: var(--font-sans);
+		min-width: 320px;
+		min-height: 100vh;
+		margin: 0;
+		overflow-x: hidden;
+		-webkit-font-smoothing: antialiased;
+	}
+
+	:where(a, button, summary):focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+
+	::selection {
+		background: color-mix(in oklch, var(--brand-teal) 30%, transparent);
+	}
+
+	h1,
+	h2,
+	h3 {
+		font-family: var(--font-display);
+		text-wrap: balance;
+	}
+}
+
+/*
+ * The glossy macOS material the app uses, kept identical so the marketing site
+ * and the product share one surface language.
+ */
+@utility glass {
+	background-color: var(--accent-glass);
+	-webkit-backdrop-filter: blur(24px) saturate(160%);
+	backdrop-filter: blur(24px) saturate(160%);
+	border: 1px solid color-mix(in oklch, var(--foreground) 9%, transparent);
+	box-shadow:
+		inset 0 1px 0 color-mix(in oklch, white 42%, transparent),
+		0 10px 30px -12px color-mix(in oklch, black 28%, transparent);
+}
+
+.dark .glass {
+	box-shadow:
+		inset 0 1px 0 color-mix(in oklch, white 14%, transparent),
+		0 10px 30px -12px color-mix(in oklch, black 55%, transparent);
+}
+
+@utility tabular {
+	font-variant-numeric: tabular-nums;
+	font-feature-settings: 'tnum';
+}
+
+/*
+ * Scroll reveal.
+ *
+ * The hidden state is gated behind `.js`, which the inline init script sets
+ * before first paint. Without JavaScript the selector never matches, so the page
+ * renders fully visible instead of leaving every card permanently transparent.
+ */
+@media (prefers-reduced-motion: no-preference) {
+	.js [data-reveal]:not([data-revealed]) {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+
+	.js [data-reveal] {
+		transition:
+			opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+			transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+		transition-delay: var(--reveal-delay, 0ms);
+	}
+
+	.js [data-reveal][data-revealed] {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	html {
+		scroll-behavior: auto;
+	}
+
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}
