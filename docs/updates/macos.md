@@ -3,7 +3,8 @@
 ## Runtime flow
 
 Direct installs use Tauri's signed updater and read the static
-`https://agentgauge.soumitrasaha.com/downloads/latest.json`. When the
+`https://github.com/SOUMITRO-SAHA/AgentGauge/releases/latest/download/latest.json`
+asset from the latest published GitHub release. When the
 returning-user shell opens, AgentGauge checks for an update after onboarding has
 resolved. If one exists, it downloads and verifies the signed bundle, then asks
 the user to restart. The user can defer the restart; Settings → About retains a
@@ -28,23 +29,21 @@ app or DMG. The updater archive's Tauri signature is independent of Apple's code
 signature: it authenticates in-app updates but does not satisfy Gatekeeper.
 macOS may block a downloaded app until the user approves it through the
 Control-click → Open flow or System Settings → Privacy & Security. Public
-downloads use `/downloads/*` on the existing website domain. The website Worker
-reads from a private R2 bucket; the bucket is not exposed through a custom R2
-domain or an `r2.dev` URL.
+downloads are GitHub release assets on the public repository. The website
+Worker serves only the static site; it has no R2 binding and no download
+route.
 
-## Static CDN distribution
+## Static GitHub Releases distribution
 
 Tauri's updater does not require a backend. It reads a static JSON manifest and
 verifies the downloaded archive against the public key embedded in the app;
 `requireSignedVersion` also binds the release version into the signed artifact.
-The release workflow writes immutable versioned artifacts and the latest
-manifests to a private R2 bucket. The app, website, Homebrew Cask, and installer
-use `https://agentgauge.soumitrasaha.com/downloads/*`; first-time website
-downloads receive the branded CDN URL, not an R2 or GitHub asset URL. The
-website Worker uses its R2 binding only to read. R2 bindings are not
-permission-restricted to reads; keep Worker code and deployment credentials
-protected. Only the release pipeline writes through a scoped Cloudflare token.
-No EC2 instance, always-on API
+The release workflow publishes immutable versioned assets and the latest
+manifests to a GitHub release on the public repository; the app, website,
+Homebrew Cask, and installer reference those release-asset URLs directly. There
+is no R2 bucket, CDN, or download proxy. The workflow creates each release as a
+draft, uploads its assets, and only then publishes it, so `releases/latest`
+never resolves to a partially uploaded release. No EC2 instance, always-on API
 server, database, or Redis is needed, so the separate `server/` project is not
 used.
 
@@ -57,14 +56,15 @@ must be able to find them.
 ### Install routes
 
 - **Homebrew:** the separate public `homebrew-agentgauge` tap will publish a
-  version-pinned Cask for the CDN DMG and checksum.
+  version-pinned Cask for the GitHub release DMG and checksum.
 - **Website download:** the site links directly to
-  `https://agentgauge.soumitrasaha.com/downloads/latest/AgentGauge-universal.dmg`.
+  `https://github.com/SOUMITRO-SAHA/AgentGauge/releases/latest/download/AgentGauge-universal.dmg`
+  (a stable-name copy of the versioned DMG uploaded with each release).
 - **Install script:** `curl -fsSL https://agentgauge.soumitrasaha.com/install.sh |
-  sh` detects macOS and its architecture, downloads the versioned DMG through
-  the CDN, verifies its SHA-256 and ad-hoc code signature, then installs to the
-  user's `~/Applications` directory without `sudo`. It explains how to approve
-  the first launch if Gatekeeper blocks it.
+  sh` detects macOS and its architecture, downloads the versioned DMG from the
+  matching GitHub release, verifies its SHA-256 and ad-hoc code signature, then
+  installs to the user's `~/Applications` directory without `sudo`. It explains
+  how to approve the first launch if Gatekeeper blocks it.
 
 The website hides these routes until the first published release is available.
 The installer currently accepts Apple Silicon (`arm64`) and Intel (`x86_64`)
@@ -72,44 +72,39 @@ Macs only; it exits with an explicit message on Windows, Linux, and unsupported
 architectures. Do not advertise those platforms until their package and
 installer paths are implemented and verified.
 
-The installer checks the DMG against a SHA-256 value fetched from the same CDN
-that hosts the DMG. This detects corruption and mismatched files, but it does not
-independently authenticate the publisher or protect against a compromised CDN
-manifest. The embedded ad-hoc signature seals the app contents but does not
-identify a trusted developer. The in-app updater's separate Tauri signature
-provides publisher-key verification for updater archives.
+The installer checks the DMG against a SHA-256 value fetched from the same
+GitHub release that hosts the DMG. This detects corruption and mismatched
+files, but it does not independently authenticate the publisher or protect
+against a compromised release manifest. The embedded ad-hoc signature seals
+the app contents but does not identify a trusted developer. The in-app
+updater's separate Tauri signature provides publisher-key verification for
+updater archives.
 
-Keep the R2 bucket private and disable its development URL (`r2.dev`). The
-website Worker's `/downloads/*` route is the public download surface; the bucket
-API endpoint and write credentials must never be embedded in the app, website,
-Homebrew Cask, or installer. The Worker only accepts GET and HEAD requests and
-streams object metadata and byte ranges from R2. The Cache API caches successful
-full GET responses for immutable versioned artifacts (up to 512 MiB) and the
-short-lived first-download DMG alias. Range/conditional requests and mutable
-manifests bypass the edge cache; a matching strong `If-Range` ETag supports
-resuming downloads, while a stale validator restarts with the full object.
-Cloudflare's Cache API is local to the edge data center, not globally replicated.
+GitHub hosts release assets for public repositories at no charge with no
+bandwidth limit; each individual asset must be under 2 GiB, and at most 1000
+assets may attach to one release. `releases/latest` resolves to the newest
+published (non-draft, non-prerelease) release, and the release workflow is the
+only creator of releases: it always publishes after uploading, so the
+`latest/download` URLs never point at a draft. GitHub enforces asset
+immutability protections once a release is published; replacing an asset then
+requires a collaborator with write access, and the Homebrew Cask and
+installer pin a SHA-256 for each version.
 
 ## Cost comparison
 
-**The selected design has no EC2 or always-on backend bill.** A small edge
-Worker maps `/downloads/*` requests to a private R2 bucket; the rest of the site
-is served as static assets. Workers Free includes 100,000 Worker invocations per
-day, and static asset requests are free and unlimited. The optional Workers Paid
-plan costs $5/month and includes 10 million Worker requests and 30 million CPU
-milliseconds per month. R2 includes 10 GB-month of standard storage, 1 million
-Class A operations, and 10 million Class B operations per month, with no
-internet egress fee. Within those allowances, storage and request costs can be
-$0/month. Above them, usage is billed; this is low-cost, not unlimited free
-hosting. There is no always-on process, PostgreSQL, Redis, or per-user database.
+**The selected design has no EC2 or always-on backend bill.** Release
+artifacts are served by GitHub as release assets on the public repository —
+free, with no bandwidth limit — and the website Worker serves only static site
+assets, which are also free and unlimited. There is no storage account,
+request quota, or egress fee to monitor for downloads. There is no always-on
+process, PostgreSQL, Redis, or per-user database.
 
 The costs that may still apply are distribution costs, not updater-server costs:
 
-| Item | Selected R2 + Cloudflare CDN design | EC2-hosted API alternative |
+| Item | Selected GitHub Releases design | EC2-hosted API alternative |
 | --- | --- | --- |
-| Download Worker requests | Workers Free includes 100,000 requests/day; Workers Paid is $5/month with 10 million requests/month included, then $0.30/million. Static website asset requests are free and unlimited. | An EC2 instance is billed while running, even when requests are idle |
-| Artifact storage and R2 reads | First 10 GB-month, 1 million Class A, and 10 million Class B operations are included; then $0.015/GB-month for standard storage, $4.50/million Class A, and $0.36/million Class B. Edge cache hits for full artifacts avoid R2 reads; misses, ranges, and manifests still read R2. | EC2 storage and network charges apply; a managed database adds separate charges |
-| Internet egress | R2 and Workers have no egress fee for downloads through the website Worker path | AWS internet transfer may be billed after its allowance; EC2 still has an hourly baseline |
+| Download requests and bandwidth | GitHub release assets are free and unmetered for public repositories; each file must be under 2 GiB | An EC2 instance is billed while running, even when requests are idle |
+| Artifact storage | Free as GitHub release assets (≤1000 assets per release) | EC2 storage and network charges apply; a managed database adds separate charges |
 | Database and cache | None | PostgreSQL could run on the same EC2 host, but uses its RAM/disk and needs backups; a managed database costs extra. Redis is not needed for this low-volume check |
 | Release build | Standard GitHub-hosted runners are free and unlimited for public repositories; private repositories use plan quotas and may incur charges after them | The same build cost applies if GitHub Actions is retained; moving the API to EC2 does not remove release-build costs |
 | macOS signing and notarization | $0 for the current ad-hoc-signed, non-notarized release; users may need to approve first launch. Developer ID signing and notarization are optional future improvements and require Apple Developer Program membership (USD $99/year; regional pricing may differ) | EC2 does not change the current ad-hoc route; optional Developer ID signing has the same Apple membership cost |
@@ -138,11 +133,9 @@ recovery plan. A separate RDS database or cache adds separate hourly and storage
 charges; a Multi-AZ database adds more. Use the AWS Pricing Calculator for the
 selected region and design before creating resources.
 
-R2 and Workers remove the outbound-transfer bill from this comparison. The
-download Worker caches successful full artifact responses per edge data center,
-so repeat full downloads at that edge avoid R2 reads; misses, partial downloads,
-and manifest requests still read R2. All download requests still invoke the
-Worker and count toward its request limit.
+GitHub Releases removes the outbound-transfer bill from this comparison
+entirely: public-repository release assets are free to store and deliver, with
+no per-request or per-gigabyte metering.
 
 AWS currently advertises up to 750 free `t4g.small` instance-hours per month
 through **December 31, 2026**. Eligibility and region restrictions apply, and
@@ -161,31 +154,26 @@ budget assumption.
   USD $99/year (regional pricing may differ) for Developer ID signing and
   notarization. There is no separate per-release Apple notarization fee.
 - **GitHub Actions:** public-repository runner usage is free; this repository is
-  currently private, so its runner use is subject to the plan's included minutes
-  and any overage rates.
-- **The binary files are public downloads:** the website Worker exposes them at
-  `https://agentgauge.soumitrasaha.com/downloads/*`; there is no separate R2
-  public domain or AWS S3 URL. The R2 bucket stays private, and only the release
-  workflow writes to it. The source repository can stay private because the
-  updater no longer fetches GitHub release assets.
-- **Worker budget:** download requests invoke the Worker, while ordinary static
-  website assets remain free and unlimited. The Free plan allows 100,000 Worker
-  requests/day, shared across the account; the $5/month Paid plan includes 10
-   million/month. Edge hits avoid R2 reads; uncached requests draw from R2's
-   10-million monthly Class B allowance. Monitor request volume before
-  choosing a Paid plan.
+  public, so release builds cost no plan minutes.
+- **The binary files are public downloads:** GitHub serves them as release
+  assets on the public repository — free, unmetered, no R2 bucket or AWS S3.
+  Only the release workflow creates releases, using the workflow's
+  `contents: write` permission; no storage credentials exist to leak.
+- **Worker budget:** the Worker serves only static website assets, which are
+  free and unlimited. No download traffic reaches it, so the Workers Free plan
+  covers the site regardless of download volume.
 - **If an EC2 backend is added anyway:** expect a fixed always-on compute and
   networking baseline (about $17.51/month in the example above), plus optional
   Apple membership only if Developer ID signing is adopted. The small number of
   update checks does not remove EC2's hourly baseline. The current design avoids
   that bill entirely.
 
-Within R2's and Workers Free's included allowances, the selected distribution
-has **$0/month in storage, request, and egress charges** and no Apple membership
-cost for the current ad-hoc route. If traffic requires Workers Paid, its base
-cost is **$5/month** with 10 million requests included. The illustrative EC2
+The selected distribution has **$0/month in storage, request, and egress
+charges** — GitHub Releases and the static-assets Worker are both free for a
+public repository — and there is no Apple membership cost for the current
+ad-hoc route. The illustrative EC2
 alternative is about **$210/year** before optional Apple membership, tax,
-private-repository GitHub Actions overages, and other extras. If Developer ID
+and other extras. If Developer ID
 signing is added later, budget another USD $99 per year.
 
 This cost comparison is a snapshot checked on October 13, 2026. AWS prices,
@@ -219,7 +207,7 @@ cask "agentgauge" do
   version "0.2.0"
   sha256 "<SHA-256 from the release checksum file>"
 
-  url "https://agentgauge.soumitrasaha.com/downloads/v#{version}/AgentGauge-#{version}-universal.dmg"
+  url "https://github.com/SOUMITRO-SAHA/AgentGauge/releases/download/v#{version}/AgentGauge-#{version}-universal.dmg"
   name "AgentGauge"
   desc "Usage monitor for AI coding harnesses"
   homepage "https://agentgauge.soumitrasaha.com"
@@ -248,56 +236,50 @@ assets, updates the latest manifests, and commits the Homebrew Cask. This is an
 explicit release action: merely pushing a tag does not publish binaries or
 change the in-app updater feed. Before the first release can be published:
 
-1. Create a private R2 bucket named `agentgauge-releases`. Do not connect a
-   separate R2 custom domain, and disable the bucket's `r2.dev` URL. The existing
-   website Worker exposes its objects under
-   `https://agentgauge.soumitrasaha.com/downloads/*` through the `RELEASES`
-   binding in `website/wrangler.jsonc`; versioned objects are immutable and
-   latest aliases carry a short cache lifetime.
-2. Give the release workflow a Cloudflare API token with R2 object-write access,
-   set `CLOUDFLARE_ACCOUNT_ID`, and set the Actions variable
-   `AGENTGAUGE_RELEASES_BUCKET` to `agentgauge-releases` so it matches the
-   Worker's R2 binding. The website deploy token also needs its existing Workers
-   deploy permissions.
-3. Add the private Tauri updater key as the `TAURI_SIGNING_PRIVATE_KEY` GitHub
+1. Add the private Tauri updater key as the `TAURI_SIGNING_PRIVATE_KEY` GitHub
    Actions secret. The local key is at `~/.tauri/agentgauge-updater.key`; the
-   key file is not in the repository. The generated key has no password, so
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` may remain unset. Never publish or
-   commit the private key.
-4. No Apple Developer account or Apple signing secrets are needed for the
+   key file is not in the repository. The secret must contain the key file's
+   plain content (its `untrusted comment:` line plus the base64 payload), not
+   a base64-of-file wrapper — the workflow writes the secret verbatim to the
+   key file `tauri signer` reads. If the key was generated with a password,
+   also set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Before the first release,
+   confirm the key pair with a local sign → verify round-trip against the
+   `pubkey` in `app/src-tauri/tauri.conf.json`. Never publish or commit the
+   private key.
+2. No Apple Developer account or Apple signing secrets are needed for the
    initial release. The workflow uses ad-hoc signing (`APPLE_SIGNING_IDENTITY=-`
    and `AGENTGAUGE_SIGN_IDENTITY=-`) and does not notarize. Keep that limitation
    visible in release notes, the installer, and the Cask caveat. If Developer ID
    signing is adopted later, update the workflow and add the required Apple
    credentials then; it is an optional cost, not a launch prerequisite.
-5. Create the public `homebrew-agentgauge` tap and configure
+3. Create the public `homebrew-agentgauge` tap and configure
    `HOMEBREW_TAP_TOKEN` with Contents write access to that repository. The
    release workflow commits the generated version-pinned Cask and DMG checksum
    there. Do not put a placeholder Cask in this app repository.
-6. Set the website Actions variable `AGENTGAUGE_DOWNLOADS_ENABLED=true` only
-   after the first DMG, installer manifest, `/downloads/*` Worker route, and tap
-   install have been verified. Then manually run the Deploy Website workflow so
-   the new variable is included in the static build. Until then, the website
-   continues to show the repository CTA.
-7. Bump `app/src-tauri/tauri.conf.json`, `app/package.json`, and
+4. Set the website Actions variable `AGENTGAUGE_DOWNLOADS_ENABLED=true` only
+   after the first release's DMG, installer manifest, GitHub release download,
+   and tap install have been verified. Then manually run the Deploy Website
+   workflow so the new variable is included in the static build. Until then,
+   the website continues to show the repository CTA.
+5. Bump `app/src-tauri/tauri.conf.json`, `app/package.json`, and
    `app/src-tauri/Cargo.toml` together before creating the release tag. The
    updater workflow intentionally rejects a v0.1.0 release because this feature
     is next-version work under the v0.1.0 feature lock.
-8. Build the final universal DMG and updater archive before publication: the
-   current Wrangler CLI's `r2 object put` limit is 315 MB per file. If either
-   exceeds that limit, change the upload transport before dispatching a release.
-   Verify the public CDN alias, versioned artifact, Gatekeeper approval on a
-   clean Mac, direct in-app update, and actual Brew install/upgrade/restart before
-   advertising availability.
+6. GitHub release assets must each stay under 2 GiB; the universal DMG and
+   updater archive are far below that today, but re-check before dispatching a
+   release if bundle sizes grow. Verify the published release's download URLs,
+   Gatekeeper approval on a clean Mac, direct in-app update, and actual Brew
+   install/upgrade/restart before advertising availability.
 
-The R2 bucket/domain, public tap, Cloudflare credentials, Homebrew tap token,
-and Tauri updater private key are not configured here, and the release workflow
+The public tap, Homebrew tap token, and Tauri updater private key are not
+configured here, and the release workflow
 has not been run. Apple signing credentials are not a blocker for the current
 ad-hoc distribution route. The app-side update flow is verified with an e2e
-fixture; actual R2 publication, Gatekeeper approval on a clean Mac, Homebrew
-installation, curl installation, and restart into a newer release remain
-release-owner checks. The workflow also rejects v0.1.0 under the existing
-feature lock; the release owner must choose and set the next release version.
+fixture; actual GitHub release publication, Gatekeeper approval on a clean Mac,
+Homebrew installation, curl installation, and restart into a newer release
+remain release-owner checks. The workflow also rejects v0.1.0 under the
+existing feature lock; the release owner must choose and set the next release
+version.
 
 ## Sources
 
@@ -313,15 +295,17 @@ feature lock; the release owner must choose and set the next release version.
 - [Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook#stanza-auto_updates)
   and [Homebrew FAQ](https://docs.brew.sh/FAQ#how-does-brew-upgrade-handle-apps-that-update-themselves)
   — `auto_updates true` and version-aware handling of self-updating apps.
-- [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/)
-  — included storage/operation allowances and no egress fee.
-- [Workers Static Assets routing](https://developers.cloudflare.com/workers/static-assets/routing/)
-  and [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-usage/)
-  — route only `/downloads/*` through the Worker and read private bucket objects.
+- [GitHub About releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
+  — storage and bandwidth quotas: 2 GiB per asset, 1000 assets per release,
+  no total-size or bandwidth limit.
+- [GitHub Linking to releases](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases)
+  — the `releases/latest/download/<asset>` stable URL used by the updater
+  endpoint, installer, and website links.
+- [GitHub CLI release commands](https://cli.github.com/manual/gh_release_create)
+  — draft → upload → publish flow, `--clobber` re-run behavior, and asset
+  label syntax used by the release workflow.
 - [Cloudflare Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
-  — Free/Paid request limits, the $5/month minimum, and static asset billing.
-- [Wrangler R2 object commands](https://developers.cloudflare.com/workers/wrangler/commands/r2/)
-  — release workflow upload behavior and disabling the `r2.dev` URL.
+  — static asset requests are free and unlimited for the site-only Worker.
 - [Tauri macOS signing and notarization](https://v2.tauri.app/distribute/sign/macos/)
   — ad-hoc signing (`-`) and the remaining first-launch approval when no Apple-
   authenticated signing identity is used.

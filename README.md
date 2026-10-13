@@ -57,12 +57,12 @@ The widget requires **macOS 14+ and Xcode 16+**. Build the macOS app and embed t
 There is no public release to install yet. The planned macOS channels are a
 universal DMG, a Homebrew Cask, and a platform-checking installer at
 `curl -fsSL https://agentgauge.soumitrasaha.com/install.sh | sh`. Release
-artifacts and the separately Tauri-signed in-app updater feed will be served
-through the website's `/downloads/*` path, served from a private R2 bucket by
-the website Worker; publishing is a manual release workflow, not an automatic
+artifacts and the separately Tauri-signed in-app updater feed are published as
+GitHub release assets on this public repository — there is no R2 bucket, CDN,
+or download proxy; publishing is a manual release workflow, not an automatic
 tag action. Direct installs use the signed in-app updater; Brew-managed copies
 ask before running a Homebrew upgrade and offer restart only after success. These routes
-will be advertised only after the storage domain and tap are configured and verified.
+will be advertised only after the tap and updater key are configured and verified.
 The initial distribution uses ad-hoc code signing and is not notarized, so
 macOS may require users to approve the first launch. See
 [`docs/updates/macos.md`](docs/updates/macos.md) for setup, costs, and remaining

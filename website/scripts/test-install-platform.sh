@@ -87,10 +87,10 @@ mkdir -p "$2"
 EOF
 chmod +x "$bin_directory"/*
 
-manifest_url='https://agentgauge.soumitrasaha.com/downloads/latest-macos.json'
+manifest_url='https://github.com/SOUMITRO-SAHA/AgentGauge/releases/latest/download/latest-macos.json'
 version='1.2.3'
 sha256='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-expected_url="https://agentgauge.soumitrasaha.com/downloads/v$version/AgentGauge-$version-universal.dmg"
+expected_url="https://github.com/SOUMITRO-SAHA/AgentGauge/releases/download/v$version/AgentGauge-$version-universal.dmg"
 curl_log="$temporary_directory/curl.log"
 home_directory="$temporary_directory/home"
 install_directory="$temporary_directory/Applications"
@@ -114,7 +114,7 @@ if PATH="$bin_directory:$PATH" \
   AGENTGAUGE_TEST_CURL_LOG="$curl_log" \
   AGENTGAUGE_TEST_MANIFEST_URL="$manifest_url" \
   AGENTGAUGE_TEST_EXPECTED_URL="$expected_url" \
-  AGENTGAUGE_TEST_MANIFEST_URL_VALUE=https://agentgauge.soumitrasaha.com/downloads/v1.2.3/AgentGauge-1.2.3-universal.dmg \
+  AGENTGAUGE_TEST_MANIFEST_URL_VALUE=https://github.com/SOUMITRO-SAHA/AgentGauge/releases/download/v1.2.3/AgentGauge-1.2.3-universal.dmg \
   AGENTGAUGE_TEST_VERSION="$version" \
   AGENTGAUGE_TEST_SHA256="$sha256" \
   sh "$root/public/install.sh" >"$temporary_directory/output" 2>&1; then
@@ -156,7 +156,7 @@ if PATH="$bin_directory:$PATH" \
   AGENTGAUGE_TEST_CURL_LOG="$curl_log" \
   AGENTGAUGE_TEST_MANIFEST_URL="$manifest_url" \
   AGENTGAUGE_TEST_EXPECTED_URL="$expected_url" \
-   AGENTGAUGE_TEST_MANIFEST_URL_VALUE=https://agentgauge.soumitrasaha.com/downloads/v1.2.3/AgentGauge-1.2.3-universal.dmg \
+   AGENTGAUGE_TEST_MANIFEST_URL_VALUE=https://github.com/SOUMITRO-SAHA/AgentGauge/releases/download/v1.2.3/AgentGauge-1.2.3-universal.dmg \
   AGENTGAUGE_TEST_VERSION="$version" \
   AGENTGAUGE_TEST_SHA256="$sha256" \
   AGENTGAUGE_TEST_ACTUAL_SHA256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \

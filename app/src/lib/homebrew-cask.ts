@@ -2,18 +2,16 @@ import { RELEASES_BASE_URL } from "~/lib/release-host";
 
 export function renderHomebrewCask({
   version,
-  tag,
   sha256,
 }: {
   readonly version: string;
-  readonly tag: string;
   readonly sha256: string;
 }): string {
   return `cask "agentgauge" do
   version "${version}"
   sha256 "${sha256}"
 
-  url "${RELEASES_BASE_URL}/${encodeURIComponent(tag)}/AgentGauge-${version}-universal.dmg"
+  url "${RELEASES_BASE_URL}/v#{version}/AgentGauge-#{version}-universal.dmg"
   name "AgentGauge"
   desc "Usage monitor for AI coding harnesses"
   homepage "https://agentgauge.soumitrasaha.com"

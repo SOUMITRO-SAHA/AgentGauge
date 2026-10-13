@@ -19,11 +19,11 @@ it("publishes one signed universal bundle for both macOS updater targets", () =>
     platforms: {
       "darwin-aarch64": {
         signature: "signed-bundle",
-        url: "https://agentgauge.soumitrasaha.com/downloads/v0.2.0/AgentGauge.app.tar.gz",
+        url: "https://github.com/SOUMITRO-SAHA/AgentGauge/releases/download/v0.2.0/AgentGauge.app.tar.gz",
       },
       "darwin-x86_64": {
         signature: "signed-bundle",
-        url: "https://agentgauge.soumitrasaha.com/downloads/v0.2.0/AgentGauge.app.tar.gz",
+        url: "https://github.com/SOUMITRO-SAHA/AgentGauge/releases/download/v0.2.0/AgentGauge.app.tar.gz",
       },
     },
   });
@@ -38,7 +38,7 @@ it("publishes a versioned universal DMG for the website installer", () => {
     }),
   ).toEqual({
     version: "0.2.0",
-    url: "https://agentgauge.soumitrasaha.com/downloads/v0.2.0/AgentGauge-0.2.0-universal.dmg",
+    url: "https://github.com/SOUMITRO-SAHA/AgentGauge/releases/download/v0.2.0/AgentGauge-0.2.0-universal.dmg",
     sha256: "a".repeat(64),
   });
 });

@@ -11,7 +11,7 @@
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
-    "test": "bun test src/config/downloads.test.ts src/lib/release-worker.test.ts",
+    "test": "bun test src/config/downloads.test.ts",
     "test:installer": "sh scripts/test-install-platform.sh",
     "icons:generate": "bun run scripts/generate-icons.ts",
     "deploy": "astro build && wrangler deploy",

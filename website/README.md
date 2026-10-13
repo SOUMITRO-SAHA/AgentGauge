@@ -63,21 +63,23 @@ manually run the Deploy Website workflow to rebuild the static site.
 The release workflow is manually dispatched from `main` with a version tag that
 must point to that exact commit; pushing a tag alone does not publish artifacts
 or advance the updater feed. Protect `main` and release tags with the repository's
-normal review/ruleset policy. The DMG and Tauri updater files are stored in the
-private `agentgauge-releases` R2 bucket and served by the existing website Worker
-at `https://agentgauge.soumitrasaha.com/downloads/*`. The bucket's `r2.dev` URL
-stays disabled; the bucket itself is not public. The Worker routes downloads to
-R2 and serves other requests from static assets. The installer currently accepts
+normal review/ruleset policy. The DMG and Tauri updater files are published as
+release assets on the public `SOUMITRO-SAHA/AgentGauge` GitHub repository; the
+updater feed, installer manifest, and a stable-name
+`AgentGauge-universal.dmg` alias ride the same release. The website Worker
+serves only static assets; it has no R2 binding and no download route. The
+installer currently accepts
 macOS Apple Silicon and Intel only and verifies the release
 manifest, SHA-256, and ad-hoc code signature before copying the app to
 `~/Applications`. It is not notarized: macOS may block the first launch, so users
 may need to Control-click the app and choose Open, or approve it in System
-Settings → Privacy & Security. The CDN-hosted checksum detects transfer
-corruption but does not independently authenticate the publisher.
+Settings → Privacy & Security. The checksum fetched from the same release
+detects transfer corruption but does not independently authenticate the
+publisher.
 
-The Worker preserves the objects' `Cache-Control`, ETag, and byte-range metadata
-for downloads. The configured bucket name in `website/wrangler.jsonc` must match
-the `AGENTGAUGE_RELEASES_BUCKET` Actions variable used by the release workflow.
+The release workflow creates each GitHub release with the workflow token's
+`contents: write` permission and is the only release creator; no storage
+bucket or Cloudflare credentials are involved in publishing.
 
 Homebrew installs are intended for the same per-user directory:
 `brew install --cask --appdir="$HOME/Applications" SOUMITRO-SAHA/agentgauge/agentgauge`.

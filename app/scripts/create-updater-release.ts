@@ -107,7 +107,6 @@ await writeFile(
   caskPath,
   renderHomebrewCask({
     version: config.version,
-    tag,
     sha256: dmgChecksum,
   }),
 );
