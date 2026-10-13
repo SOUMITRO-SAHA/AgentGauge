@@ -23,6 +23,9 @@ target
 # Test artifacts (e2e screenshots, scratch files)
 .temp
 
+# Local release-support clones (Homebrew tap); fetched at release time by CI
+release/
+
 # Xcode DerivedData for the macOS widget extension
 app/src-tauri/widget/build/
 app/src-tauri/widget/**/xcuserdata/
