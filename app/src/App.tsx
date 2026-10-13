@@ -70,9 +70,18 @@ function OnboardingGate() {
     onFailure: () => false,
   });
 
+  const progressLoaded = AsyncResult.match(progress, {
+    onInitial: () => false,
+    onSuccess: () => true,
+    onFailure: () => false,
+  });
+
   return (
     <>
-      <AppShell hidden={sessionVisible && showFlow} />
+      <AppShell
+        hidden={sessionVisible && showFlow}
+        autoCheckForUpdates={progressLoaded && !showFlow}
+      />
       <OnboardingFlow />
     </>
   );

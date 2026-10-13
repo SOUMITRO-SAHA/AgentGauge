@@ -1,0 +1,171 @@
+name: Publish macOS release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and publish (for example v0.2.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: macos-latest
+    if: github.ref == 'refs/heads/main'
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: bun install --frozen-lockfile
+
+      - name: Install Wrangler
+        working-directory: website
+        run: bun install --frozen-lockfile
+
+      - name: Verify release version and tag
+        working-directory: app
+        run: |
+          if ! printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            printf '%s\n' 'Release tag must have the form vX.Y.Z.' >&2
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            printf 'Release tag does not exist: %s\n' "$RELEASE_TAG" >&2
+            exit 1
+          fi
+          tag_commit="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          workflow_commit="$(git rev-parse HEAD)"
+          bun scripts/verify-updater-release.ts "$RELEASE_TAG" "$tag_commit" "$workflow_commit"
+
+      - name: Verify release credentials
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          AGENTGAUGE_RELEASES_BUCKET: ${{ vars.AGENTGAUGE_RELEASES_BUCKET }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$HOMEBREW_TAP_TOKEN"
+          test -n "$AGENTGAUGE_RELEASES_BUCKET"
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v7
+        with:
+          repository: SOUMITRO-SAHA/homebrew-agentgauge
+          ref: main
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-agentgauge
+
+      - name: Build the universal app
+        working-directory: app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: "-"
+        run: bun run tauri build --target universal-apple-darwin --bundles app --config src-tauri/tauri.updater-release.conf.json
+
+      - name: Embed and sign WidgetKit
+        env:
+          AGENTGAUGE_WIDGET_ARCH: universal
+          AGENTGAUGE_SIGN_IDENTITY: "-"
+        run: |
+          app_bundle="app/src-tauri/target/universal-apple-darwin/release/bundle/macos/AgentGauge.app"
+          ./app/src-tauri/widget/build-widget.sh all "$app_bundle"
+
+      - name: Create the distribution DMG
+        run: |
+          app_bundle="app/src-tauri/target/universal-apple-darwin/release/bundle/macos/AgentGauge.app"
+          artifact_dir="$(dirname "$app_bundle")"
+          dmg_root="$RUNNER_TEMP/AgentGauge-dmg"
+          version="${RELEASE_TAG#v}"
+          dmg="$artifact_dir/AgentGauge-$version-universal.dmg"
+          mkdir -p "$dmg_root"
+          ditto "$app_bundle" "$dmg_root/AgentGauge.app"
+          ln -s /Applications "$dmg_root/Applications"
+          hdiutil create -volname AgentGauge -srcfolder "$dmg_root" -ov -format UDZO "$dmg"
+          hdiutil verify "$dmg"
+
+      - name: Create final signed manifests and checksums
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          app_bundle="app/src-tauri/target/universal-apple-darwin/release/bundle/macos/AgentGauge.app"
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$RUNNER_TEMP/agentgauge-updater.key"
+          chmod 600 "$RUNNER_TEMP/agentgauge-updater.key"
+          unset TAURI_SIGNING_PRIVATE_KEY
+          export TAURI_SIGNING_PRIVATE_KEY_PATH="$RUNNER_TEMP/agentgauge-updater.key"
+          bun run app/scripts/create-updater-release.ts "$app_bundle" "$RELEASE_TAG"
+
+      - name: Publish versioned artifacts to Cloudflare R2
+        working-directory: website
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AGENTGAUGE_RELEASES_BUCKET: ${{ vars.AGENTGAUGE_RELEASES_BUCKET }}
+        run: |
+          app_bundle="../app/src-tauri/target/universal-apple-darwin/release/bundle/macos/AgentGauge.app"
+          artifact_dir="$(dirname "$app_bundle")"
+          version="${RELEASE_TAG#v}"
+          bucket="$AGENTGAUGE_RELEASES_BUCKET"
+          wrangler="./node_modules/.bin/wrangler"
+          "$wrangler" r2 object put "$bucket/$RELEASE_TAG/AgentGauge.app.tar.gz" --remote --file "$artifact_dir/AgentGauge.app.tar.gz" --content-type application/gzip --cache-control "public, max-age=31536000, immutable"
+          "$wrangler" r2 object put "$bucket/$RELEASE_TAG/AgentGauge.app.tar.gz.sig" --remote --file "$artifact_dir/AgentGauge.app.tar.gz.sig" --content-type text/plain --cache-control "public, max-age=31536000, immutable"
+          "$wrangler" r2 object put "$bucket/$RELEASE_TAG/AgentGauge.app.tar.gz.sha256" --remote --file "$artifact_dir/AgentGauge.app.tar.gz.sha256" --content-type text/plain --cache-control "public, max-age=31536000, immutable"
+          "$wrangler" r2 object put "$bucket/$RELEASE_TAG/AgentGauge-$version-universal.dmg" --remote --file "$artifact_dir/AgentGauge-$version-universal.dmg" --content-type application/x-apple-diskimage --content-disposition "attachment; filename=AgentGauge-$version-universal.dmg" --cache-control "public, max-age=31536000, immutable"
+          "$wrangler" r2 object put "$bucket/$RELEASE_TAG/AgentGauge-$version-universal.dmg.sha256" --remote --file "$artifact_dir/AgentGauge-$version-universal.dmg.sha256" --content-type text/plain --cache-control "public, max-age=31536000, immutable"
+
+      - name: Publish Homebrew Cask
+        run: |
+          app_bundle="app/src-tauri/target/universal-apple-darwin/release/bundle/macos/AgentGauge.app"
+          artifact_dir="$(dirname "$app_bundle")"
+          version="${RELEASE_TAG#v}"
+          mkdir -p homebrew-agentgauge/Casks
+          cp "$artifact_dir/agentgauge.rb" homebrew-agentgauge/Casks/agentgauge.rb
+          git -C homebrew-agentgauge config user.name "github-actions[bot]"
+          git -C homebrew-agentgauge config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-agentgauge add Casks/agentgauge.rb
+          if ! git -C homebrew-agentgauge diff --cached --quiet; then
+            git -C homebrew-agentgauge commit -m "Update AgentGauge to $version"
+            git -C homebrew-agentgauge push origin HEAD:main
+          fi
+
+      - name: Publish latest aliases and updater manifests
+        working-directory: website
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AGENTGAUGE_RELEASES_BUCKET: ${{ vars.AGENTGAUGE_RELEASES_BUCKET }}
+        run: |
+          app_bundle="../app/src-tauri/target/universal-apple-darwin/release/bundle/macos/AgentGauge.app"
+          artifact_dir="$(dirname "$app_bundle")"
+          version="${RELEASE_TAG#v}"
+          bucket="$AGENTGAUGE_RELEASES_BUCKET"
+          wrangler="./node_modules/.bin/wrangler"
+          "$wrangler" r2 object put "$bucket/latest/AgentGauge-universal.dmg" --remote --file "$artifact_dir/AgentGauge-$version-universal.dmg" --content-type application/x-apple-diskimage --content-disposition 'attachment; filename=AgentGauge-universal.dmg' --cache-control "public, max-age=60, must-revalidate"
+          "$wrangler" r2 object put "$bucket/latest-macos.json" --remote --file "$artifact_dir/latest-macos.json" --content-type application/json --cache-control "public, max-age=60, must-revalidate"
+          "$wrangler" r2 object put "$bucket/latest.json" --remote --file "$artifact_dir/latest.json" --content-type application/json --cache-control "public, max-age=60, must-revalidate"
+
+      - name: Remove release signing keychain
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/agentgauge-updater.key"

@@ -20,6 +20,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { useCallback, useEffect, useRef } from "react";
 
 import { routeAtom } from "~/atoms";
+import { AppUpdateProvider } from "~/components/updates/app-update-provider";
 import { AutomationView } from "~/components/views/automation-view";
 import { HomeView } from "~/components/views/home-view";
 import { ProcessView } from "~/components/views/process-view";
@@ -50,7 +51,21 @@ import { isRoute, routeForShortcut, type Route } from "~/lib/navigation";
 const PAGE =
   "mx-auto flex w-full max-w-5xl flex-col gap-[clamp(0.75rem,2.5vw,1.5rem)] px-[clamp(0.75rem,4vw,2rem)] py-[clamp(1rem,4vw,2rem)] pb-28 md:pb-10";
 
-export function AppShell({ hidden = false }: { readonly hidden?: boolean }) {
+export function AppShell({
+  hidden = false,
+  autoCheckForUpdates = false,
+}: {
+  readonly hidden?: boolean;
+  readonly autoCheckForUpdates?: boolean;
+}) {
+  return (
+    <AppUpdateProvider autoCheck={autoCheckForUpdates}>
+      <AppShellContent hidden={hidden} />
+    </AppUpdateProvider>
+  );
+}
+
+function AppShellContent({ hidden }: { readonly hidden: boolean }) {
   const route = useAtomValue(routeAtom);
   const setRoute = useAtomSet(routeAtom);
   // Set the moment the user navigates this session, so the mount-time read of

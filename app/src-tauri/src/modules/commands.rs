@@ -23,6 +23,7 @@ use crate::modules::opencode::OpenCodeCatalog;
 use crate::modules::process_insights;
 use crate::modules::providers::{ProviderRegistry, PING_PROMPT};
 use crate::modules::settings::SettingsStore;
+use crate::modules::updates;
 use crate::modules::widget::{now_secs, SnapshotStore, SystemWidgetStatus};
 use crate::shared::domain::{CodingSubscription, ProviderKind, UsageSnapshot};
 use crate::shared::error::{Error, ErrorKind};
@@ -119,6 +120,15 @@ fn handle(request: AppRequest, state: &AppState, app: &AppHandle) -> Result<AppR
         AppRequest::AppInfo => Ok(AppResponse::AppInfo {
             info: about::app_info(&state.app_version),
         }),
+
+        AppRequest::UpdateChannel => Ok(AppResponse::UpdateChannel {
+            channel: updates::channel(),
+        }),
+
+        AppRequest::UpgradeHomebrew { version } => {
+            updates::upgrade(&version)?;
+            Ok(AppResponse::HomebrewUpgraded)
+        }
 
         AppRequest::OpenLink { url } => {
             about::open_link(app, &url)?;

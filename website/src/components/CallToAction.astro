@@ -21,18 +21,32 @@ import Icon from './Icon.astro';
 				See your remaining quota before it runs out
 			</h2>
 			<p class="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
-				AgentGauge is in early access and macOS is the only platform we have shipped. The
-				repository carries the roadmap, the product requirements, and the open questions.
+				{
+					site.downloadsAvailable
+						? 'AgentGauge is in early access, and macOS is the only platform we have shipped.'
+						: 'AgentGauge is in early access and macOS is the only platform we have shipped. The repository carries the roadmap, the product requirements, and the open questions.'
+				}
 			</p>
 
 			<div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-				<a
-					href={site.repository}
-					class="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-brand-ink px-7 text-sm font-semibold text-background transition-opacity hover:opacity-90 dark:bg-foreground dark:text-background"
-				>
-					<Icon name="github-logo" class="size-4" />
-					View on GitHub
-				</a>
+				{
+					site.downloadsAvailable ? (
+						<a
+							href={`${site.downloadsBaseUrl}/latest/AgentGauge-universal.dmg`}
+							class="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-brand-ink px-7 text-sm font-semibold text-background transition-opacity hover:opacity-90 dark:bg-foreground dark:text-background"
+						>
+							Download for macOS
+						</a>
+					) : (
+						<a
+							href={site.repository}
+							class="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-brand-ink px-7 text-sm font-semibold text-background transition-opacity hover:opacity-90 dark:bg-foreground dark:text-background"
+						>
+							<Icon name="github-logo" class="size-4" />
+							View on GitHub
+						</a>
+					)
+				}
 				<a
 					href={`${site.repository}#readme`}
 					class="inline-flex h-12 items-center justify-center gap-2 rounded-md border border-border bg-surface-raised px-7 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
@@ -41,6 +55,24 @@ import Icon from './Icon.astro';
 					<Icon name="arrow-up-right" class="size-4" />
 				</a>
 			</div>
+			{
+				site.downloadsAvailable && (
+					<div class="mx-auto mt-6 grid max-w-2xl gap-4 text-left sm:grid-cols-2">
+						<div>
+							<p class="text-sm font-semibold text-foreground">Homebrew</p>
+							<code class="mt-2 block break-all rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-muted-foreground">
+								brew install --cask --appdir="$HOME/Applications" SOUMITRO-SAHA/agentgauge/agentgauge
+							</code>
+						</div>
+						<div>
+							<p class="text-sm font-semibold text-foreground">Installer script</p>
+							<code class="mt-2 block break-all rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-muted-foreground">
+								curl -fsSL {site.installerUrl} | sh
+							</code>
+						</div>
+					</div>
+				)
+			}
 		</div>
 	</div>
 </section>

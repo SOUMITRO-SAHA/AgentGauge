@@ -19,6 +19,7 @@ use crate::modules::cli_detection::CliToolStatus;
 use crate::modules::kickoff::KickoffOverview;
 use crate::modules::onboarding::{OnboardingProgress, OnboardingStep};
 use crate::modules::process_insights::ProcessInsights as ProcessInsightsReport;
+use crate::modules::updates::UpdateChannel;
 use crate::modules::widget::SystemWidgetStatus;
 use crate::shared::domain::{
     AccountUsage, CodingSubscription, PlanKind, ProviderKind, UsageSnapshot,
@@ -43,11 +44,17 @@ pub enum AppRequest {
     ProviderStatus,
     /// Facts about this build, and the outbound links the Settings screen offers.
     AppInfo,
+    UpdateChannel,
+    UpgradeHomebrew {
+        version: String,
+    },
     /// Opens one of the app's own outbound links in the user's browser.
     ///
     /// The URL is validated against the allowlist in `modules::about` before
     /// the opener runs, so this is not a generic "open anything" capability.
-    OpenLink { url: String },
+    OpenLink {
+        url: String,
+    },
     /// Detects supported coding-agent CLIs without starting sessions.
     CliDetection,
     /// Reads the read-only process and storage insights for the app and the
@@ -65,31 +72,48 @@ pub enum AppRequest {
     /// Reads usage for every provider.
     ReadUsage,
     /// Reads usage for one provider, propagating its failure.
-    ReadUsageFor { provider: ProviderKind },
+    ReadUsageFor {
+        provider: ProviderKind,
+    },
     /// Reads account activity for one provider.
-    ReadAccountUsage { provider: ProviderKind },
+    ReadAccountUsage {
+        provider: ProviderKind,
+    },
     /// Reads the account plan tier, which an API-key account does not have.
-    ReadPlan { provider: ProviderKind },
+    ReadPlan {
+        provider: ProviderKind,
+    },
     /// Sends the minimal prompt that proves the account can still answer.
     ///
     /// Spends quota. Nothing may send this on a timer the user did not opt into.
-    SendPing { prompt: Option<String> },
+    SendPing {
+        prompt: Option<String>,
+    },
     /// Every sub's rollover-monitor state.
     AutomationState,
     /// Starts one sub's rollover monitor. Idempotent, and persisted: the
     /// choice survives a relaunch.
-    StartAutomation { kind: ProviderKind },
+    StartAutomation {
+        kind: ProviderKind,
+    },
     /// Stops one sub's rollover monitor. Persisted.
-    StopAutomation { kind: ProviderKind },
+    StopAutomation {
+        kind: ProviderKind,
+    },
     /// Clears a detected rollover once the UI has shown it.
-    AcknowledgeRollover { kind: ProviderKind },
+    AcknowledgeRollover {
+        kind: ProviderKind,
+    },
     /// The scheduled kickoff's per-subscription state and scheduler status.
     KickoffState,
     /// Opts one subscription into (or out of) the scheduled kickoff.
     ///
     /// This is the explicit quota-spending opt-in: nothing may schedule a
     /// prompt without a `true` that arrived through this request.
-    SetKickoffEnabled { kind: ProviderKind, enabled: bool },
+    SetKickoffEnabled {
+        kind: ProviderKind,
+        enabled: bool,
+    },
     /// Selects the model the scheduled kickoff uses for one subscription.
     SetKickoffModel {
         kind: ProviderKind,
@@ -141,6 +165,8 @@ impl AppRequest {
             Self::Hello => "hello",
             Self::ProviderStatus => "providerStatus",
             Self::AppInfo => "appInfo",
+            Self::UpdateChannel => "updateChannel",
+            Self::UpgradeHomebrew { .. } => "upgradeHomebrew",
             Self::OpenLink { .. } => "openLink",
             Self::CliDetection => "cliDetection",
             Self::ProcessInsights => "processInsights",
@@ -186,6 +212,10 @@ pub enum AppResponse {
     AppInfo {
         info: AppInfo,
     },
+    UpdateChannel {
+        channel: UpdateChannel,
+    },
+    HomebrewUpgraded,
     /// An outbound link was handed to the system opener.
     LinkOpened,
     CliDetections {

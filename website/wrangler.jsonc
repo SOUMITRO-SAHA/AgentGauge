@@ -1,8 +1,17 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "agentgauge-website",
+	"main": "./src/worker.ts",
 	"compatibility_date": "2026-10-13",
 	"assets": {
-		"directory": "./dist"
-	}
+		"directory": "./dist",
+		"binding": "ASSETS",
+		"run_worker_first": ["/downloads", "/downloads/*"]
+	},
+	"r2_buckets": [
+		{
+			"binding": "RELEASES",
+			"bucket_name": "agentgauge-releases"
+		}
+	]
 }

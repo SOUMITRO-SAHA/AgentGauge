@@ -51,6 +51,8 @@ log = "0.4"
 # src/lib.rs, so they are compiled into debug builds but never activated in release.
 tauri-plugin-wdio = "1"
 tauri-plugin-wdio-webdriver = "1"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 # macOS Dock tile for unbundled debug runs. `tauri dev` gets this from Tauri's
 # own `cfg(dev)` path, but the e2e binary is a plain `cargo build` and would

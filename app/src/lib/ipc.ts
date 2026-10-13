@@ -690,6 +690,8 @@ export const AppRequest = Schema.Union([
   Schema.Struct({ type: Schema.Literal("hello") }),
   Schema.Struct({ type: Schema.Literal("providerStatus") }),
   Schema.Struct({ type: Schema.Literal("appInfo") }),
+  Schema.Struct({ type: Schema.Literal("updateChannel") }),
+  Schema.Struct({ type: Schema.Literal("upgradeHomebrew"), version: Schema.String }),
   Schema.Struct({ type: Schema.Literal("openLink"), url: Schema.String }),
   Schema.Struct({ type: Schema.Literal("cliDetection") }),
   Schema.Struct({ type: Schema.Literal("processInsights") }),
@@ -759,6 +761,8 @@ export const AppResponse = Schema.Union([
     providers: Schema.Array(ProviderStatus),
   }),
   Schema.Struct({ type: Schema.Literal("appInfo"), info: AppInfo }),
+  Schema.Struct({ type: Schema.Literal("updateChannel"), channel: Schema.Literals(["direct", "homebrew"]) }),
+  Schema.Struct({ type: Schema.Literal("homebrewUpgraded") }),
   Schema.Struct({ type: Schema.Literal("linkOpened") }),
   Schema.Struct({
     type: Schema.Literal("cliDetections"),
@@ -905,6 +909,16 @@ export const getProviderStatus = () =>
 export const getAppInfo = () =>
   request({ type: "appInfo" }).pipe(
     Effect.map((response) => expectType(response, "appInfo").info),
+  );
+
+export const getUpdateChannel = () =>
+  request({ type: "updateChannel" }).pipe(
+    Effect.map((response) => expectType(response, "updateChannel").channel),
+  );
+
+export const upgradeHomebrew = (version: string) =>
+  request({ type: "upgradeHomebrew", version }).pipe(
+    Effect.map((response) => { expectType(response, "homebrewUpgraded"); }),
   );
 
 /**

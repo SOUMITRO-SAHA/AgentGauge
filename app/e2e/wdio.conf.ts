@@ -40,6 +40,7 @@ export const config: WebdriverIO.Config = {
       path.join(here, "specs", "features", "widget.e2e.ts"),
       path.join(here, "specs", "features", "widget-setup.e2e.ts"),
       path.join(here, "specs", "features", "settings.e2e.ts"),
+      path.join(here, "specs", "features", "updates.e2e.ts"),
       path.join(here, "specs", "features", "styling.e2e.ts"),
       path.join(here, "specs", "features", "stats", "stats.e2e.ts"),
       path.join(here, "specs", "features", "stats", "all-plans.e2e.ts"),

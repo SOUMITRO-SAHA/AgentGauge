@@ -6,7 +6,7 @@ import Logo from './Logo.astro';
 const assurances = [
 	{ icon: 'lock-simple' as const, label: 'No API keys, ever' },
 	{ icon: 'desktop' as const, label: 'Runs entirely on your Mac' },
-	{ icon: 'shield-check' as const, label: 'No account, no cloud' },
+	{ icon: 'shield-check' as const, label: 'No account, no usage uploads' },
 ];
 ---
 
@@ -60,13 +60,23 @@ const assurances = [
 		</p>
 
 		<div class="mt-9 flex flex-col items-center gap-3 sm:flex-row">
-			<a
-				href={site.repository}
-				class="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-brand-ink px-7 text-sm font-semibold text-background transition-all hover:opacity-90 dark:bg-foreground dark:text-background"
-			>
-				View on GitHub
-				<Icon name="arrow-clockwise" class="hidden size-4" />
-			</a>
+			{
+				site.downloadsAvailable ? (
+					<a
+						href={`${site.downloadsBaseUrl}/latest/AgentGauge-universal.dmg`}
+						class="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-brand-ink px-7 text-sm font-semibold text-background transition-all hover:opacity-90 dark:bg-foreground dark:text-background"
+					>
+						Download for macOS
+					</a>
+				) : (
+					<a
+						href={site.repository}
+						class="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-brand-ink px-7 text-sm font-semibold text-background transition-all hover:opacity-90 dark:bg-foreground dark:text-background"
+					>
+						View on GitHub
+					</a>
+				)
+			}
 			<a
 				href="#how-it-works"
 				class="inline-flex h-12 items-center justify-center rounded-md border border-border bg-surface-raised px-7 text-sm font-semibold text-foreground transition-colors hover:bg-muted"

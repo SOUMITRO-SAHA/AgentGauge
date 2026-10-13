@@ -16,4 +16,5 @@ pub mod opencode;
 pub mod process_insights;
 pub mod providers;
 pub mod settings;
+pub mod updates;
 pub mod widget;

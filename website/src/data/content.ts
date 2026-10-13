@@ -290,14 +290,14 @@ export const faqs: Faq[] = [
 	},
 	{
 		question: 'Is my code sent anywhere?',
-		answer: 'No. AgentGauge is local-first. Your session history is read on your own machine to build your own charts, and there is no upload path.',
+		answer: 'No. AgentGauge reads session history locally and does not upload usage data. It fetches static update metadata and Tauri-updater-signed update archives, but never sends your sessions or provider credentials.',
 	},
 	{
 		question: 'Can I use it on Windows or Linux?',
 		answer: 'Not yet. macOS is the only platform we have built and exercised, so we would rather say that plainly than imply coverage we have not proven. Both are on the roadmap.',
 	},
 	{
-		question: 'Why is the repository the main call to action?',
-		answer: 'The project is still in early access, so there is no polished release download to point you at yet. The repository carries the roadmap, the product requirements, and the open questions.',
+		question: 'How can I install AgentGauge?',
+		answer: 'macOS is the only supported platform today. When a release is available, this page lists the direct DMG, Homebrew Cask, and macOS installer script. Initial releases are ad-hoc signed and not notarized, so macOS may require you to approve the first launch.',
 	},
 ];

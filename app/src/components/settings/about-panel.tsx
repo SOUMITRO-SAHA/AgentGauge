@@ -17,7 +17,9 @@ import { PANEL, PanelHeader } from "~/components/dashboard/panel";
 import { OutboundLink } from "~/components/settings/outbound-link";
 import { BrandMark } from "~/components/shell/navigation";
 import { Badge } from "~/components/ui/badge";
+import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
+import { useAppUpdate } from "~/components/updates/app-update-provider";
 
 import type { AppInfo } from "~/lib/ipc";
 
@@ -74,6 +76,7 @@ function Facts({ info }: { readonly info: AppInfo }) {
           </p>
         </div>
       </div>
+      {info.os === "macos" && <UpdateControls />}
       <div className="flex flex-wrap gap-2 border-t border-border/60 pt-3">
         <OutboundLink url={info.links.repository} testId="about-link-repository">
           Repository
@@ -82,6 +85,72 @@ function Facts({ info }: { readonly info: AppInfo }) {
           Releases
         </OutboundLink>
       </div>
+    </div>
+  );
+}
+
+function UpdateControls() {
+  const { state, checkForUpdates, restart, installWithHomebrew } = useAppUpdate();
+  const isReady = state.kind === "ready" || state.kind === "restart-failed";
+  const isRestarting = state.kind === "restarting";
+  const isHomebrew = state.kind === "brew-available" || state.kind === "brew-upgrading" || state.kind === "brew-failed";
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="update-controls">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={state.kind === "checking" || isReady || isRestarting || isHomebrew}
+        onClick={checkForUpdates}
+        data-testid="update-check"
+      >
+        {state.kind === "checking" ? "Checking…" : "Check for updates"}
+      </Button>
+      {state.kind === "up-to-date" && (
+        <p className="text-xs text-muted-foreground" data-testid="update-up-to-date">
+          You’re up to date.
+        </p>
+      )}
+      {state.kind === "failed" && (
+        <p className="text-xs text-destructive" data-testid="update-check-failed">
+          Could not check for updates. Try again later.
+        </p>
+      )}
+      {isHomebrew && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="update-brew-inline">
+          <p className="text-xs text-muted-foreground">
+            Version {state.update.version} is available through Homebrew.
+          </p>
+          <Button type="button" size="sm" disabled={state.kind === "brew-upgrading"} onClick={installWithHomebrew} data-testid="update-brew-inline-install">
+            {state.kind === "brew-upgrading" ? "Updating…" : "Update with Homebrew"}
+          </Button>
+          {state.kind === "brew-failed" && <p className="text-xs text-destructive" data-testid="update-brew-inline-failed">Homebrew update failed. Try again or use Terminal.</p>}
+        </div>
+      )}
+      {isReady && (
+        <div className="flex flex-wrap items-center gap-2">
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="update-ready-inline"
+          >
+            Version {state.update.version} is ready to restart.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            onClick={restart}
+            data-testid="update-restart-inline"
+          >
+            Restart now
+          </Button>
+        </div>
+      )}
+      {isRestarting && (
+        <p className="text-xs text-muted-foreground" data-testid="update-restarting">
+          Restarting AgentGauge…
+        </p>
+      )}
     </div>
   );
 }
