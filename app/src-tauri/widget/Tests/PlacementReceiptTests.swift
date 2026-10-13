@@ -8,6 +8,16 @@ private let widgetKind = "AIStatsUsageWidget"
 private let expectedFileName = "widget-placement.json"
 #endif
 
+/// The receipt as the host app's Rust reader expects to find it.
+///
+/// Decoded independently of the writer's own type, so the assertion is about the
+/// bytes on disk — the contract between the two processes — rather than about a
+/// round trip through the same struct on both sides.
+private struct StoredReceipt: Decodable {
+    let kind: String
+    let renderedAt: Int
+}
+
 @main
 struct PlacementReceiptTests {
     static func main() {
@@ -43,7 +53,7 @@ struct PlacementReceiptTests {
             to: scratch
         )
         expect(
-            PlacementReceipt.read(from: scratch) == nil,
+            !FileManager.default.fileExists(atPath: scratch.path),
             "a gallery preview is not a placement and must leave no receipt"
         )
 
@@ -53,13 +63,18 @@ struct PlacementReceiptTests {
             now: renderedAt,
             to: scratch
         )
+        guard let data = try? Data(contentsOf: scratch),
+              let stored = try? JSONDecoder().decode(StoredReceipt.self, from: data)
+        else {
+            FileHandle.standardError.write(
+                Data("PlacementReceiptTests failed: a real render must write a decodable receipt\n".utf8)
+            )
+            exit(1)
+        }
+        expect(stored.kind == widgetKind, "the receipt names the kind WidgetKit rendered")
         expect(
-            PlacementReceipt.read(from: scratch)
-                == PlacementReceipt.Receipt(
-                    kind: widgetKind,
-                    renderedAt: Int(renderedAt.timeIntervalSince1970)
-                ),
-            "a real render records the kind WidgetKit rendered and when, in whole seconds"
+            stored.renderedAt == Int(renderedAt.timeIntervalSince1970),
+            "the receipt carries the render time in whole Unix seconds, as the host reader parses it"
         )
 
         print("PlacementReceiptTests passed (\(PlacementReceipt.fileName))")

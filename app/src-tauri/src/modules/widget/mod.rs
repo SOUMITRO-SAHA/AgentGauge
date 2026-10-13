@@ -519,18 +519,15 @@ pub struct SystemWidgetStatus {
     /// `None` means the system query was unavailable; it is never treated as
     /// an answer that the widget is not configured.
     pub configured: Option<bool>,
-    /// Every AgentGauge widget kind the successful query found configured.
+    /// Every AgentGauge widget kind placed on this Mac.
     ///
-    /// The Dev and Release builds place separate widgets, so this can name a
-    /// kind other than this build's own. Empty when the query was unavailable
-    /// or found nothing — `configured` distinguishes those cases.
-    pub configured_kinds: Vec<String>,
-    /// Every AgentGauge widget kind placed on this Mac, from either source.
-    ///
-    /// WidgetCenter's list plus every kind with a fresh placement receipt, so a
-    /// sibling build's widget counts even though that app's query cannot see
-    /// it. This is what the setup action keys off: a widget the user can see on
-    /// screen must not be reported as needing setup.
+    /// This build's own answer from WidgetCenter, plus the kinds a sibling
+    /// build's widget left a fresh placement receipt for — receipts for this
+    /// build's own kind are dropped once the query has answered, because
+    /// WidgetCenter reports a removal immediately and the receipt outlives it by
+    /// the whole freshness window. This is what the setup action keys off: a
+    /// widget the user can see on screen must not be reported as needing setup,
+    /// and a widget they removed must not keep the action away.
     pub placed_kinds: Vec<String>,
     /// Whether the widget can also live in the menu bar (macOS 26+).
     pub menu_bar_available: bool,
@@ -593,7 +590,6 @@ impl SystemWidgetStatus {
             extension_present,
             snapshot_written,
             configured: None,
-            configured_kinds: Vec::new(),
             placed_kinds: Vec::new(),
             menu_bar_available,
             setup,
@@ -611,10 +607,11 @@ impl SystemWidgetStatus {
             extension_present,
             store.is_some_and(|s| s.has_snapshot()),
         );
+        let mut configured_kinds = Vec::new();
         if status.supported && extension_present {
             if let Some(answer) = widget_configuration_status() {
                 status.configured = answer.configured;
-                status.configured_kinds = answer.kinds;
+                configured_kinds = answer.kinds;
             }
         } else {
             log::debug!(
@@ -623,7 +620,7 @@ impl SystemWidgetStatus {
                 extension_present
             );
         }
-        status.placed_kinds = placed_kinds(&status.configured_kinds);
+        status.placed_kinds = placed_kinds(status.configured, &configured_kinds);
         status
     }
 }
@@ -633,11 +630,35 @@ impl SystemWidgetStatus {
 /// Receipts are read whatever the query did: an unbundled build cannot ask
 /// WidgetKit, and a sibling build's placed widget is exactly the case receipts
 /// exist for.
-fn placed_kinds(configured_kinds: &[String]) -> Vec<String> {
+fn placed_kinds(configured: Option<bool>, configured_kinds: &[String]) -> Vec<String> {
     let receipts = PlacementReceiptStore::from_env()
         .map(|store| store.placed_kinds(unix_seconds()))
         .unwrap_or_default();
-    merge_placed_kinds(configured_kinds, &receipts)
+    merge_placed_kinds(
+        configured_kinds,
+        &trustworthy_receipt_kinds(configured, &receipts),
+    )
+}
+
+/// The receipt kinds worth reading alongside WidgetCenter's own answer.
+///
+/// WidgetCenter answers for this build's kind live: a user who removes the
+/// widget is reflected within one poll, while the receipt their last render left
+/// stays fresh for [`RECEIPT_MAX_AGE_SECS`]. Trusting it would keep the setup
+/// action hidden for the whole window after a removal, so once the query has
+/// answered, a receipt about this build's own kind describes a placement that
+/// may already be gone. When the query could not run there is nothing
+/// authoritative to defer to, and a receipt is the only evidence available —
+/// including for this build's own kind.
+fn trustworthy_receipt_kinds(configured: Option<bool>, receipt_kinds: &[String]) -> Vec<String> {
+    match configured {
+        Some(_) => receipt_kinds
+            .iter()
+            .filter(|kind| *kind != WIDGET_KIND)
+            .cloned()
+            .collect(),
+        None => receipt_kinds.to_vec(),
+    }
 }
 
 /// Unions the two sources of a placement, keeping WidgetCenter's order first.
@@ -1348,30 +1369,61 @@ mod tests {
     fn a_placement_is_either_the_configured_kinds_or_a_fresh_receipt() {
         // This build's widget: WidgetCenter names it, and the union keeps it once.
         assert_eq!(
-            merge_placed_kinds(
-                &["AIStatsUsageWidget".to_string()],
-                &["AIStatsUsageWidget".to_string()]
-            ),
-            vec!["AIStatsUsageWidget".to_string()]
+            merge_placed_kinds(&[WIDGET_KIND.to_string()], &[WIDGET_KIND.to_string()]),
+            vec![WIDGET_KIND.to_string()]
         );
 
         // The sibling build's widget, which this app's own query cannot see.
+        let sibling = if WIDGET_KIND == "AIStatsUsageWidgetDev" {
+            "AIStatsUsageWidget"
+        } else {
+            "AIStatsUsageWidgetDev"
+        };
         assert_eq!(
-            merge_placed_kinds(
-                &[],
-                &[
-                    "AIStatsUsageWidgetDev".to_string(),
-                    "AIStatsUsageWidget".to_string()
-                ]
-            ),
-            vec![
-                "AIStatsUsageWidgetDev".to_string(),
-                "AIStatsUsageWidget".to_string()
-            ]
+            merge_placed_kinds(&[], &[sibling.to_string(), WIDGET_KIND.to_string()]),
+            vec![sibling.to_string(), WIDGET_KIND.to_string()]
         );
 
         // Nothing placed anywhere.
         assert!(merge_placed_kinds(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn a_removed_widget_keeps_no_placement_once_widgetkit_answers() {
+        // The removal case: WidgetCenter reports this kind as gone while the
+        // extension's last render is still on disk and still inside the
+        // freshness window. The query is live and the receipt is not, so the
+        // query wins — otherwise the setup action stays hidden for the whole
+        // window after the user removed the widget.
+        assert_eq!(
+            trustworthy_receipt_kinds(Some(false), &[WIDGET_KIND.to_string()]),
+            Vec::<String>::new()
+        );
+
+        // The same receipt when the query could not run is the only evidence
+        // there is, so it still counts — including for this build's own kind.
+        assert_eq!(
+            trustworthy_receipt_kinds(None, &[WIDGET_KIND.to_string()]),
+            vec![WIDGET_KIND.to_string()]
+        );
+    }
+
+    #[test]
+    fn a_sibling_receipt_outranks_the_answer_about_our_own_kind() {
+        let sibling = if WIDGET_KIND == "AIStatsUsageWidgetDev" {
+            "AIStatsUsageWidget"
+        } else {
+            "AIStatsUsageWidgetDev"
+        };
+
+        // WidgetCenter's answer covers this build's kinds only, so a receipt
+        // naming the other build survives whatever it said about ours.
+        for configured in [Some(false), Some(true), None] {
+            assert_eq!(
+                trustworthy_receipt_kinds(configured, &[sibling.to_string()]),
+                vec![sibling.to_string()]
+            );
+        }
     }
 
     #[test]

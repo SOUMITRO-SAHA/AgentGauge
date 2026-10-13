@@ -16,7 +16,6 @@ function status(
     extensionPresent: true,
     snapshotWritten: true,
     configured,
-    configuredKinds: [],
     placedKinds: configured === true ? ["AIStatsUsageWidget"] : [],
     menuBarAvailable: true,
     setup: [],
@@ -39,10 +38,7 @@ describe("shouldOfferWidgetSetup", () => {
     // a Debug widget the user can see must not make Release ask for another one.
     expect(
       shouldOfferWidgetSetup(
-        status(false, {
-          configuredKinds: [],
-          placedKinds: ["AIStatsUsageWidgetDev"],
-        }),
+        status(false, { placedKinds: ["AIStatsUsageWidgetDev"] }),
       ),
     ).toBe(false);
   });
@@ -51,7 +47,6 @@ describe("shouldOfferWidgetSetup", () => {
     expect(
       shouldOfferWidgetSetup(
         status(false, {
-          configuredKinds: ["AIStatsUsageWidget"],
           placedKinds: ["AIStatsUsageWidget", "AIStatsUsageWidgetDev"],
         }),
       ),

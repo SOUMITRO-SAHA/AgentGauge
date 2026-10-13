@@ -155,9 +155,6 @@ enum ProviderSelectionError: Error, LocalizedError {
     }
 }
 
-import Foundation
-import os
-
 /// The widget's own record that WidgetKit rendered it on this Mac.
 ///
 /// `WidgetCenter.getCurrentConfigurations` answers only about the app that calls
@@ -174,8 +171,8 @@ enum PlacementReceipt {
     static let fileName = "widget-placement.json"
 #endif
 
-    /// What the widget extension records, read back by the host apps.
-    struct Receipt: Codable, Equatable {
+    /// What the widget extension records and the host apps read back.
+    struct Receipt: Codable {
         let kind: String
         let renderedAt: Int
     }
@@ -219,11 +216,5 @@ enum PlacementReceipt {
         } catch {
             logger.error("Could not record the widget placement receipt.")
         }
-    }
-
-    /// The receipt as it stands at `url`, for the tests and for readers.
-    static func read(from url: URL = fileURL) -> Receipt? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(Receipt.self, from: data)
     }
 }

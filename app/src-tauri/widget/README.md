@@ -160,9 +160,12 @@ loading the bundled `Contents/Frameworks/libWidgetBridge.dylib` with `dlopen`
 still be running in). `chronod` accepts WidgetCenter calls only from the process
 whose executable is the bundle's `CFBundleExecutable`, so a spawned helper
 executable is rejected — that was the bug that kept configuration "unknown"
-forever. The bridge answers `configured` for the requested kind plus
-`configuredKinds`, the list of configured AgentGauge widget kinds; a missing or
-failed query is `null` and means unknown, never "not configured". The same
+forever. The bridge answers `configured` for the requested kind plus the
+configured AgentGauge widget kinds; a missing or failed query is `null` and means
+unknown, never "not configured". The app publishes those kinds to the UI merged
+with the receipts below, as one `placedKinds` list — the kinds WidgetCenter named
+are always a subset of it, so the raw list is not sent across the IPC boundary
+separately. The same
 bridge carries `reloadAllTimelines`, which the app requests after every snapshot
 publication; a rejected or absent bridge degrades to WidgetKit's own refresh
 cadence. This reports configuration, not whether the widget is on the desktop or
@@ -203,11 +206,16 @@ logs read `timelineExhausted-…-budgeted-1`, and idle reloads on this Mac clust
 around the hour — so that window spans a night's sleep and a busy day, while a
 removed widget stops rendering and goes stale instead of suppressing the action
 indefinitely. Receipts are never trusted over this build's own WidgetCenter
-answer; they only add the kinds that answer cannot see.
+answer: once the query has answered, a receipt naming this build's own kind is
+dropped, because WidgetCenter reflects a removal within one poll while the
+receipt outlives it by the whole window. When the query could not run there is
+nothing authoritative to defer to, and the receipt counts — including for this
+build's own kind.
 
 `Tests/PlacementReceiptTests.sh` compiles and runs the writer's shape checks in
-every widget build: the per-build file name, the shared directory, and the fact
-that a gallery preview writes nothing.
+every widget build: the per-build file name, the shared directory, the fact that
+a gallery preview writes nothing, and that a written receipt decodes into the
+`kind`/`renderedAt` shape the Rust reader parses.
 
 ## Keeping detection live
 

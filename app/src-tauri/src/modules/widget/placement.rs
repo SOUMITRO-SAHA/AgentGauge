@@ -20,9 +20,11 @@
 //! night's sleep and a busy day, and goes stale shortly after removal. The cost
 //! is bounded and stated: after the window, a still-placed widget of the *other*
 //! build looks absent to this one, which is the safe direction to be wrong in
-//! (the user is shown setup steps for a widget they already have). Nothing here
-//! is trusted for this build's own kind: WidgetCenter answers that one directly
-//! and immediately.
+//! (the user is shown setup steps for a widget they already have). This build's
+//! own kind is not left to the window at all — WidgetCenter answers it directly
+//! and immediately, so `super::trustworthy_receipt_kinds` drops a receipt for it
+//! as soon as that answer exists. Without that rule a user who removes the widget
+//! would not see the setup action come back for the rest of the window.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -115,13 +117,15 @@ impl PlacementReceiptStore {
     ///
     /// A missing file is normal — most Macs have exactly one build's widget —
     /// and a corrupt one is ignored rather than reported: an unreadable receipt
-    /// means "no evidence", never an error the user has to act on.
+    /// means "no evidence", never an error the user has to act on. This runs on
+    /// every poll while the app is open, so both log lines are debug-level: a
+    /// warning would repeat several times a minute for the life of the process.
     pub fn placed_kinds(&self, now_unix: i64) -> Vec<String> {
         let mut kinds: Vec<String> = Vec::new();
         for path in &self.paths {
             let Ok(data) = fs::read(path) else { continue };
             let Ok(receipt) = serde_json::from_slice::<PlacementReceipt>(&data) else {
-                log::warn!(
+                log::debug!(
                     "ignoring an unreadable widget placement receipt: {}",
                     path.display()
                 );

@@ -31,7 +31,6 @@ it("reserves the widget guidance shape while system support is checked", async (
               extensionPresent: true,
               snapshotWritten: true,
               configured: null,
-              configuredKinds: [],
               placedKinds: [],
               menuBarAvailable: true,
               setup: [
@@ -67,7 +66,6 @@ it("names the other build's widget instead of claiming none is configured", asyn
           extensionPresent: true,
           snapshotWritten: true,
           configured: false,
-          configuredKinds: [],
           placedKinds: ["AIStatsUsageWidgetDev"],
           menuBarAvailable: true,
           setup: [

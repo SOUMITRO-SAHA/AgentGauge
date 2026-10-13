@@ -798,7 +798,6 @@ export interface DispatchFixtures {
    * drive the "the app cannot tell" state rather than inferring it.
    */
   readonly widgetConfigured?: boolean | null;
-  readonly widgetConfiguredKinds?: readonly string[];
   /**
    * Kinds the app is told are placed on this Mac, receipts included. Defaults
    * to the WidgetCenter answer; set it to drive the cross-build case, where this
@@ -1210,11 +1209,6 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               extensionPresent: data.widgetEmbedded,
               snapshotWritten: data.widgetEmbedded,
               configured: data.widgetConfigured === undefined ? true : data.widgetConfigured,
-              configuredKinds:
-                data.widgetConfiguredKinds ??
-                (data.widgetConfigured === false || data.widgetConfigured === null
-                  ? []
-                  : ["AIStatsUsageWidget"]),
               placedKinds:
                 data.widgetPlacedKinds ??
                 (data.widgetConfigured === false || data.widgetConfigured === null
@@ -1655,7 +1649,6 @@ export async function onboardingVisible(): Promise<void> {
 /** Onboarding dismissed, dashboard showing live data. */
 export async function dashboardLive(options: {
   readonly widgetConfigured?: boolean | null;
-  readonly widgetConfiguredKinds?: readonly string[];
   readonly widgetPlacedKinds?: readonly string[];
 } = {}): Promise<void> {
   await boot({
@@ -1667,7 +1660,6 @@ export async function dashboardLive(options: {
     widgetSupported: true,
     widgetConfigured:
       options.widgetConfigured === undefined ? true : options.widgetConfigured,
-    widgetConfiguredKinds: options.widgetConfiguredKinds,
     widgetPlacedKinds: options.widgetPlacedKinds,
     automationRunning: true,
     codexLocalUsage: codexLocalUsage(),
