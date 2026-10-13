@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-releases_base_url="https://agentgauge.soumitrasaha.com/downloads"
+releases_base_url="https://github.com/SOUMITRO-SAHA/AgentGauge/releases"
 system="$(uname -s)"
 architecture="$(uname -m)"
 
@@ -25,7 +25,7 @@ for utility in curl plutil shasum hdiutil codesign ditto; do
   fi
 done
 
-manifest_url="$releases_base_url/latest-macos.json"
+manifest_url="$releases_base_url/latest/download/latest-macos.json"
 temporary_directory="$(mktemp -d)"
 mount_point="$temporary_directory/mount"
 
@@ -48,7 +48,7 @@ if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
   exit 1
 fi
 
-expected_url="$releases_base_url/v$version/AgentGauge-$version-universal.dmg"
+expected_url="$releases_base_url/download/v$version/AgentGauge-$version-universal.dmg"
 if [ "$download_url" != "$expected_url" ]; then
   printf '%s\n' 'The release manifest contains an unexpected download URL.' >&2
   exit 1

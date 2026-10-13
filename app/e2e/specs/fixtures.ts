@@ -725,6 +725,14 @@ export interface DispatchFixtures {
    */
   readonly subscriptionsFailing?: boolean;
   /**
+   * When set with `needsConsent: true`, the Stats view's removable-volume gate
+   * reports a pending consent, so the access dialog renders before any stats.
+   * Granting flips the consent write-through, mirroring the Rust store's
+   * persisted `volumeAccessConsent` document. Absent means the data roots sit
+   * on the boot volume and no gate is needed.
+   */
+  readonly volumeAccess?: { readonly needsConsent: boolean };
+  /**
    * Per-provider usage replies for `readUsageFor`, keyed by provider kind.
    * `codex` is not needed here: the single `usage` fixture serves it.
    */
@@ -867,6 +875,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       __ismKickoffModels__?: Record<string, string>;
       __ismKickoffEfforts__?: Record<string, string>;
       __ismAutomationRunning__?: Record<string, boolean>;
+      __ismVolumeConsent__?: boolean;
       __wdio_mocks__: Record<
         string,
         (args: unknown) => Promise<Record<string, unknown>>
@@ -903,6 +912,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
       codex: f().automationRunning === true,
       ...(f().automationRunningByKind ?? {}),
     };
+    w.__ismVolumeConsent__ = f().volumeAccess?.needsConsent !== true;
     const dispatcher = async (args?: {
       request?: Record<string, unknown>;
     }): Promise<Record<string, unknown>> => {
@@ -1217,6 +1227,20 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                 supported: kickoff.supported ?? true,
                 installed: kickoff.installed ?? false,
               },
+            },
+          };
+        }
+        case "volumeAccess":
+        case "grantVolumeAccess": {
+          if (request.type === "grantVolumeAccess") {
+            w.__ismVolumeConsent__ = true;
+          }
+          const needed = f().volumeAccess?.needsConsent === true;
+          return {
+            type: "volumeAccess",
+            status: {
+              needsConsent: needed,
+              consented: w.__ismVolumeConsent__ === true,
             },
           };
         }
@@ -1673,6 +1697,7 @@ export async function onboardingVisible(): Promise<void> {
 export async function dashboardLive(options: {
   readonly widgetConfigured?: boolean | null;
   readonly widgetPlacedKinds?: readonly string[];
+  readonly volumeAccessNeeded?: boolean;
 } = {}): Promise<void> {
   await boot({
     visible: false,
@@ -1686,6 +1711,7 @@ export async function dashboardLive(options: {
     widgetPlacedKinds: options.widgetPlacedKinds,
     automationRunning: true,
     codexLocalUsage: codexLocalUsage(),
+    ...(options.volumeAccessNeeded ? { volumeAccess: { needsConsent: true } } : {}),
   });
 }
 

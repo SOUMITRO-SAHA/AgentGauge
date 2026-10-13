@@ -1,5 +1,5 @@
 export const DOWNLOADS_BASE_URL =
-	'https://agentgauge.soumitrasaha.com/downloads';
+	'https://github.com/SOUMITRO-SAHA/AgentGauge/releases/latest/download';
 
 export function downloadsAreAvailable(setting: string | undefined): boolean {
 	return setting === 'true';

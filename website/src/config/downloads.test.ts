@@ -2,9 +2,9 @@ import { expect, it } from "bun:test";
 
 import { DOWNLOADS_BASE_URL, downloadsAreAvailable } from "./downloads";
 
-it("uses the website downloads path", () => {
+it("uses the GitHub Releases latest-asset download base", () => {
   expect(DOWNLOADS_BASE_URL).toBe(
-    "https://agentgauge.soumitrasaha.com/downloads",
+    "https://github.com/SOUMITRO-SAHA/AgentGauge/releases/latest/download",
   );
 });
 
