@@ -65,6 +65,18 @@ export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
   const active = tabs.some((tab) => tab.value === selected)
     ? selected
     : "codex";
+  const activeKind = tabs.find((tab) => tab.value === active)?.kind ?? "codex";
+  const activeUsage = useAtomValue(usageForAtom(activeKind));
+  const loading = AsyncResult.match(activeUsage, {
+    onInitial: () => true,
+    onSuccess: (result) => result.waiting,
+    onFailure: () => false,
+  });
+  const refreshing = AsyncResult.match(activeUsage, {
+    onInitial: () => false,
+    onSuccess: (result) => result.waiting,
+    onFailure: () => false,
+  });
 
   // The tab set refreshes with the reading it belongs to: a plan connected
   // while the app was open appears on the next refresh, not on a relaunch.
@@ -74,8 +86,13 @@ export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <PanelHeader title="Usage" testId="refresh-usage" onRefresh={refresh} />
+    <div className="flex flex-col gap-4" aria-busy={loading}>
+      <PanelHeader
+        title="Usage"
+        testId="refresh-usage"
+        onRefresh={refresh}
+        refreshing={refreshing}
+      />
       <Tabs
         value={active}
         onValueChange={setSelected}
@@ -229,6 +246,8 @@ function ProviderUsage({
   return AsyncResult.match(usage, {
     onInitial: () => <UsageLoadingSkeleton />,
     onSuccess: (result) => {
+      if (result.waiting) return <UsageLoadingSkeleton />;
+
       const snapshot = result.value.find((item) => item.provider === kind);
       if (!snapshot) {
         return (
@@ -273,21 +292,26 @@ function ProviderUsage({
  */
 function UsageLoadingSkeleton() {
   return (
-    <div className="flex flex-col gap-4" data-testid="usage-skeleton">
+    <div
+      className="flex flex-col gap-4"
+      data-testid="usage-skeleton"
+      role="status"
+      aria-label="Loading usage"
+    >
       <div
         className="flex flex-wrap items-center gap-2"
         data-testid="usage-skeleton-status"
       >
-        <Skeleton className="h-5 w-20 rounded-full" />
-        <Skeleton className="h-4 w-14" />
+        <Skeleton className="h-5 w-20 rounded-full" aria-hidden="true" />
+        <Skeleton className="h-4 w-14" aria-hidden="true" />
       </div>
       <div
         className="flex flex-col gap-2"
         data-testid="usage-skeleton-headline"
       >
-        <Skeleton className="h-3 w-24" />
-        <Skeleton className="h-10 w-32" />
-        <Skeleton className="h-4 w-52" />
+        <Skeleton className="h-3 w-24" aria-hidden="true" />
+        <Skeleton className="h-10 w-32" aria-hidden="true" />
+        <Skeleton className="h-4 w-52" aria-hidden="true" />
       </div>
       <div className="flex flex-col gap-5">
         <UsageWindowSkeleton />

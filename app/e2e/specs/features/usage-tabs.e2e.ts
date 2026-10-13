@@ -123,6 +123,32 @@ describe("usage tabs", () => {
     expect(loadedWindows).toHaveLength(2);
   });
 
+  it("refreshes the active usage reading and shows the loading skeleton", async () => {
+    await bootOnHome(dashboardWithSlowPlans);
+
+    await clickDisplayed('[data-testid="usage-tab-zai"]');
+    await expect($('[data-testid="plan"]')).toHaveText("Pro");
+    const readsBefore = (await dispatchCalls()).filter(
+      (request) =>
+        request.type === "readUsageFor" && request.provider === "zai",
+    ).length;
+
+    await clickDisplayed('[data-testid="refresh-usage"]');
+    await expectDisplayed('[data-testid="usage-skeleton"]');
+    await expect($('[data-testid="refresh-usage"]')).toBeDisabled();
+
+    const readsDuringRefresh = (await dispatchCalls()).filter(
+      (request) =>
+        request.type === "readUsageFor" && request.provider === "zai",
+    ).length;
+    expect(readsDuringRefresh).toBe(readsBefore + 1);
+
+    await expect($('[data-testid="plan"]')).toHaveText("Pro");
+    await expect($('[data-testid="refresh-usage"]')).toBeEnabled();
+    const skeletonsAfter = await $$('[data-testid="usage-skeleton"]');
+    expect(skeletonsAfter).toHaveLength(0);
+  });
+
   it("renders a revisited tab from its retained reading without reloading", async () => {
     await bootOnHome(dashboardWithPlans);
 

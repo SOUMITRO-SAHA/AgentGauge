@@ -1,6 +1,7 @@
 import { ArrowClockwise } from "@phosphor-icons/react";
 
 import { Button } from "~/components/ui/button";
+import { cn } from "~/lib/utils";
 
 /**
  * The dashboard's panel treatment, shared by every panel.
@@ -46,10 +47,12 @@ export function PanelHeader({
   title,
   testId,
   onRefresh,
+  refreshing = false,
 }: {
   readonly title: string;
   readonly testId?: string;
   readonly onRefresh?: () => void;
+  readonly refreshing?: boolean;
 }) {
   return (
     <div className="mb-4 flex items-center justify-between gap-2">
@@ -62,9 +65,14 @@ export function PanelHeader({
           size="sm"
           className="shrink-0"
           onClick={onRefresh}
+          disabled={refreshing}
           data-testid={testId}
+          aria-label={`Refresh ${title}`}
         >
-          <ArrowClockwise aria-hidden="true" />
+          <ArrowClockwise
+            className={cn(refreshing && "motion-safe:animate-spin")}
+            aria-hidden="true"
+          />
           <span className="hidden sm:inline">Refresh</span>
         </Button>
       )}
