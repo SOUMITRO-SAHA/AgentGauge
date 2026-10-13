@@ -22,7 +22,7 @@ use crate::modules::process_insights::ProcessInsights as ProcessInsightsReport;
 use crate::modules::updates::UpdateChannel;
 use crate::modules::widget::SystemWidgetStatus;
 use crate::shared::domain::{
-    AccountUsage, CodingSubscription, PlanKind, ProviderKind, UsageSnapshot,
+    AccountUsage, CodingSubscription, LocalUsage, PlanKind, ProviderKind, UsageSnapshot,
 };
 use crate::shared::error::Error;
 use crate::shared::provider::{PingOutcome, ProviderStatus};
@@ -77,6 +77,10 @@ pub enum AppRequest {
     },
     /// Reads account activity for one provider.
     ReadAccountUsage {
+        provider: ProviderKind,
+    },
+    /// Reads local harness activity for one provider.
+    ReadLocalUsage {
         provider: ProviderKind,
     },
     /// Reads the account plan tier, which an API-key account does not have.
@@ -176,6 +180,7 @@ impl AppRequest {
             Self::ReadUsage => "readUsage",
             Self::ReadUsageFor { .. } => "readUsageFor",
             Self::ReadAccountUsage { .. } => "readAccountUsage",
+            Self::ReadLocalUsage { .. } => "readLocalUsage",
             Self::ReadPlan { .. } => "readPlan",
             Self::SendPing { .. } => "sendPing",
             Self::AutomationState => "automationState",
@@ -234,6 +239,9 @@ pub enum AppResponse {
     },
     AccountUsage {
         usage: AccountUsage,
+    },
+    LocalUsage {
+        usage: Option<LocalUsage>,
     },
     Plan {
         plan: Option<PlanKind>,
@@ -425,6 +433,9 @@ mod tests {
             AppRequest::ReadAccountUsage {
                 provider: ProviderKind::Codex,
             },
+            AppRequest::ReadLocalUsage {
+                provider: ProviderKind::Codex,
+            },
             AppRequest::ReadPlan {
                 provider: ProviderKind::Codex,
             },
@@ -502,6 +513,18 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_local_usage_response_round_trips() {
+        let response = AppResponse::LocalUsage { usage: None };
+        let json = serde_json::to_value(&response).expect("serializes");
+        assert_eq!(json["type"], "localUsage");
+        assert!(json["usage"].is_null());
+        assert_eq!(
+            serde_json::from_value::<AppResponse>(json).expect("deserializes"),
+            response
+        );
+    }
+
+    #[test]
     fn every_request_name_matches_the_serde_tag() {
         // `name()` doubles as the wire discriminator in logs; if it ever
         // disagrees with serde's tag, a client would send a tag the backend
@@ -515,6 +538,9 @@ mod tests {
                 provider: ProviderKind::Codex,
             },
             AppRequest::ReadAccountUsage {
+                provider: ProviderKind::Codex,
+            },
+            AppRequest::ReadLocalUsage {
                 provider: ProviderKind::Codex,
             },
             AppRequest::ReadPlan {

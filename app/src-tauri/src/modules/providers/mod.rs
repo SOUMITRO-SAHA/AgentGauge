@@ -22,7 +22,8 @@ pub(crate) mod minimax;
 pub(crate) mod zai;
 
 use crate::shared::domain::{
-    rank_kickoff_models, AccountUsage, KickoffModelInfo, PlanKind, ProviderKind, UsageSnapshot,
+    rank_kickoff_models, AccountUsage, KickoffModelInfo, LocalUsage, PlanKind, ProviderKind,
+    UsageSnapshot,
 };
 use crate::shared::error::{Error, ErrorKind};
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
@@ -102,6 +103,10 @@ impl ProviderRegistry {
 
     pub fn account_usage(&self, kind: ProviderKind) -> Result<AccountUsage, Error> {
         self.find(kind)?.read_account_usage()
+    }
+
+    pub fn local_usage(&self, kind: ProviderKind) -> Result<Option<LocalUsage>, Error> {
+        Ok(self.find(kind)?.read_local_usage())
     }
 
     /// Sends a minimal prompt. Callers must gate this behind an explicit,

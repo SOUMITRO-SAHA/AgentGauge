@@ -101,6 +101,25 @@ export function accountUsageForAtom(kind: Ipc.ProviderKind) {
   return atom;
 }
 
+const localUsageByProvider = new Map<
+  Ipc.ProviderKind,
+  ReturnType<typeof makeLocalUsageAtom>
+>();
+
+function makeLocalUsageAtom(kind: Ipc.ProviderKind) {
+  return Atom.setIdleTTL(Infinity)(runtime.atom(() => Ipc.getLocalUsage(kind)));
+}
+
+/** The session-retained local harness-log reading for one provider. */
+export function localUsageForAtom(kind: Ipc.ProviderKind) {
+  let atom = localUsageByProvider.get(kind);
+  if (atom === undefined) {
+    atom = makeLocalUsageAtom(kind);
+    localUsageByProvider.set(kind, atom);
+  }
+  return atom;
+}
+
 /**
  * The scheduled kickoff state for every connected plan, retained for the
  * session.

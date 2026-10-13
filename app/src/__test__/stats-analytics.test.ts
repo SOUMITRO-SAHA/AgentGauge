@@ -92,7 +92,11 @@ describe("cumulativeCostSeries", () => {
 
 describe("model-day coverage and costs", () => {
   const priceList: PriceList = {
-    meta: { updated: "2026-10-11", currency: "USD" },
+    meta: {
+      updated: "2026-10-11",
+      currency: "USD",
+      unit: "per 1M tokens",
+    },
     providers: {
       example: {
         models: {

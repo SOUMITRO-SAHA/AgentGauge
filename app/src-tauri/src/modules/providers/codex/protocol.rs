@@ -532,6 +532,7 @@ mod tests {
         assert_eq!(usage.daily_usage_buckets.len(), 2);
         assert_eq!(usage.daily_usage_buckets[0].tokens, Some(12_345));
         assert_eq!(usage.daily_usage_buckets[1].tokens, None);
+        assert_eq!(usage.local, None);
         assert_eq!(usage.fetched_at, NOW);
     }
 

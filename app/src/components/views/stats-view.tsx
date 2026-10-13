@@ -43,6 +43,7 @@ import { ArrowClockwise, Fire, Lightning } from "@phosphor-icons/react";
 
 import {
   accountUsageForAtom,
+  localUsageForAtom,
   priceListAtom,
   statsTabAtom,
   subscriptionsAtom,
@@ -50,7 +51,9 @@ import {
 } from "~/atoms";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
 import { FreshnessPill } from "~/components/usage/provider-status-card";
+import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Card } from "~/components/ui/card";
 import {
   ChartContainer,
   ChartLegend,
@@ -59,6 +62,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "~/components/ui/chart";
+import { Progress } from "~/components/ui/progress";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { ViewHeader } from "~/components/views/view-header";
@@ -310,13 +314,15 @@ function ProviderRefreshHandler({
 }) {
   const refreshUsage = useAtomRefresh(usageForAtom(kind));
   const refreshAccount = useAtomRefresh(accountUsageForAtom(kind));
+  const refreshLocal = useAtomRefresh(localUsageForAtom(kind));
   const mountTick = useRef(tick);
 
   useEffect(() => {
     if (tick === mountTick.current) return;
     refreshUsage();
     refreshAccount();
-  }, [tick, refreshUsage, refreshAccount]);
+    refreshLocal();
+  }, [tick, refreshUsage, refreshAccount, refreshLocal]);
 
   return null;
 }
@@ -338,6 +344,7 @@ function PlanSummaryRow({
 }) {
   const snapshotRead = useAtomValue(usageForAtom(kind));
   const accountRead = useAtomValue(accountUsageForAtom(kind));
+  const localUsageRead = useAtomValue(localUsageForAtom(kind));
   const priceList = useAtomValue(priceListAtom);
 
   const accountPending = AsyncResult.isInitial(accountRead);
@@ -352,26 +359,53 @@ function PlanSummaryRow({
     onSuccess: (result) => result.value,
     onFailure: () => null,
   });
+  const localUsage = AsyncResult.match(localUsageRead, {
+    onInitial: () => null,
+    onSuccess: (result) => result.value,
+    onFailure: () => null,
+  });
+  const localPending =
+    kind === "codex" && AsyncResult.isInitial(localUsageRead);
+  const localFailed =
+    kind === "codex" &&
+    AsyncResult.match(localUsageRead, {
+      onInitial: () => false,
+      onSuccess: () => false,
+      onFailure: () => true,
+    });
+  const combinedAccount =
+    account === null
+      ? null
+      : {
+          ...account,
+          local: kind === "codex" ? localUsage : account.local,
+        };
 
   const windowFill = snapshot?.windows.find(
     (candidate) => candidate.usedPercent > 0,
   );
   const tokens = account?.summary.totalTokens ?? null;
-  const local = account?.local ?? null;
-  const coverage = coverageOf(account, kind);
+  const local = combinedAccount?.local ?? null;
+  const coverage = localFailed
+    ? "Local logs unavailable."
+    : coverageOf(combinedAccount, kind);
   const list = AsyncResult.match(priceList, {
     onInitial: () => null,
     onSuccess: (result) => result.value,
     onFailure: () => null,
   });
   const estimate =
-    account !== null &&
-    account.local === null &&
-    account.models.length > 0 &&
+    combinedAccount !== null &&
+    combinedAccount.local === null &&
+    combinedAccount.models.length > 0 &&
     list !== null
-      ? estimateModelCosts(account.models, list, PRICING_PROVIDER_IDS[kind])
+      ? estimateModelCosts(
+          combinedAccount.models,
+          list,
+          PRICING_PROVIDER_IDS[kind],
+        )
       : null;
-  const cost = costOf(account, estimate, list);
+  const cost = costOf(combinedAccount, estimate, list);
   const localRequests =
     local === null
       ? null
@@ -429,15 +463,23 @@ function PlanSummaryRow({
             ? "Reading…"
             : tokens !== null
               ? `${formatCompactCount(tokens)} tokens`
-              : local !== null
-                ? `${formatCompactCount(localTotals(local))} tokens`
-                : "No token history"}
+              : localPending
+                ? "Reading…"
+                : localFailed
+                  ? "Local logs unavailable"
+                  : local !== null
+                    ? `${formatCompactCount(localTotals(local))} tokens`
+                    : "No token history"}
         </span>
         <span
           className="font-medium tabular text-foreground"
           data-testid={`stats-plan-row-${kind}-cost`}
         >
-          {accountPending ? "Reading…" : cost.cost}
+          {accountPending || localPending
+            ? "Reading…"
+            : localFailed
+              ? "Unavailable"
+              : cost.cost}
         </span>
         {requests !== null ? (
           <span
@@ -858,10 +900,6 @@ export function LocalLogPanel({
     (sum, model) => sum + model.input + model.output,
     0,
   );
-  const pricedCost = usage.models.reduce(
-    (sum, model) => sum + (model.costUsd ?? 0),
-    0,
-  );
   const coverage =
     usage.firstDay !== null && usage.lastDay !== null
       ? `${usage.firstDay} → ${usage.lastDay}`
@@ -878,7 +916,8 @@ export function LocalLogPanel({
         </h3>
         <p className="text-xs text-muted-foreground">
           Read from {source}'s own session logs on this machine — per-model
-          tokens and what they would have cost at API prices.
+          tokens and API-equivalent estimates using reference rates in USD per
+          1M tokens.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -920,7 +959,6 @@ export function LocalLogPanel({
             key={model.id}
             model={model}
             totalTokens={totalTokens}
-            pricedTotal={pricedCost}
           />
         ))}
       </div>
@@ -966,8 +1004,8 @@ export function LocalLogPanel({
         data-testid="stats-local-source"
       >
         {usage.sessions} {source} session logs on this machine
-        {coverage !== null ? ` · ${coverage}` : ""} · exact per-response rates ·
-        not a bill.
+        {coverage !== null ? ` · ${coverage}` : ""} · API reference rates in
+        USD per 1M tokens · exact per-response token split · not a bill.
       </p>
     </div>
   );
@@ -1321,23 +1359,17 @@ const HEATMAP_FILL: Record<HeatState, string> = {
  * labels align with the cells without crowding the block. */
 const WEEKDAY_LABELS = ["Mon", "", "Wed", "", "Fri", "", ""] as const;
 
-/** One model's row in the local reading: token share against exact cost share. */
+/** One model's local row: token share and an API-equivalent estimate. */
 function LocalModelRow({
   model,
   totalTokens,
-  pricedTotal,
 }: {
   readonly model: Ipc.LocalModelUsage;
   readonly totalTokens: number;
-  readonly pricedTotal: number;
 }) {
   const tokens = model.input + model.output;
   const tokenSharePct =
     totalTokens > 0 ? Math.round((tokens / totalTokens) * 100) : 0;
-  const costSharePct =
-    model.costUsd !== null && pricedTotal > 0
-      ? Math.round((model.costUsd / pricedTotal) * 100)
-      : null;
 
   return (
     <div
@@ -1354,34 +1386,17 @@ function LocalModelRow({
             : "No reference price"}
         </span>
       </div>
-      <div className="flex flex-col gap-1.5">
-        <ShareBar
-          label="Tokens"
-          widthPercent={tokenSharePct}
-          caption={`${tokenSharePct}% of tokens · ${formatCompactCount(tokens)}`}
-          barClassName="bg-chart-1"
-        />
-        {costSharePct !== null ? (
-          <ShareBar
-            label="Est. cost"
-            widthPercent={costSharePct}
-            caption={`${costSharePct}% of est. cost`}
-            barClassName="bg-chart-2"
-          />
-        ) : null}
-      </div>
+      <ShareBar
+        label="Tokens"
+        widthPercent={tokenSharePct}
+        caption={`${tokenSharePct}% of tokens · ${formatCompactCount(tokens)}`}
+        barClassName="bg-chart-1"
+      />
     </div>
   );
 }
 
-/**
- * The project leaderboard: which working directory the tokens went to.
- *
- * Ranked by tokens, with the cost share beside it where it is known. A
- * project whose models the catalog could not price shows its token share
- * alone — a `$0` there would read as free rather than as unknown, which is the
- * same lie the model mix avoids.
- */
+/** Project usage by working directory, ranked by token volume. */
 export function ProjectLeaderboard({
   projects,
   totalTokens,
@@ -1389,9 +1404,6 @@ export function ProjectLeaderboard({
   readonly projects: readonly Ipc.LocalProjectUsage[];
   readonly totalTokens: number;
 }) {
-  // Re-sorted rather than trusting the caller's order. Both readers already
-  // rank their rows, but a leaderboard that silently showed whatever order it
-  // was handed would be wrong in a way nobody would notice.
   const ranked = useMemo(
     () =>
       [...projects].sort(
@@ -1404,58 +1416,95 @@ export function ProjectLeaderboard({
 
   if (ranked.length === 0) return null;
 
-  const pricedTotal = projects.reduce(
-    (sum, project) => sum + (project.costUsd ?? 0),
-    0,
-  );
-
   return (
-    <div className="flex flex-col gap-2" data-testid="stats-projects">
-      <h4 className="text-xs font-medium text-foreground">Which project</h4>
-      {ranked.map((project) => {
-        const tokens = project.input + project.output;
-        const tokenSharePct =
-          totalTokens > 0 ? Math.round((tokens / totalTokens) * 100) : 0;
-        const costSharePct =
-          project.costUsd !== null && pricedTotal > 0
-            ? Math.round((project.costUsd / pricedTotal) * 100)
-            : null;
-        return (
-          <div
-            key={project.name}
-            className="flex flex-col gap-1.5"
-            data-testid="stats-project-row"
-          >
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="truncate text-sm text-foreground">
-                {project.name}
-              </span>
-              <span className="text-xs text-muted-foreground tabular">
-                {project.costUsd !== null
-                  ? `≈ ${formatUsd(project.costUsd)}`
-                  : `${formatCompactCount(tokens)} tokens`}
-              </span>
-            </div>
-            <ShareBar
-              label="Tokens"
-              widthPercent={tokenSharePct}
-              caption={`${tokenSharePct}% of tokens · ${formatCompactCount(tokens)} · ${project.responses} responses`}
-              barClassName="bg-chart-1"
-            />
-            {costSharePct !== null ? (
-              <ShareBar
-                label="Est. cost"
-                widthPercent={costSharePct}
-                caption={`${costSharePct}% of est. cost`}
-                barClassName="bg-chart-2"
-              />
-            ) : null}
-          </div>
-        );
-      })}
+    <div
+      className="flex flex-col gap-3 border-t border-border/70 pt-4"
+      data-testid="stats-projects"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="flex flex-col gap-1">
+          <h4 className="text-sm font-medium text-foreground">Which project</h4>
+          <p className="text-xs text-muted-foreground">
+            Token share by working directory · API estimates use reference rates
+            in USD per 1M tokens
+          </p>
+        </div>
+        <span className="text-xs tabular text-muted-foreground">
+          {ranked.length} {ranked.length === 1 ? "project" : "projects"}
+        </span>
+      </div>
+      <div className="grid gap-2 lg:grid-cols-2">
+        {ranked.map((project, index) => {
+          const tokens = project.input + project.output;
+          const tokenSharePct =
+            totalTokens > 0 ? Math.round((tokens / totalTokens) * 100) : 0;
+          return (
+            <Card
+              key={project.name}
+              className="gap-3 rounded-lg border-border/70 bg-surface/60 px-3 py-3"
+              data-testid="stats-project-row"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <Badge
+                  variant="secondary"
+                  className="size-7 rounded-md px-0 py-0 font-mono tabular-nums"
+                  data-testid="stats-project-rank"
+                  aria-label={`Rank ${index + 1}`}
+                >
+                  {String(index + 1).padStart(2, "0")}
+                </Badge>
+                <span
+                  className="min-w-0 flex-1 break-words text-sm font-medium text-foreground"
+                >
+                  {project.name}
+                </span>
+                <div
+                  className="flex shrink-0 flex-col items-end gap-0.5 text-right"
+                  data-testid="stats-project-cost"
+                >
+                  <span className="text-xs text-muted-foreground">
+                    API estimate
+                  </span>
+                  {project.costUsd !== null ? (
+                    <span className="text-sm font-semibold tabular text-foreground">
+                      ≈ {formatUsd(project.costUsd)}
+                    </span>
+                  ) : (
+                    <Badge variant="outline">Not priced</Badge>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <p
+                  className="text-xs tabular text-muted-foreground"
+                  data-testid="stats-project-details"
+                >
+                  {formatCompactCount(tokens)} tokens ·{" "}
+                  {formatCompactCount(project.responses)} responses
+                </p>
+                <div className="flex items-center gap-2">
+                  <Progress
+                    value={tokenSharePct}
+                    aria-label={`Token share for ${project.name}`}
+                    data-testid="stats-project-progress"
+                    className="h-2 min-w-0 flex-1 bg-muted [&>[data-slot=progress-indicator]]:bg-chart-1"
+                  />
+                  <Badge
+                    variant="outline"
+                    className="min-w-20 justify-center tabular-nums"
+                    data-testid="stats-project-share"
+                  >
+                    {tokenSharePct}% of tokens
+                  </Badge>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
       <p className="text-xs text-muted-foreground">
-        Ranked by tokens, from the directory each turn ran in. A project with
-        no reference price shows its token share alone.
+        Ranked by token volume from local turn logs. API estimates are
+        illustrative, not a bill; unpriced projects still show token usage.
       </p>
     </div>
   );
@@ -1463,7 +1512,13 @@ export function ProjectLeaderboard({
 
 function CodexActivity() {
   const usage = useAtomValue(accountUsageForAtom("codex"));
-  const refresh = useAtomRefresh(accountUsageForAtom("codex"));
+  const localUsage = useAtomValue(localUsageForAtom("codex"));
+  const refreshAccount = useAtomRefresh(accountUsageForAtom("codex"));
+  const refreshLocal = useAtomRefresh(localUsageForAtom("codex"));
+  const refresh = useCallback(() => {
+    refreshAccount();
+    refreshLocal();
+  }, [refreshAccount, refreshLocal]);
 
   return (
     <section
@@ -1482,12 +1537,7 @@ function CodexActivity() {
       {AsyncResult.match(usage, {
         onInitial: () => <AnalyticsLoadingSkeleton />,
         onSuccess: (result) => (
-          <>
-            <AnalyticsContent usage={result.value} refreshing={result.waiting} />
-            {result.value.local !== null ? (
-              <LocalLogPanel usage={result.value.local} />
-            ) : null}
-          </>
+          <AnalyticsContent usage={result.value} refreshing={result.waiting} />
         ),
         onFailure: () => (
           <p
@@ -1496,6 +1546,19 @@ function CodexActivity() {
           >
             Codex account activity is unavailable. Your usage-window readings
             are not affected.
+          </p>
+        ),
+      })}
+      {AsyncResult.match(localUsage, {
+        onInitial: () => <LocalLogLoadingSkeleton />,
+        onSuccess: (result) =>
+          result.value === null ? null : <LocalLogPanel usage={result.value} />,
+        onFailure: () => (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="stats-local-logs-unavailable"
+          >
+            Codex local log activity is unavailable.
           </p>
         ),
       })}
@@ -2196,7 +2259,6 @@ export function ModelMixBlock({
       : null;
   const ratio =
     estimate !== null ? valueRatio(estimate.estimatedTotalUsd, planPrice) : null;
-  const pricedTotal = estimate?.estimatedTotalUsd ?? 0;
 
   return (
     <div
@@ -2208,8 +2270,8 @@ export function ModelMixBlock({
           Model mix
         </h3>
         <p className="text-xs text-muted-foreground">
-          Tokens and estimated API-equivalent cost per model, in the reported
-          window.
+          Per-model tokens and illustrative API-equivalent estimates use
+          reference rates in USD per 1M tokens.
         </p>
       </div>
       {pricingState === "failed" ? (
@@ -2260,7 +2322,6 @@ export function ModelMixBlock({
               estimate?.rows.find((candidate) => candidate.id === model.id) ??
               null
             }
-            pricedTotal={pricedTotal}
           />
         ))}
       </div>
@@ -2278,28 +2339,22 @@ export function ModelMixBlock({
         data-testid="stats-model-mix-source"
       >
         {estimate !== null
-          ? `Estimates: reported tokens × price list ${priceList?.meta.updated} · assumes ${Math.round(estimate.inputShare * 100)}% input · not a bill.`
+          ? `Estimates use reference rates of ${priceList?.meta.currency} ${priceList?.meta.unit} · assumes ${Math.round(estimate.inputShare * 100)}% input / ${Math.round((1 - estimate.inputShare) * 100)}% output · price list ${priceList?.meta.updated} · not a bill.`
           : "Token shares as reported; no estimates without the price list."}
       </p>
     </div>
   );
 }
 
-/** One model's row: name, both shares, and its estimate (or why there is none). */
+/** One model's row: name, token share, and its estimate or why there is none. */
 function ModelMixRow({
   model,
   row,
-  pricedTotal,
 }: {
   readonly model: Ipc.ModelUsage;
   readonly row: ModelCostRow | null;
-  readonly pricedTotal: number;
 }) {
   const tokenSharePct = Math.round((row?.shareOfTokens ?? 0) * 100);
-  const costSharePct =
-    row?.costUsd !== null && row?.costUsd !== undefined && pricedTotal > 0
-      ? Math.round((row.costUsd / pricedTotal) * 100)
-      : null;
 
   return (
     <div
@@ -2311,30 +2366,22 @@ function ModelMixRow({
           {model.displayName}
         </span>
         <span className="text-sm font-semibold tabular text-foreground">
-          {row?.costUsd != null ? `≈ ${formatUsd(row.costUsd)}` : "No reference price"}
+          {row?.costUsd != null
+            ? `≈ ${formatUsd(row.costUsd)}`
+            : "No reference price"}
         </span>
       </div>
-      <div className="flex flex-col gap-1.5">
-        <ShareBar
-          label="Tokens"
-          widthPercent={tokenSharePct}
-          caption={`${tokenSharePct}% of tokens`}
-          barClassName="bg-chart-1"
-        />
-        {costSharePct !== null ? (
-          <ShareBar
-            label="Est. cost"
-            widthPercent={costSharePct}
-            caption={`${costSharePct}% of est. cost`}
-            barClassName="bg-chart-2"
-          />
-        ) : null}
-      </div>
+      <ShareBar
+        label="Tokens"
+        widthPercent={tokenSharePct}
+        caption={`${tokenSharePct}% of tokens`}
+        barClassName="bg-chart-1"
+      />
     </div>
   );
 }
 
-/** A labelled share bar: the model mix's two lenses read as lengths. */
+/** A labelled token-share bar. */
 function ShareBar({
   label,
   widthPercent,
@@ -2447,6 +2494,45 @@ function MetricCardsSkeleton({
         <MetricCardSkeleton key={index} />
       ))}
     </div>
+  );
+}
+
+function LocalLogLoadingSkeleton() {
+  return (
+    <section
+      className="flex flex-col gap-4 border-t border-border/70 pt-4"
+      data-testid="stats-local-logs-skeleton"
+      aria-busy="true"
+      aria-label="Local log reading"
+    >
+      <div className="flex flex-col gap-1">
+        <h3 className="font-display text-sm font-medium text-foreground">
+          Local log reading
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          Scanning Codex session logs on this machine…
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {Array.from({ length: 2 }, (_, index) => (
+          <div
+            key={index}
+            className="flex flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
+          >
+            <Skeleton className="h-3 w-28" />
+            <Skeleton className="h-7 w-24" />
+            <Skeleton className="h-3 w-36" />
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-col gap-3">
+        {Array.from({ length: 3 }, (_, index) => (
+          <Skeleton key={index} className="h-16 rounded-lg" />
+        ))}
+      </div>
+      <Skeleton className="h-28 rounded-lg" />
+      <Skeleton className="h-56 rounded-lg" />
+    </section>
   );
 }
 

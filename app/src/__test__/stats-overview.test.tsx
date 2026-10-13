@@ -21,7 +21,7 @@ import {
 type Request = { readonly type: string; readonly provider?: string };
 
 const PRICE_LIST = {
-  meta: { currency: "USD", updated: "2026-10-11" },
+  meta: { currency: "USD", updated: "2026-10-11", unit: "per 1M tokens" },
   providers: {
     "zai-coding-plan": {
       subscription: { plans: [{ name: "Pro", price_usd_per_month: 80 }] },
@@ -176,8 +176,19 @@ function installDeferredDispatch(): { releaseAll: () => void } {
         return hold(`account:${request.provider ?? ""}`, {
           type: "accountUsage",
           usage:
-            request.provider === "zai" ? zaiAccountUsage() : codexAccountUsage(),
+            request.provider === "zai"
+              ? zaiAccountUsage()
+              : { ...codexAccountUsage(), local: null },
         });
+      }
+      if (request.type === "readLocalUsage") {
+        return {
+          type: "localUsage",
+          usage:
+            request.provider === "codex"
+              ? codexAccountUsage().local
+              : null,
+        };
       }
       if (request.type === "readUsageFor") {
         return hold(`usage:${request.provider ?? ""}`, {
@@ -207,7 +218,17 @@ function installDispatch(): void {
           return {
             type: "accountUsage",
             usage:
-              request.provider === "zai" ? zaiAccountUsage() : codexAccountUsage(),
+              request.provider === "zai"
+                ? zaiAccountUsage()
+                : { ...codexAccountUsage(), local: null },
+          };
+        case "readLocalUsage":
+          return {
+            type: "localUsage",
+            usage:
+              request.provider === "codex"
+                ? codexAccountUsage().local
+                : null,
           };
         case "readUsageFor":
           return {

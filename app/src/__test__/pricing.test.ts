@@ -21,7 +21,7 @@ import {
 } from "~/lib/pricing";
 
 const LIST: PriceList = {
-  meta: { currency: "USD", updated: "2026-10-11" },
+  meta: { currency: "USD", updated: "2026-10-11", unit: "per 1M tokens" },
   providers: {
     "zai-coding-plan": {
       subscription: {

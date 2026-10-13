@@ -41,7 +41,11 @@ type ProviderEntry = {
 
 /** The slice of `price_list.json` the estimator reads. */
 export type PriceList = {
-  readonly meta: { readonly updated: string; readonly currency: string };
+  readonly meta: {
+    readonly updated: string;
+    readonly currency: string;
+    readonly unit: string;
+  };
   readonly providers: Readonly<Record<string, ProviderEntry>>;
 };
 

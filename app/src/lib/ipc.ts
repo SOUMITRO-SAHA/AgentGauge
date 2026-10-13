@@ -467,10 +467,9 @@ export const AccountUsage = Schema.Struct({
   models: Schema.Array(ModelUsage),
   modelDailyUsage: Schema.optional(Schema.Array(ModelDayUsage)),
   /**
-   * The local harness logs' own reading, when the provider has a local
-   * record to read. Null means absent — no Codex home, or one with no
-   * rollouts — which the view reports differently from a scan that found
-   * nothing to price.
+   * Local harness data included by providers that combine it with account
+   * activity. Codex reads its rollout files through the separate local-usage
+   * request so its API result does not wait for that scan.
    */
   local: Schema.NullOr(LocalUsage),
   /**
@@ -699,6 +698,7 @@ export const AppRequest = Schema.Union([
   Schema.Struct({ type: Schema.Literal("readUsage") }),
   Schema.Struct({ type: Schema.Literal("readUsageFor"), provider: ProviderKind }),
   Schema.Struct({ type: Schema.Literal("readAccountUsage"), provider: ProviderKind }),
+  Schema.Struct({ type: Schema.Literal("readLocalUsage"), provider: ProviderKind }),
   Schema.Struct({ type: Schema.Literal("readPlan"), provider: ProviderKind }),
   Schema.Struct({
     type: Schema.Literal("sendPing"),
@@ -781,6 +781,7 @@ export const AppResponse = Schema.Union([
     snapshots: Schema.Array(UsageSnapshot),
   }),
   Schema.Struct({ type: Schema.Literal("accountUsage"), usage: AccountUsage }),
+  Schema.Struct({ type: Schema.Literal("localUsage"), usage: Schema.NullOr(LocalUsage) }),
   Schema.Struct({ type: Schema.Literal("plan"), plan: Schema.NullOr(PlanKind) }),
   Schema.Struct({ type: Schema.Literal("ping"), outcome: PingOutcome }),
   Schema.Struct({
@@ -986,6 +987,12 @@ export const getUsageFor = (provider: ProviderKind) =>
 export const getAccountUsage = (provider: ProviderKind) =>
   request({ type: "readAccountUsage", provider }).pipe(
     Effect.map((response) => expectType(response, "accountUsage").usage),
+  );
+
+/** Reads local harness-log token activity for one provider. */
+export const getLocalUsage = (provider: ProviderKind) =>
+  request({ type: "readLocalUsage", provider }).pipe(
+    Effect.map((response) => expectType(response, "localUsage").usage),
   );
 
 /** Reads the account plan tier, which an API-key account does not have. */

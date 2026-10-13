@@ -6,7 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::shared::domain::{AccountUsage, KickoffModelInfo, ProviderKind, UsageSnapshot};
+use crate::shared::domain::{
+    AccountUsage, KickoffModelInfo, LocalUsage, ProviderKind, UsageSnapshot,
+};
 use crate::shared::error::Error;
 
 /// What a provider can tell us about itself, checked before anything else.
@@ -43,6 +45,11 @@ pub trait Provider: Send + Sync {
 
     /// Reads account-wide token activity after the user explicitly opts in.
     fn read_account_usage(&self) -> Result<AccountUsage, Error>;
+
+    /// Reads token activity from local harness logs, when the provider has them.
+    fn read_local_usage(&self) -> Option<LocalUsage> {
+        None
+    }
 
     /// Reads the account's plan tier, when the provider reports one.
     ///

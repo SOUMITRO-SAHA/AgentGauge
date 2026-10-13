@@ -165,6 +165,10 @@ fn handle(request: AppRequest, state: &AppState, app: &AppHandle) -> Result<AppR
             usage: state.registry.account_usage(provider)?,
         }),
 
+        AppRequest::ReadLocalUsage { provider } => Ok(AppResponse::LocalUsage {
+            usage: state.registry.local_usage(provider)?,
+        }),
+
         AppRequest::ReadPlan { provider } => Ok(AppResponse::Plan {
             plan: state.registry.plan(provider)?,
         }),

@@ -128,10 +128,9 @@ pub struct AccountUsage {
     /// Per-model daily totals when the provider reports that series.
     #[serde(default)]
     pub model_daily_usage: Vec<ModelDayUsage>,
-    /// What the app read from the user's own local harness logs, when the
-    /// provider's local record was readable. `None` means the local record is
-    /// absent — no Codex home, or a home with no rollouts — which is different
-    /// from a scan that found nothing to price.
+    /// Local harness usage when a provider includes it in this account read.
+    /// Codex reads its rollout files through the separate local-usage request
+    /// so the account API result does not wait for that scan.
     #[serde(default)]
     pub local: Option<LocalUsage>,
     /// How many days the reported window covers, when the provider reports a

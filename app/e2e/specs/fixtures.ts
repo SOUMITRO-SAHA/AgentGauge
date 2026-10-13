@@ -739,13 +739,15 @@ export interface DispatchFixtures {
    * analytics skeleton a first token-history read shows.
    */
   readonly accountUsageDelay?: { readonly provider: string; readonly ms: number };
+  /** Delays one provider's `readLocalUsage` answer while other Stats reads proceed. */
+  readonly localUsageDelay?: { readonly provider: string; readonly ms: number };
   /**
    * Per-provider account-analytics replies for `readAccountUsage`, keyed by
    * provider kind. Absent means the default Codex-shaped answer serves.
    */
   readonly accountUsageByProvider?: Record<string, Record<string, unknown>>;
   /**
-   * The local-rollout reading the default Codex answer carries.
+   * The local-rollout reading returned by `readLocalUsage` for Codex.
    *
    * It crosses as fixture data rather than as a call to `codexLocalUsage()`:
    * the injected mock is closure-free by construction (a Node function does not
@@ -960,7 +962,13 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
           const perProviderUsage =
             data.accountUsageByProvider?.[request.provider as string];
           if (perProviderUsage) {
-            return { type: "accountUsage", usage: perProviderUsage };
+            return {
+              type: "accountUsage",
+              usage:
+                request.provider === "codex"
+                  ? { ...perProviderUsage, local: null }
+                  : perProviderUsage,
+            };
           }
           return {
             type: "accountUsage",
@@ -976,13 +984,27 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               },
               windowDays: null,
               models: [],
-              local: f().codexLocalUsage ?? null,
+              local: null,
               dailyUsageBuckets: [
                 { startDate: "2026-10-07", tokens: 2300 },
                 { startDate: "2026-10-08", tokens: 0 },
                 { startDate: "2026-10-09", tokens: 12345 },
               ],
             },
+          };
+        }
+        case "readLocalUsage": {
+          if (data.localUsageDelay?.provider === request.provider) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, data.localUsageDelay?.ms ?? 0),
+            );
+          }
+          return {
+            type: "localUsage",
+            usage:
+              request.provider === "codex"
+                ? (data.codexLocalUsage ?? null)
+                : null,
           };
         }
         case "providerStatus":
@@ -2221,6 +2243,34 @@ export async function dashboardWithSlowStats(): Promise<void> {
     accountUsageByProvider: { zai: zaiAccountUsage() },
     usageForDelay: { provider: "zai", ms: 800 },
     accountUsageDelay: { provider: "zai", ms: 800 },
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+    codexLocalUsage: codexLocalUsage(),
+  });
+}
+
+export async function dashboardWithSlowCodexStats(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    accountUsageDelay: { provider: "codex", ms: 3000 },
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+    codexLocalUsage: codexLocalUsage(),
+  });
+}
+
+export async function dashboardWithSlowCodexLocalUsage(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    localUsageDelay: { provider: "codex", ms: 3000 },
     installed: true,
     version: "codex-cli 0.159.0",
     widgetEmbedded: true,

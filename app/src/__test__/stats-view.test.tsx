@@ -17,6 +17,7 @@ import { statsTabAtom } from "~/atoms";
 import {
   LocalLogPanel,
   ModelMixBlock,
+  ProjectLeaderboard,
   reportsOwnAnalytics,
   StatsView,
   tokenTooltipFormatter,
@@ -213,12 +214,24 @@ function installDispatch(overrides?: {
         case "openCodeSubscriptions":
           return subscriptionsReply();
         case "readAccountUsage":
+          const accountUsage =
+            request.provider === "zai"
+              ? (overrides?.zaiUsage ?? zaiAccountUsage())
+              : (overrides?.codexUsage ?? codexAccountUsage());
           return {
             type: "accountUsage",
             usage:
-              request.provider === "zai"
-                ? (overrides?.zaiUsage ?? zaiAccountUsage())
-                : (overrides?.codexUsage ?? codexAccountUsage()),
+              request.provider === "codex"
+                ? { ...accountUsage, local: null }
+                : accountUsage,
+          };
+        case "readLocalUsage":
+          return {
+            type: "localUsage",
+            usage:
+              request.provider === "codex"
+                ? codexAccountUsage().local
+                : null,
           };
         case "readUsageFor":
           return {
@@ -265,7 +278,7 @@ afterEach(() => {
  * the rest of the catalog.
  */
 const PRICE_LIST: PriceList = {
-  meta: { currency: "USD", updated: "2026-10-11" },
+  meta: { currency: "USD", updated: "2026-10-11", unit: "per 1M tokens" },
   providers: {
     "zai-coding-plan": {
       subscription: { plans: [{ name: "Pro", price_usd_per_month: 80 }] },
@@ -304,13 +317,14 @@ async function openZaiAnalytics(): Promise<void> {
 }
 
 /**
- * Answers the subscription read at once but holds both usage reads until the
- * test releases them, so a skeleton's brief moment can be asserted. Every
- * release must happen before the test ends: the atoms are session-retained,
- * and a read left pending here would poison every later test in this file.
+ * Holds both reads until the test releases them, reproducing the case where
+ * window readings and Codex activity resolve independently. Every release
+ * must happen before the test ends: the atoms are session-retained, and a read
+ * left pending here would poison later tests.
  */
 function installDeferredDispatch(): {
   releaseAccountUsage: (provider: string) => void;
+  releaseLocalUsage: (provider: string) => void;
   releaseUsageFor: (provider: string) => void;
   releaseAll: () => void;
 } {
@@ -323,7 +337,18 @@ function installDeferredDispatch(): {
         return hold(`account:${request.provider ?? ""}`, {
           type: "accountUsage",
           usage:
-            request.provider === "zai" ? zaiAccountUsage() : codexAccountUsage(),
+            request.provider === "zai"
+              ? zaiAccountUsage()
+              : { ...codexAccountUsage(), local: null },
+        });
+      }
+      if (request.type === "readLocalUsage") {
+        return hold(`local:${request.provider ?? ""}`, {
+          type: "localUsage",
+          usage:
+            request.provider === "codex"
+              ? codexAccountUsage().local
+              : null,
         });
       }
       if (request.type === "readUsageFor") {
@@ -338,6 +363,7 @@ function installDeferredDispatch(): {
   };
   return {
     releaseAccountUsage: (provider) => pending.get(`account:${provider}`)?.(),
+    releaseLocalUsage: (provider) => pending.get(`local:${provider}`)?.(),
     releaseUsageFor: (provider) => pending.get(`usage:${provider}`)?.(),
     releaseAll: () => {
       for (const release of pending.values()) release();
@@ -352,9 +378,7 @@ function registerDeferredDispatch() {
   return deferred;
 }
 
-
-
-it("stands in with a shaped skeleton while the first analytics read runs", async () => {
+it("shows the plan reading as soon as quota data arrives before analytics", async () => {
   const release = registerDeferredDispatch();
 
   render(createElement(StatsView, { visible: true }));
@@ -372,19 +396,31 @@ it("stands in with a shaped skeleton while the first analytics read runs", async
   expect(
     within(skeleton).getByTestId("stats-analytics-skeleton-chart"),
   ).toBeTruthy();
+  expect(screen.getByTestId("stats-local-logs-skeleton")).toBeTruthy();
 
   // The old loading line is gone; a placeholder paragraph reserved nothing.
   expect(screen.queryByText("Reading Codex activity…")).toBeNull();
 
-  // The window reading below it holds its own shape for the same read.
   const reading = await screen.findByTestId("stats-plan-reading");
+  expect(within(reading).getByTestId("stats-reading-skeleton")).toBeTruthy();
+
+  release.releaseUsageFor("codex");
   expect(
-    within(reading).getByTestId("stats-reading-skeleton"),
+    await within(reading).findByTestId("stats-plan-window-used-5h"),
   ).toBeTruthy();
+  expect(within(reading).queryByTestId("stats-reading-skeleton")).toBeNull();
+  expect(
+    within(reading).getByTestId("stats-plan-window-used-5h").textContent,
+  ).toContain("32% used");
 
   release.releaseAccountUsage("codex");
   expect(await screen.findByTestId("stats-total-tokens")).toBeTruthy();
   expect(screen.queryByTestId("stats-analytics-skeleton")).toBeNull();
+  expect(screen.getByTestId("stats-local-logs-skeleton")).toBeTruthy();
+  expect(screen.queryByTestId("stats-local-logs")).toBeNull();
+  release.releaseLocalUsage("codex");
+  expect(await screen.findByTestId("stats-local-logs")).toBeTruthy();
+  expect(screen.queryByTestId("stats-local-logs-skeleton")).toBeNull();
   release.releaseAll();
 });
 
@@ -538,7 +574,7 @@ async function readAnalyticsCards() {
   };
 }
 
-it("shows the model mix with token shares and API-equivalent estimates", async () => {
+it("shows token shares and API-equivalent estimates without cost-share bars", async () => {
   installDispatch();
 
   render(createElement(StatsView, { visible: true }));
@@ -549,11 +585,13 @@ it("shows the model mix with token shares and API-equivalent estimates", async (
   const glm = screen.getByTestId("stats-model-row-glm-5.3");
   expect(within(glm).getByText("GLM-5.3")).toBeTruthy();
   expect(within(glm).getByText("39% of tokens")).toBeTruthy();
-  expect(within(glm).getByText("85% of est. cost")).toBeTruthy();
+  expect(within(glm).getByText(/≈ \$/)).toBeTruthy();
+  expect(within(glm).queryByText(/% of est\. cost/)).toBeNull();
 
   const flash = screen.getByTestId("stats-model-row-glm-5.3-flash");
   expect(within(flash).getByText("61% of tokens")).toBeTruthy();
-  expect(within(flash).getByText("15% of est. cost")).toBeTruthy();
+  expect(within(flash).getByText(/≈ \$/)).toBeTruthy();
+  expect(within(flash).queryByText(/% of est\. cost/)).toBeNull();
 
   // 8.47B at $2.00/M + 13.23B at $0.22/M ≈ $19,855, ≈ 248× the $80 Pro plan.
   const cost = screen.getByTestId("stats-est-cost");
@@ -563,7 +601,9 @@ it("shows the model mix with token shares and API-equivalent estimates", async (
 
   const source = screen.getByTestId("stats-model-mix-source");
   expect(source.textContent ?? "").toContain("price list 2026-10-11");
+  expect(source.textContent ?? "").toContain("USD per 1M tokens");
   expect(source.textContent ?? "").toContain("80% input");
+  expect(source.textContent ?? "").toContain("20% output");
   expect(screen.queryByTestId("stats-unpriced-tokens")).toBeNull();
 });
 
@@ -632,7 +672,7 @@ it("leaves the model mix off a tab whose provider reports no models", async () =
   expect(screen.queryByTestId("stats-model-mix")).toBeNull();
 });
 
-it("shows Codex's local model mix with exact costs and cache efficiency", async () => {
+it("shows Codex's local model estimates without cost-share bars", async () => {
   installDispatch();
 
   render(createElement(StatsView, { visible: true }));
@@ -655,11 +695,11 @@ it("shows Codex's local model mix with exact costs and cache efficiency", async 
 
   const gpt55 = screen.getByTestId("stats-local-model-gpt-5.5");
   expect(within(gpt55).getByText("GPT-5.5")).toBeTruthy();
-  expect(within(gpt55).getByText("98% of est. cost")).toBeTruthy();
+  expect(within(gpt55).getByText(/≈ \$112/)).toBeTruthy();
+  expect(within(gpt55).queryByText(/% of est\. cost/)).toBeNull();
   const luna = screen.getByTestId("stats-local-model-gpt-6-luna");
-  expect(within(luna).getByText("2% of est. cost")).toBeTruthy();
-  // Token share barely tracks cost share — the two lenses disagree, which is
-  // the whole point of showing both.
+  expect(within(luna).getByText(/≈ \$2\.05/)).toBeTruthy();
+  expect(within(luna).queryByText(/% of est\. cost/)).toBeNull();
   expect(within(luna).getByText("51% of tokens · 137.9M")).toBeTruthy();
 
   // Provenance: which logs, how far back, and that it is not a bill.
@@ -667,7 +707,81 @@ it("shows Codex's local model mix with exact costs and cache efficiency", async 
   expect(source.textContent ?? "").toContain("168");
   expect(source.textContent ?? "").toContain("2026-09-04");
   expect(source.textContent ?? "").toContain("2026-09-24");
+  expect(source.textContent ?? "").toContain("USD per 1M tokens");
   expect(source.textContent ?? "").toContain("not a bill");
+});
+
+it("keeps project API-equivalent amounts without cost-share bars", () => {
+  render(
+    createElement(LocalLogPanel, {
+      usage: {
+        ...codexAccountUsage().local,
+        projects: [
+          {
+            name: "agentgauge",
+            input: 2_000_000,
+            output: 1_000_000,
+            responses: 12,
+            costUsd: 5.25,
+          },
+        ],
+      },
+    }),
+  );
+
+  const project = screen.getByTestId("stats-project-row");
+  expect(within(project).getByText(/≈ \$5\.25/)).toBeTruthy();
+  expect(within(project).queryByText(/% of est\. cost/)).toBeNull();
+});
+
+it("presents project usage as ranked cards with clear token and cost details", () => {
+  render(
+    createElement(ProjectLeaderboard, {
+      projects: [
+        {
+          name: "libryva-monorepo",
+          input: 398_540_000,
+          output: 0,
+          responses: 3_371,
+          costUsd: 140,
+        },
+        {
+          name: "No project recorded",
+          input: 1_470_000,
+          output: 0,
+          responses: 10,
+          costUsd: null,
+        },
+      ],
+      totalTokens: 662_480_000,
+    }),
+  );
+
+  const [top, unpriced] = screen.getAllByTestId("stats-project-row");
+  expect(
+    screen.getByText(/API estimates use reference rates in USD per 1M tokens/),
+  ).toBeTruthy();
+  expect(top).toBeTruthy();
+  expect(unpriced).toBeTruthy();
+  expect(within(top!).getByTestId("stats-project-rank").textContent).toBe("01");
+  expect(within(top!).getByTestId("stats-project-cost").textContent).toContain(
+    "≈ $140",
+  );
+  expect(
+    within(top!).getByTestId("stats-project-details").textContent,
+  ).toContain("398.54M tokens · 3,371 responses");
+  expect(within(top!).getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+    "60",
+  );
+  expect(within(unpriced!).getByTestId("stats-project-rank").textContent).toBe(
+    "02",
+  );
+  expect(within(unpriced!).getByTestId("stats-project-cost").textContent).toContain(
+    "Not priced",
+  );
+  expect(
+    within(unpriced!).getByTestId("stats-project-details").textContent,
+  ).toContain("1.47M tokens · 10 responses");
 });
 
 it("keeps unpriced local models visible as tokens, never as $0", async () => {
