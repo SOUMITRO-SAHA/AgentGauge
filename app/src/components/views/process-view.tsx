@@ -96,7 +96,7 @@ export function ProcessView({ visible }: { readonly visible: boolean }) {
         )}
         data-testid="process-refreshing"
       >
-        Refreshing · showing the previous reading until it completes.
+        Refreshing · loading updated process details.
       </p>
 
       {AsyncResult.match(insights, {
@@ -108,6 +108,10 @@ export function ProcessView({ visible }: { readonly visible: boolean }) {
           />
         ),
         onSuccess: (result) => {
+          if (result.waiting) {
+            return <ProcessLoadingSkeleton />;
+          }
+
           const groups = result.value.groups;
           const activeTab =
             groups.find((group) => group.id === selectedTab)?.id ??
@@ -279,8 +283,8 @@ function ProcessLoadingSkeleton() {
             className="flex flex-col gap-1.5 px-3 py-2"
             data-testid="process-loading-tab"
           >
-            <Skeleton className="h-3.5 w-2/3" />
-            <Skeleton className="h-3 w-1/2" />
+            <Skeleton className="h-5 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
           </div>
         ))}
       </div>

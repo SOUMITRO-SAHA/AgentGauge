@@ -465,7 +465,7 @@ export async function processScreenLive(): Promise<void> {
     widgetSupported: true,
     automationRunning: true,
     processInsights: processInsightsReport(),
-  });
+  }, { finalRoute: "processes" });
 }
 
 /**

@@ -141,7 +141,7 @@ it("reserves the process panel shape while the first snapshot loads", async () =
   expect(screen.queryByTestId("process-loading-skeleton")).toBeNull();
 });
 
-it("mirrors the success shape while loading: one skeleton panel per group plus the note", async () => {
+it("mirrors the active tab shape while loading: tab ghosts, one panel, and the note", async () => {
   (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
     dispatch: () =>
       new Promise((resolve: (value: unknown) => void) => {
@@ -163,6 +163,9 @@ it("mirrors the success shape while loading: one skeleton panel per group plus t
   ).toHaveLength(2);
   expect(await screen.findByTestId("process-loading-note")).toBeTruthy();
   expect(screen.getByTestId("process-refreshing")).toBeTruthy();
+  expect(screen.getByTestId("process-refreshing").textContent).toContain(
+    "loading updated process details",
+  );
 
   releaseProcessRead();
 });
@@ -234,6 +237,7 @@ it("renders one tab per group and shows the active group's panel", async () => {
   await switchTo("opencode");
   expect(screen.getByTestId("process-panel-opencode")).toBeTruthy();
   expect(screen.queryByTestId("process-panel-codex")).toBeNull();
+  expect(screen.queryByTestId("process-loading-skeleton")).toBeNull();
 });
 
 it("carries a glance line on each tab: process count and memory", async () => {
@@ -723,7 +727,7 @@ it("explains cpu above one hundred percent in the read-only note", async () => {
   ).toContain("100%");
 });
 
-it("marks a re-read in flight instead of rendering it as fresh", async () => {
+it("shows the shaped skeleton while a re-read is in flight", async () => {
   installDispatch([group("codex"), group("opencode")]);
   await renderView();
 
@@ -736,7 +740,41 @@ it("marks a re-read in flight instead of rendering it as fresh", async () => {
   fireEvent.click(screen.getByTestId("refresh-processes-codex"));
 
   expect(await screen.findByTestId("process-refreshing")).toBeTruthy();
-  expect(screen.getByTestId("process-panel-codex")).toBeTruthy();
+  expect(await screen.findByTestId("process-loading-skeleton")).toBeTruthy();
+  expect(screen.queryByTestId("process-panel-codex")).toBeNull();
+});
+
+it("shows the shaped skeleton when revisiting Processes during a re-read", async () => {
+  installDispatch([group("codex"), group("opencode")]);
+  const { ProcessView } = await import("~/components/views/process-view");
+  const view = (visible: boolean) =>
+    createElement(ProcessView as ComponentType<{ visible: boolean }>, {
+      visible,
+    });
+  const rendered = render(view(true));
+  await screen.findByTestId("process-panel-codex");
+
+  const complete: Array<(value: unknown) => void> = [];
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: () =>
+      new Promise((resolve) => {
+        complete.push(resolve as (value: unknown) => void);
+      }),
+  };
+  rendered.rerender(view(false));
+  rendered.rerender(view(true));
+
+  expect(await screen.findByTestId("process-loading-skeleton")).toBeTruthy();
+  expect(screen.queryByTestId("process-panel-codex")).toBeNull();
+
+  complete[0]?.({
+    type: "processInsights",
+    insights: {
+      fetchedAt: Date.now(),
+      groups: [group("codex"), group("opencode")],
+    },
+  });
+  expect(await screen.findByTestId("process-panel-codex")).toBeTruthy();
 });
 
 it("shows the read's own reason and a re-read when the read fails", async () => {
