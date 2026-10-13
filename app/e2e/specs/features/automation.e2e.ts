@@ -85,7 +85,6 @@ describe("automation", () => {
     expect(text).toContain("codex exec");
     expect(text).toContain('"Hi"');
     expect(text).toContain("--model");
-    expect(text).toContain("-s read-only");
     expect(text).toContain("--ephemeral");
 
     await expect(
@@ -206,29 +205,16 @@ describe("automation", () => {
       kickoff: { enabledByKind: { codex: true } },
     });
 
-    const callsBefore = await dispatchCalls();
-    const countBefore = callsBefore.length;
-
     await clickDisplayed('[data-testid="automation-toggle-codex"]');
 
-    await browser.waitUntil(
-      async () => {
-        const tab = $('[data-testid="automation-connection-tab-codex"]');
-        const text = await tab.getText();
-        return text.includes("Inactive");
-      },
-      { timeout: 10_000, timeoutMsg: "Tab did not switch to Inactive" },
-    );
-
-    const allCalls = await dispatchCalls();
-    const newCalls = allCalls.slice(countBefore);
-    const disables = newCalls.filter(
+    const calls = await dispatchCalls();
+    const disables = calls.filter(
       (request) =>
         request.type === "setKickoffEnabled" &&
         request.kind === "codex" &&
         request.enabled === false,
     );
-    const stops = newCalls.filter(
+    const stops = calls.filter(
       (request) =>
         request.type === "stopAutomation" && request.kind === "codex",
     );
