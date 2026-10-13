@@ -37,7 +37,9 @@ route.
 
 Tauri's updater does not require a backend. It reads a static JSON manifest and
 verifies the downloaded archive against the public key embedded in the app;
-`requireSignedVersion` also binds the release version into the signed artifact.
+the release script also binds the release version into that signature
+(`tauri signer sign --app-version`), which the updater checks against the
+manifest's version.
 The release workflow publishes immutable versioned assets and the latest
 manifests to a GitHub release on the public repository; the app, website,
 Homebrew Cask, and installer reference those release-asset URLs directly. There
