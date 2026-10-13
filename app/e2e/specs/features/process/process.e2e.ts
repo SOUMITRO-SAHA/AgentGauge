@@ -27,6 +27,7 @@ after(() => {
 
 /** Activates a group's tab and waits for its panel. */
 async function switchToGroup(groupId: string): Promise<void> {
+  await expectDisplayed('[data-testid="process-groups"]');
   await clickDisplayed(`[data-testid="process-tab-${groupId}"]`);
   await expectDisplayed(`[data-testid="process-panel-${groupId}"]`);
 }
@@ -54,6 +55,7 @@ describe("processes", () => {
 
   it("switches with the command digits derived from the route order", async () => {
     // ⌘4 = Processes, derived from ROUTES order (see navigation.test.ts).
+    await gotoView("home");
     await browser.keys(["Meta", "4"]);
     await browser.pause(300);
     await expectDisplayed('[data-testid="view-processes"]');
@@ -79,6 +81,7 @@ describe("processes", () => {
     await switchToGroup("opencode");
     await expectDisplayed('[data-testid="process-panel-opencode"]');
     expect(await $$('[data-testid="process-panel-codex"]')).toHaveLength(0);
+    expect(await $$('[data-testid="process-loading-skeleton"]')).toHaveLength(0);
   });
 
   it("renders every group's processes with memory and uptime", async () => {
@@ -155,6 +158,7 @@ describe("processes", () => {
 
   it("offers no control beyond view tabs and refresh, because the capability has no write", async () => {
     await gotoView("processes");
+    await expectDisplayed('[data-testid="process-groups"]');
 
     const buttons = await $$('[data-testid="view-processes"] button');
     expect(buttons.length).toBeGreaterThan(0);
@@ -177,20 +181,20 @@ describe("processes loading flow", () => {
     await processScreenSlow();
   });
 
-  it("holds a shaped skeleton and replaces it without moving the layout", async () => {
+  it("shows the shaped skeleton while reads are pending without moving the layout", async () => {
     await gotoView("processes");
 
     await expectDisplayed('[data-testid="process-loading-skeleton"]');
-    expect(await $$('[data-testid="process-loading-panel"]')).toHaveLength(2);
+    expect(await $$('[data-testid="process-loading-panel"]')).toHaveLength(1);
     await expectDisplayed('[data-testid="process-loading-note"]');
-    // The refresh-status slot is mounted from the start, invisible, so its
-    // text can never shift the panels when it appears or clears.
+    // The refresh-status slot is fixed above the panels while a re-read is
+    // pending, so it does not shift the skeleton or the loaded panel.
     const statusClass = await browser.execute(
       () =>
         document.querySelector('[data-testid="process-refreshing"]')
           ?.className ?? null,
     );
-    expect(statusClass).toContain("invisible");
+    expect(statusClass).toContain("visible");
 
     const topBefore = (await browser.execute(
       () =>
@@ -211,6 +215,10 @@ describe("processes loading flow", () => {
     expect(
       Math.abs((topAfter as number) - (topBefore as number)),
     ).toBeLessThanOrEqual(1);
+
+    await clickDisplayed('[data-testid="refresh-processes-codex"]');
+    await expectDisplayed('[data-testid="process-loading-skeleton"]');
+    await expectDisplayed('[data-testid="process-panel-codex"]');
   });
 });
 
@@ -221,6 +229,7 @@ describe("processes with a listening server", () => {
 
   it("renders the listening port per process and in the group totals", async () => {
     await gotoView("processes");
+    await expectDisplayed('[data-testid="process-groups"]');
     await clickDisplayed('[data-testid="process-tab-opencode"]');
     await expectDisplayed('[data-testid="process-panel-opencode"]');
 

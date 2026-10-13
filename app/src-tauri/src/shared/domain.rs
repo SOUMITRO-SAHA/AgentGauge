@@ -47,6 +47,18 @@ impl ProviderKind {
             Self::Kimi => "kimi code plan",
         }
     }
+
+    /// The kind a stored identifier names, or none when it names nothing this
+    /// build knows, so a row written by another build is never misread.
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "codex" => Some(Self::Codex),
+            "zai" => Some(Self::Zai),
+            "minimax" => Some(Self::Minimax),
+            "kimi" => Some(Self::Kimi),
+            _ => None,
+        }
+    }
 }
 
 /// How fresh a reading is, and where it came from.

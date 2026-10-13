@@ -57,6 +57,56 @@ impl FixedClock {
     }
 }
 
+/// Milliseconds in one day.
+const DAY_MS: i64 = 86_400_000;
+
+/// The UTC day `now_ms` falls in, as the `YYYY-MM-DD` key the stats store uses.
+///
+/// UTC, deliberately: it is the boundary providers report on (Z.AI's own
+/// timestamps are UTC+8 and Codex's day labels are UTC), so a stored day lines
+/// up with its source instead of being reassembled across two vendor days.
+///
+/// Days-from-civil, inverted. Valid for the whole proleptic Gregorian range, so
+/// no lookup table and no date dependency is needed for what is only a key.
+pub fn utc_day(now_ms: i64) -> String {
+    let days = now_ms.div_euclid(DAY_MS);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// The UTC day `days` before `now_ms`, as a `YYYY-MM-DD` key.
+///
+/// Subtracts whole days on the day axis rather than subtracting milliseconds
+/// from the timestamp, so a boundary never drifts by an hour.
+pub fn utc_day_offset(now_ms: i64, days: i64) -> String {
+    utc_day(now_ms - days * DAY_MS)
+}
+
+/// Whether `value` is a `YYYY-MM-DD` day key this build accepts.
+///
+/// Shape only. The calendar is not re-derived here: a stored key that parses as
+/// a day is already the product of [`utc_day`], and rejecting a real past date
+/// would delete history the user earned.
+pub fn is_day_key(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+}
+
 #[cfg(test)]
 impl Clock for FixedClock {
     fn now_ms(&self) -> i64 {

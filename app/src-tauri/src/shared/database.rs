@@ -33,16 +33,117 @@ use crate::shared::error::Error;
 /// sub-millisecond; five seconds means a real fault, not contention.
 const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// The daily usage table: one row per provider, lens and UTC day.
+///
+/// The primary key *is* the natural key, so a refresh corrects a day rather than
+/// appending one. The table's size is a function of how many days have been
+/// used, not how often the app polls — which is the whole no-bloat argument.
+/// `WITHOUT ROWID` stores each row once, in key order, and key order is exactly
+/// the order a `[from, to]` scan wants, so a range read walks the primary key
+/// contiguously with no second index to maintain.
+const STATS_DAY_SQL: &str = "CREATE TABLE IF NOT EXISTS stats_day (
+     provider      TEXT NOT NULL,
+     source        TEXT NOT NULL,
+     day           TEXT NOT NULL,
+     tokens        INTEGER NOT NULL,
+     requests      INTEGER,
+     prompt_tokens INTEGER,
+     cached_tokens INTEGER,
+     output_tokens INTEGER,
+     PRIMARY KEY (provider, source, day),
+     CHECK (source IN ('account', 'local')),
+     CHECK (day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+     CHECK (tokens >= 0),
+     CHECK (requests IS NULL OR requests >= 0),
+     CHECK (prompt_tokens IS NULL OR prompt_tokens >= 0),
+     CHECK (cached_tokens IS NULL OR cached_tokens >= 0),
+     CHECK (output_tokens IS NULL OR output_tokens >= 0),
+     CHECK (
+         prompt_tokens IS NULL
+         OR cached_tokens IS NULL
+         OR cached_tokens <= prompt_tokens
+     )
+ ) STRICT, WITHOUT ROWID;";
+
+/// Per-model per-day rows.
+///
+/// Deliberately no foreign key to `stats_day`: a provider can report a model
+/// total for a day it reported no total for, and rejecting that row would lose
+/// real data rather than protect an invariant the writer upholds anyway.
+const STATS_MODEL_DAY_SQL: &str = "CREATE TABLE IF NOT EXISTS stats_model_day (
+     provider TEXT NOT NULL,
+     source   TEXT NOT NULL,
+     day      TEXT NOT NULL,
+     model_id TEXT NOT NULL,
+     tokens   INTEGER NOT NULL,
+     requests INTEGER,
+     PRIMARY KEY (provider, source, day, model_id),
+     CHECK (source IN ('account', 'local')),
+     CHECK (day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+     CHECK (tokens >= 0),
+     CHECK (requests IS NULL OR requests >= 0)
+ ) STRICT, WITHOUT ROWID;";
+
+/// Session counts, which are a count of work rather than a token count and so
+/// belong in no other table.
+const STATS_SESSION_DAY_SQL: &str = "CREATE TABLE IF NOT EXISTS stats_session_day (
+     provider TEXT NOT NULL,
+     source   TEXT NOT NULL,
+     day      TEXT NOT NULL,
+     sessions INTEGER NOT NULL,
+     PRIMARY KEY (provider, source, day),
+     CHECK (source IN ('account', 'local')),
+     CHECK (day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+     CHECK (sessions >= 0)
+ ) STRICT, WITHOUT ROWID;";
+
+/// What is actually stored, beside what the provider said about its whole
+/// window.
+///
+/// Headline figures live here and never in `stats_day`: Codex's account total is
+/// a lifetime figure next to a 43-day series, and summing the two would be
+/// meaningless. `backfill_cursor` lets a provider that refuses a wide single
+/// request — Z.AI caps a window at 31 days — be walked backwards a chunk at a
+/// time instead of in one burst.
+const STATS_COVERAGE_SQL: &str = "CREATE TABLE IF NOT EXISTS stats_coverage (
+     provider             TEXT NOT NULL,
+     source               TEXT NOT NULL,
+     last_fetched_at      INTEGER,
+     first_day            TEXT,
+     last_day             TEXT,
+     backfill_cursor      TEXT,
+     headline_tokens      INTEGER,
+     headline_requests    INTEGER,
+     window_days          INTEGER,
+     window_prompt_tokens INTEGER,
+     window_cached_tokens INTEGER,
+     window_hit_rate      REAL,
+     PRIMARY KEY (provider, source),
+     CHECK (source IN ('account', 'local'))
+ ) STRICT;";
+
+/// "Every day of this one model", which the primary key cannot serve because
+/// `model_id` trails the range columns.
+const STATS_MODEL_DAY_INDEX_SQL: &str = "CREATE INDEX IF NOT EXISTS stats_model_day_by_model
+     ON stats_model_day (provider, source, model_id, day);";
+
 /// Ordered schema steps. Each step's SQL must be idempotent (a crash mid-step
 /// leaves the file at the previous version and the step reruns on the next
 /// open) and must not reorder or drop earlier steps' tables.
-const MIGRATIONS: &[(i32, &str)] = &[(
-    1,
-    "CREATE TABLE IF NOT EXISTS app_state (
-         key TEXT PRIMARY KEY,
-         value TEXT NOT NULL
-     ) STRICT;",
-)];
+const MIGRATIONS: &[(i32, &str)] = &[
+    (
+        1,
+        "CREATE TABLE IF NOT EXISTS app_state (
+             key TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         ) STRICT;",
+    ),
+    (2, STATS_DAY_SQL),
+    (2, STATS_MODEL_DAY_SQL),
+    (2, STATS_SESSION_DAY_SQL),
+    (2, STATS_COVERAGE_SQL),
+    (2, STATS_MODEL_DAY_INDEX_SQL),
+];
 
 /// Reads and writes the app's durable documents.
 pub struct Database {
@@ -116,6 +217,16 @@ impl Database {
     /// The connection, for the migration and import paths that own SQL.
     fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The connection itself, for a store whose rows are tables rather than
+    /// documents.
+    ///
+    /// A caller holding this must not block: every other store shares the one
+    /// lock, so a stats write and an automation toggle serialize here. That is
+    /// the intended trade — these writes are sub-millisecond.
+    pub fn lock(&self) -> MutexGuard<'_, Connection> {
+        self.conn()
     }
 
     /// Reads the document stored under `key`, or none.
