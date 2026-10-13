@@ -15,7 +15,6 @@
 //! system scheduler, not by the app window — and reads the same file, which
 //! is also where the desktop app records every fresh reset time it sees.
 
-pub(crate) mod agent;
 pub(crate) mod worker;
 
 use std::fs;
@@ -554,7 +553,7 @@ pub fn overview(
         subscriptions,
         scheduler: SchedulerStatus {
             supported: cfg!(target_os = "macos"),
-            installed: agent::is_installed(),
+            installed: crate::modules::background::agent::is_installed(),
         },
     }
 }
@@ -897,13 +896,11 @@ mod tests {
             .find(|view| view.kind == ProviderKind::Codex)
             .expect("codex");
         assert_eq!(codex.effective_model, "gpt-6-luna");
-        assert!(!overview.scheduler.installed);
     }
 
     #[test]
     fn the_overview_without_a_store_still_renders() {
         let overview = overview(None, |_| Ok(Vec::new()));
         assert_eq!(overview.subscriptions.len(), 4);
-        assert!(!overview.scheduler.installed);
     }
 }

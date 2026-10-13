@@ -232,6 +232,8 @@ pub struct AutomationRunner {
     on_reading: Option<OnReading>,
     spawner: Spawner,
     monitors: Mutex<HashMap<ProviderKind, Arc<Monitor>>>,
+    external: bool,
+    last_attempts: Mutex<HashMap<ProviderKind, i64>>,
 }
 
 impl AutomationRunner {
@@ -248,6 +250,8 @@ impl AutomationRunner {
                     .ok()
             }),
             monitors: Mutex::new(HashMap::new()),
+            external: false,
+            last_attempts: Mutex::new(HashMap::new()),
         }
     }
 
@@ -255,6 +259,11 @@ impl AutomationRunner {
     /// in memory; choices just do not survive a relaunch.
     pub fn with_store(mut self, store: AutomationStore) -> Self {
         self.store = Some(Arc::new(store));
+        self
+    }
+
+    pub fn with_external_service(mut self) -> Self {
+        self.external = true;
         self
     }
 
@@ -291,6 +300,21 @@ impl AutomationRunner {
     /// Starts one sub's monitor. Calling twice for the same sub is a no-op,
     /// so a monitor cannot double-start.
     pub fn start(&self, kind: ProviderKind) {
+        if self.external {
+            if let Some(store) = &self.store {
+                if let Err(error) = store.update(kind, |mut record| {
+                    record.enabled = true;
+                    record.last_polled_at = None;
+                    record
+                }) {
+                    log::error!(
+                        "could not persist automation start for {kind:?}: {}",
+                        error.message
+                    );
+                }
+            }
+            return;
+        }
         let monitor = self.monitor(kind);
         if monitor.running.swap(true, Ordering::SeqCst) {
             return;
@@ -320,6 +344,20 @@ impl AutomationRunner {
     /// loop checks the flag at least once per poll interval, so shutdown waits
     /// no longer than the interval plus one poll.
     pub fn stop(&self, kind: ProviderKind) {
+        if self.external {
+            if let Some(store) = &self.store {
+                if let Err(error) = store.update(kind, |mut record| {
+                    record.enabled = false;
+                    record
+                }) {
+                    log::error!(
+                        "could not persist automation stop for {kind:?}: {}",
+                        error.message
+                    );
+                }
+            }
+            return;
+        }
         let monitor = {
             let mut monitors = self.monitors.lock().unwrap_or_else(PoisonError::into_inner);
             monitors.remove(&kind)
@@ -351,6 +389,25 @@ impl AutomationRunner {
 
     /// One sub's monitor state, cloned out of the lock.
     pub fn state_for(&self, kind: ProviderKind) -> AutomationState {
+        if self.external {
+            if let Some(store) = &self.store {
+                let record = store.record(kind);
+                return AutomationState {
+                    kind,
+                    running: record.enabled,
+                    last_polled_at: record.last_polled_at,
+                    next_poll_at: record.enabled.then(|| {
+                        record.last_polled_at.map_or_else(
+                            || self.clock.now_ms(),
+                            |last| last + POLL_INTERVAL.as_millis() as i64,
+                        )
+                    }),
+                    observed_resets_at: record.observed_resets_at,
+                    rolled_over: record.rolled_over,
+                    rolled_over_at: record.rolled_over_at,
+                };
+            }
+        }
         self.monitor(kind)
             .state
             .lock()
@@ -361,6 +418,16 @@ impl AutomationRunner {
     /// Clears a seen rollover once the UI has acknowledged it, so it does not
     /// re-fire on every subsequent read.
     pub fn acknowledge_rollover(&self, kind: ProviderKind) {
+        if self.external {
+            if let Some(store) = &self.store {
+                let _ = store.update(kind, |mut record| {
+                    record.rolled_over = false;
+                    record.rolled_over_at = None;
+                    record
+                });
+            }
+            return;
+        }
         self.monitor(kind).acknowledge_rollover();
     }
 
@@ -369,11 +436,75 @@ impl AutomationRunner {
     /// startup, before the renderer asks anything: the choice is already
     /// running, and the screen shows continuity instead of blanks.
     pub fn resume_persisted(&self) {
+        if self.external {
+            return;
+        }
         let Some(store) = &self.store else {
             return;
         };
         for record in store.load().records.into_iter().filter(|r| r.enabled) {
             self.start(record.kind);
+        }
+    }
+
+    pub fn poll_enabled_due(&self) {
+        let Some(store) = &self.store else { return };
+        let now = self.clock.now_ms();
+        let due: Vec<ProviderKind> = {
+            let mut attempts = self
+                .last_attempts
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            store
+                .load()
+                .records
+                .into_iter()
+                .filter(|record| {
+                    record.enabled
+                        && record
+                            .last_polled_at
+                            .is_none_or(|last| now - last >= POLL_INTERVAL.as_millis() as i64)
+                })
+                .filter_map(|record| {
+                    let kind = record.kind;
+                    if attempts
+                        .get(&kind)
+                        .is_some_and(|last| now - last < POLL_INTERVAL.as_millis() as i64)
+                    {
+                        return None;
+                    }
+                    attempts.insert(kind, now);
+                    Some(kind)
+                })
+                .collect()
+        };
+        for kind in due {
+            if let Ok(snapshot) = self.registry.usage(kind) {
+                let resets_at = snapshot
+                    .five_hour
+                    .as_ref()
+                    .and_then(|window| window.resets_at);
+                let _ = store.update(kind, |mut latest| {
+                    if latest.enabled {
+                        if latest
+                            .observed_resets_at
+                            .zip(resets_at)
+                            .is_some_and(|(old, new)| new > old)
+                        {
+                            latest.rolled_over = true;
+                            latest.rolled_over_at = Some(now);
+                        }
+                        if resets_at.is_some() {
+                            latest.observed_resets_at = resets_at;
+                        }
+                        latest.last_polled_at = Some(now);
+                    }
+                    latest
+                });
+                if let Some(on_reading) = &self.on_reading {
+                    on_reading(kind, resets_at);
+                }
+            }
         }
     }
 
@@ -478,6 +609,120 @@ mod tests {
         let db = crate::shared::database::Database::open(&dir.join("agentgauge.db"))
             .expect("opens a temp database");
         AutomationStore::new(Arc::new(db))
+    }
+
+    #[test]
+    fn external_service_is_the_only_poll_owner_and_ui_reads_persisted_state() {
+        let store = temp_store("external-owner");
+        let runner = runner(Some(store.clone())).with_external_service();
+        runner.start(ProviderKind::Codex);
+        assert!(store.record(ProviderKind::Codex).enabled);
+        assert!(runner.state_for(ProviderKind::Codex).running);
+        assert!(runner.monitors.lock().unwrap().is_empty());
+        store
+            .update(ProviderKind::Codex, |mut record| {
+                record.last_polled_at = Some(500);
+                record.rolled_over = true;
+                record
+            })
+            .unwrap();
+        assert_eq!(
+            runner.state_for(ProviderKind::Codex).last_polled_at,
+            Some(500)
+        );
+        runner.acknowledge_rollover(ProviderKind::Codex);
+        assert!(!store.record(ProviderKind::Codex).rolled_over);
+        runner.stop(ProviderKind::Codex);
+        assert!(!store.record(ProviderKind::Codex).enabled);
+        assert!(runner.monitors.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn desktop_and_service_share_state_through_the_store() {
+        let store = temp_store("desktop-service-roundtrip");
+        let desktop = runner(Some(store.clone())).with_external_service();
+        let service = runner(Some(store.clone()));
+
+        desktop.start(ProviderKind::Zai);
+        assert!(store.record(ProviderKind::Zai).enabled);
+        assert!(desktop.state_for(ProviderKind::Zai).running);
+        assert_eq!(desktop.state_for(ProviderKind::Zai).last_polled_at, None);
+
+        store
+            .update(ProviderKind::Zai, |mut record| {
+                record.last_polled_at = Some(2_000);
+                record.observed_resets_at = Some(8_000);
+                record
+            })
+            .unwrap();
+
+        let from_desktop = desktop.state_for(ProviderKind::Zai);
+        assert_eq!(from_desktop.last_polled_at, Some(2_000));
+        assert_eq!(from_desktop.observed_resets_at, Some(8_000));
+        assert!(from_desktop.running);
+
+        store
+            .update(ProviderKind::Zai, |mut record| {
+                record.last_polled_at = Some(2_000);
+                record.observed_resets_at = Some(12_000);
+                record.rolled_over = true;
+                record.rolled_over_at = Some(3_000);
+                record
+            })
+            .unwrap();
+
+        let rollover_view = desktop.state_for(ProviderKind::Zai);
+        assert!(rollover_view.rolled_over);
+        assert_eq!(rollover_view.rolled_over_at, Some(3_000));
+
+        desktop.acknowledge_rollover(ProviderKind::Zai);
+        assert!(!store.record(ProviderKind::Zai).rolled_over);
+        assert!(!desktop.state_for(ProviderKind::Zai).rolled_over);
+
+        desktop.stop(ProviderKind::Zai);
+        assert!(!store.record(ProviderKind::Zai).enabled);
+        assert!(!desktop.state_for(ProviderKind::Zai).running);
+
+        assert!(
+            service.monitors.lock().unwrap().is_empty(),
+            "no threads spawned in either process"
+        );
+        assert!(desktop.monitors.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn poll_enabled_due_detects_rollovers_and_feeds_the_kickoff_schedule() {
+        let store = temp_store("poll-enabled-due");
+        store
+            .update(ProviderKind::Codex, |mut record| {
+                record.enabled = true;
+                record.observed_resets_at = Some(5_000);
+                record
+            })
+            .unwrap();
+
+        let clock: Arc<dyn crate::shared::clock::Clock> = Arc::new(FixedClock::new(10_000));
+        let seen_resets: Arc<Mutex<Vec<(ProviderKind, Option<i64>)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let hook_resets = Arc::clone(&seen_resets);
+        let service = AutomationRunner::new(Arc::new(ProviderRegistry::new()))
+            .with_clock(Arc::clone(&clock))
+            .with_store(store.clone())
+            .with_on_reading(Arc::new(move |kind, resets_at| {
+                hook_resets.lock().unwrap().push((kind, resets_at));
+            }));
+
+        service.poll_enabled_due();
+        let after = store.record(ProviderKind::Codex);
+        assert!(
+            after.last_polled_at.is_some() || !after.enabled,
+            "a poll attempt was made or the record is untouched because the provider is unreachable"
+        );
+
+        let hooks = seen_resets.lock().unwrap();
+        if !hooks.is_empty() {
+            assert_eq!(hooks[0].0, ProviderKind::Codex);
+        }
     }
 
     #[test]

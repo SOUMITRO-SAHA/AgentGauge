@@ -20,6 +20,7 @@ use crate::modules::onboarding::{
     OnboardingProgress, OnboardingState, OnboardingStep, OnboardingStore,
 };
 use crate::modules::opencode::OpenCodeCatalog;
+use crate::modules::permissions::VolumeAccessStore;
 use crate::modules::process_insights;
 use crate::modules::providers::{ProviderRegistry, PING_PROMPT};
 use crate::modules::settings::SettingsStore;
@@ -41,6 +42,7 @@ pub struct AppState {
     pub onboarding: OnboardingStore,
     pub widget_snapshots: Option<SnapshotStore>,
     pub settings: SettingsStore,
+    pub volume_access: VolumeAccessStore,
     /// The kickoff schedule's home. `None` only when there is no home
     /// directory, in which case every kickoff capability reports unsupported.
     /// Shared because the automation reading hook also folds into it.
@@ -187,7 +189,15 @@ fn handle(request: AppRequest, state: &AppState, app: &AppHandle) -> Result<AppR
         }),
 
         AppRequest::StartAutomation { kind } => {
+            crate::modules::background::agent::install(
+                &std::env::current_exe().unwrap_or_else(|_| "agentgauge".into()),
+            )?;
             state.automation.start(kind);
+            if !state.automation.state_for(kind).running {
+                return Err(Error::storage(
+                    "Could not persist the background monitor choice.",
+                ));
+            }
             Ok(AppResponse::Automation {
                 monitors: state.automation.overview(),
             })
@@ -195,6 +205,9 @@ fn handle(request: AppRequest, state: &AppState, app: &AppHandle) -> Result<AppR
 
         AppRequest::StopAutomation { kind } => {
             state.automation.stop(kind);
+            if state.automation.state_for(kind).running {
+                return Err(Error::storage("Could not disable the background monitor."));
+            }
             Ok(AppResponse::Automation {
                 monitors: state.automation.overview(),
             })
@@ -242,15 +255,12 @@ fn handle(request: AppRequest, state: &AppState, app: &AppHandle) -> Result<AppR
             } else {
                 (None, None)
             };
+            if enabled {
+                crate::modules::background::agent::install(
+                    &std::env::current_exe().unwrap_or_else(|_| "agentgauge".into()),
+                )?;
+            }
             store.set_enabled(kind, enabled, now_millis(), model_id, minimum_effort)?;
-            // The system scheduler exists exactly while a sub is opted in:
-            // enabling installs it, the last disable removes it. A failure is
-            // propagated — silently running (or not running) a quota-spending
-            // timer is the one thing this feature must never do.
-            kickoff::agent::install(
-                &std::env::current_exe().unwrap_or_else(|_| "agentgauge".into()),
-                &store.load(),
-            )?;
             Ok(AppResponse::Kickoff {
                 state: kickoff_overview(state),
             })
@@ -323,6 +333,14 @@ fn handle(request: AppRequest, state: &AppState, app: &AppHandle) -> Result<AppR
 
         AppRequest::SystemWidgetStatus => Ok(AppResponse::SystemWidget {
             status: SystemWidgetStatus::current(),
+        }),
+
+        AppRequest::VolumeAccess => Ok(AppResponse::VolumeAccess {
+            status: state.volume_access.check(),
+        }),
+
+        AppRequest::GrantVolumeAccess => Ok(AppResponse::VolumeAccess {
+            status: state.volume_access.grant()?,
         }),
 
         AppRequest::UiState => Ok(AppResponse::UiState {
@@ -608,6 +626,8 @@ mod tests {
             AppRequest::OnboardingProgress,
             AppRequest::ProcessInsights,
             AppRequest::SystemWidgetStatus,
+            AppRequest::VolumeAccess,
+            AppRequest::GrantVolumeAccess,
         ];
         for request in all {
             assert!(

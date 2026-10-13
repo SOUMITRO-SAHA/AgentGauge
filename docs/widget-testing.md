@@ -30,6 +30,14 @@ The widget build checks provider cycling, sandboxed storage paths, and the
 extension bundle. The e2e spec covers the app's setup guide, not native widget
 rendering.
 
+`widget:build` does **not** install the new UI into the placed widget. For the
+Release widget, `bun run build:mac` builds and embeds the extension in the
+packaged app; launch that app and request Refresh in the widget. For an isolated
+Dev placement, `bun run widget:dev` builds, embeds, and opens AgentGauge Dev.
+If an already-running watcher misses a Swift file change, rerun it to rebuild
+and embed; a successful Xcode build by itself cannot change a placed widget.
+macOS controls the actual redraw timing and may keep an old rendered timeline.
+
 ## Check the native widget
 
 The app queries WidgetCenter **in-process** through
@@ -74,12 +82,23 @@ and read `~/Library/Application Support/<identifier>/logs/agentgauge-<date>.log`
 bridge that will not load, a truncated reply, or a query chronod never answered.
 
 1. Open **AgentGauge Dev** once, then add it from the macOS widget gallery.
-2. Small shows the brand mark and tight rows; medium shows provider plus
-   side-by-side cards; large shows roomy stacked rows.
+2. Small shows the provider name and both quotas without clipping; medium shows
+   side-by-side quota cards; large fills its height with remaining and used
+   percentages, reset countdowns and calendar dates, reading status, last-read
+   age and time, and plan or “Plan not reported”. There must be no horizontal
+   header rule. Check each size against a light and dark desktop background for
+   material translucency and text legibility. macOS may adapt widget material to
+   the system's appearance and accessibility settings.
 3. Click both arrows; confirm the provider and its 5-hour and weekly quotas
     change together.
-4. Click Refresh; confirm WidgetKit reloads the latest published snapshot. This
-   does not request new provider usage; that read happens in the host app.
+4. Click Refresh; confirm the pending state redacts quotas, then the selected
+   provider's reading updates with a new last-read time. Quit the app window and
+   repeat: the on-demand headless AgentGauge worker performs the read without
+   reopening the window. If the provider is unreachable, the prior reading
+   remains visible with “Refresh failed”, not a fresh timestamp. The widget's
+   sandbox should still have no CLI or network access. WidgetKit may skip an
+   intermediate loading frame or delay a redraw; it does not offer a guaranteed
+   continuous animation while an App Intent is running.
 5. Confirm unavailable quotas show no fabricated values.
 6. Rebuild or refresh and confirm the widget updates when WidgetKit reloads it.
 7. Confirm the sidebar's setup action appears within ~10s of removing the widget

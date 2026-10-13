@@ -13,7 +13,6 @@ import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { Check, Copy, Play, Stop } from "@phosphor-icons/react";
-import { enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 
 import {
   automationAtom,
@@ -238,12 +237,6 @@ function ConnectionCard({
     try {
       await Effect.runPromise(Ipc.startAutomation(kind));
       await Effect.runPromise(Ipc.setKickoffEnabled(kind, true));
-      try {
-        const alreadyEnabled = await isAutostartEnabled();
-        if (!alreadyEnabled) await enableAutostart();
-      } catch {
-        // Autostart is best-effort; the automation itself matters more.
-      }
       onChanged();
     } catch (cause: unknown) {
       setError(describeError(cause));

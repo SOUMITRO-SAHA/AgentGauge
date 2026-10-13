@@ -355,6 +355,20 @@ export const ModelDayUsage = Schema.Struct({
 export type ModelDayUsage = typeof ModelDayUsage.Type;
 
 /**
+ * The prompt-cache split a provider publishes for its reported window.
+ *
+ * `hitRate` is the vendor's own rate when it publishes one; otherwise the share
+ * is read off `cachedPromptTokens / promptTokens`, which is the arithmetic that
+ * rate is built from.
+ */
+export const CacheStats = Schema.Struct({
+  hitRate: Schema.NullOr(Schema.Number),
+  promptTokens: Schema.Number,
+  cachedPromptTokens: Schema.Number,
+});
+export type CacheStats = typeof CacheStats.Type;
+
+/**
  * One model's usage as read from the user's own local harness logs.
  *
  * The token split is per-response fact, not a total: `cachedInput` is part of
@@ -467,6 +481,11 @@ export const AccountUsage = Schema.Struct({
   models: Schema.Array(ModelUsage),
   modelDailyUsage: Schema.optional(Schema.Array(ModelDayUsage)),
   /**
+   * The provider's own prompt-cache split. `null` means the provider published
+   * none — never a zero hit rate.
+   */
+  cacheStats: Schema.NullOr(CacheStats),
+  /**
    * Local harness data included by providers that combine it with account
    * activity. Codex reads its rollout files through the separate local-usage
    * request so its API result does not wait for that scan.
@@ -572,6 +591,12 @@ export const SystemWidgetStatus = Schema.Struct({
   reason: Schema.NullOr(Schema.String),
 });
 export type SystemWidgetStatus = typeof SystemWidgetStatus.Type;
+
+export const VolumeAccessStatus = Schema.Struct({
+  needsConsent: Schema.Boolean,
+  consented: Schema.Boolean,
+});
+export type VolumeAccessStatus = typeof VolumeAccessStatus.Type;
 
 /**
  * One place a reader can support the project.
@@ -740,6 +765,8 @@ export const AppRequest = Schema.Union([
     dismissed: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({ type: Schema.Literal("systemWidgetStatus") }),
+  Schema.Struct({ type: Schema.Literal("volumeAccess") }),
+  Schema.Struct({ type: Schema.Literal("grantVolumeAccess") }),
   Schema.Struct({ type: Schema.Literal("uiState") }),
   Schema.Struct({
     type: Schema.Literal("setUiState"),
@@ -797,6 +824,7 @@ export const AppResponse = Schema.Union([
     progress: OnboardingProgress,
   }),
   Schema.Struct({ type: Schema.Literal("systemWidget"), status: SystemWidgetStatus }),
+  Schema.Struct({ type: Schema.Literal("volumeAccess"), status: VolumeAccessStatus }),
   Schema.Struct({
     type: Schema.Literal("uiState"),
     state: UiState,
@@ -1092,6 +1120,16 @@ export const setOnboardingStep = (step: OnboardingStep, dismissed: boolean) =>
 export const getSystemWidgetStatus = () =>
   request({ type: "systemWidgetStatus" }).pipe(
     Effect.map((response) => expectType(response, "systemWidget").status),
+  );
+
+export const getVolumeAccess = () =>
+  request({ type: "volumeAccess" }).pipe(
+    Effect.map((response) => expectType(response, "volumeAccess").status),
+  );
+
+export const grantVolumeAccess = () =>
+  request({ type: "grantVolumeAccess" }).pipe(
+    Effect.map((response) => expectType(response, "volumeAccess").status),
   );
 
 /** Reads the renderer's persisted preferences. */

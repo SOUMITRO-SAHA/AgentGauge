@@ -27,12 +27,17 @@ bun run clean:widget                      # remove widget build output (both con
 
 The extension **must** be built from a real Xcode app-extension target
 (`com.apple.product-type.app-extension`).
+`widget:build` only compiles the extension; it does not update the `.appex`
+inside an already installed app. To deliver UI changes to the Release widget,
+rebuild and embed with `bun run build:mac`, then launch that bundle. For the
+separate Dev widget, `bun run widget:dev` embeds the Debug extension; WidgetKit
+may continue displaying a cached timeline until macOS reloads it.
 
 ## Widget UI development
 
 Open `AIStatsWidget.xcodeproj` in Xcode and use the SwiftUI canvas previews in
 `Sources/UsageWidget.swift` to review small, medium, and large families with
-live, stale, and unavailable readings. Preview fixtures are static; they never
+live, cached, stale, and unavailable readings. Preview fixtures are static; they never
 read or overwrite a real account snapshot.
 
 For an installed development widget, run:
@@ -103,8 +108,10 @@ macOS therefore offers only `systemSmall`, `systemMedium`, `systemLarge`,
 `systemExtraLarge`, and `systemExtraLargePortrait`. The widget uses small, medium
 and large; every one shows the selected provider's 5-hour and weekly quota.
 The header's accessible left/right buttons cycle through providers with a
-current or cached quota reading. Its refresh button asks WidgetKit to reload the
-timeline from the latest published snapshot; it does not make a provider request.
+current or cached quota reading. Refresh writes a request for the selected,
+previously synchronized provider; an on-demand headless AgentGauge worker reads
+that provider with the existing Rust integration and publishes a new snapshot.
+The widget never reads provider credentials or invokes provider CLIs directly.
 
 A menu bar _Control_ (`ControlWidgetButton`, macOS 26+) is the way to sit in the
 menu bar, but a Control is an action surface rather than a passive readout, so it
@@ -154,6 +161,19 @@ it does not make a provider request or spend quota. Release data uses
 host and widget copy old snapshot and selection files forward from the previous
 `AI Sub Stats` directory; the old files are retained, and all new writes use
 `AgentGauge`.
+
+The refresh intent writes `widget-refresh-request.json` (Debug:
+`widget-refresh-request-dev.json`) in that same directory. The single launchd
+`agentgauge background-service` installed by the bundled app checks the mailbox
+and handles opted-in automation. It validates the selected provider against the
+app's last published subscription snapshot, runs a read-only provider usage
+request and writes `widget-refresh-result.json` (`-dev` for Debug). It never
+sends a prompt on a widget request or rereads quotas without a recent user request. The extension
+uses WidgetKit's system-managed invalidation and a redacted quota state while
+the read is pending; WidgetKit ultimately controls when those frames appear.
+Failures keep the previous quotas with a visible failure label, never fabricated
+fresh values. The app's own process does not need to have an open window, but
+the bundled app must have launched at least once to register the headless service.
 
 ## Detecting user configuration
 
@@ -275,7 +295,7 @@ If it is missing, check `codesign -dvvv --entitlements -` on the embedded
 | `Sources/Snapshot.swift`              | The wire contract. Mirrors `WidgetSnapshot` in `modules/widget/mod.rs`.              |
 | `Sources/SnapshotStore.swift`         | Reads the shared file.                                                               |
 | `Sources/UsageTimelineProvider.swift` | Reads the selected provider and refreshes at the soonest quota reset.                |
-| `Sources/UsageWidget.swift`           | Per-family layouts (small: brand-only compact, medium: side-by-side cards, large: roomy rows) and the Xcode preview matrix. |
+| `Sources/UsageWidget.swift`           | Per-family glass layouts (small: provider and stacked quotas, medium: side-by-side quotas, large: expanded quotas plus reading metadata) and the Xcode preview matrix. |
 | `Sources/RefreshWidgetIntent.swift`   | Requests a timeline reload from the latest published snapshot.                         |
 | `Sources/ProviderSwitchIntent.swift`  | Cycles providers without opening the host app.                                       |
 | `Sources/WidgetBridge.swift`          | In-process WidgetKit status query and timeline reload, built as `libWidgetBridge.dylib`. |

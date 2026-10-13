@@ -11,9 +11,6 @@ mod shared;
 
 use std::sync::Arc;
 
-use tauri::image::Image;
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 
 use modules::automation::AutomationRunner;
@@ -21,8 +18,10 @@ use modules::automation::AutomationStore;
 use modules::commands::AppState;
 use modules::kickoff::KickoffStore;
 use modules::onboarding::OnboardingStore;
+use modules::permissions::VolumeAccessStore;
 use modules::providers::ProviderRegistry;
 use modules::settings::SettingsStore;
+use modules::widget::process_widget_refresh;
 use modules::widget::SnapshotStore;
 use shared::database::Database;
 
@@ -46,24 +45,6 @@ pub mod testkit {
 /// freely, and the user's real profile is never touched by a test run.
 /// Release builds ignore the variable — production storage is never
 /// redirectable by the environment.
-/// The icon for the system tray.
-///
-/// A bundled build carries the icon in the window-icon slot that Tauri fills
-/// from `tauri.conf.json → bundle.icon`. An unbundled debug run (plain
-/// `cargo build`, the e2e binary, or `tauri dev` before the bundle exists)
-/// has no bundle, so the icon is embedded at compile time — the same
-/// `icon.png` the bundle ships, so both paths show one identical image.
-///
-/// Without an explicit icon the tray process appears as the generic `exec`
-/// tile in macOS Background App Activity.
-fn resolve_tray_icon(app: &tauri::App) -> Image<'static> {
-    if let Some(icon) = app.default_window_icon() {
-        return Image::new_owned(icon.rgba().to_vec(), icon.width(), icon.height());
-    }
-    const EMBEDDED_PNG: &[u8] = include_bytes!("../icons/icon.png");
-    Image::from_bytes(EMBEDDED_PNG).expect("the embedded icon.png is valid")
-}
-
 fn resolve_data_dir(app: &tauri::App) -> Option<std::path::PathBuf> {
     #[cfg(debug_assertions)]
     if let Some(dir) = std::env::var_os("AGENTGAUGE_DATA_DIR") {
@@ -75,19 +56,70 @@ fn resolve_data_dir(app: &tauri::App) -> Option<std::path::PathBuf> {
     app.path().app_data_dir().ok()
 }
 
+fn is_service_running() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let home = match std::env::var_os("HOME") {
+            Some(h) => h,
+            None => return false,
+        };
+        let lock_suffix = if cfg!(debug_assertions) { "-dev" } else { "" };
+        let lock_path = shared::app_support::app_support_dir(&home)
+            .join(format!("background-service{lock_suffix}.lock"));
+        let Ok(file) = std::fs::OpenOptions::new().write(true).open(&lock_path) else {
+            return false;
+        };
+        use std::os::fd::AsRawFd;
+        // SAFETY: Nonblocking exclusive lock attempt — if it succeeds the
+        // service is NOT running (no one else holds the lock).
+        let got_lock = unsafe { libc_flock(file.as_raw_fd(), 2 | 4) } == 0;
+        if got_lock {
+            let _ = unsafe { libc_flock(file.as_raw_fd(), 8) };
+            false
+        } else {
+            true
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    false
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    #[link_name = "flock"]
+    fn libc_flock(fd: i32, operation: i32) -> i32;
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // The headless kickoff worker: the system scheduler starts this same
-    // binary with the `kickoff-worker` argument once a minute, with no app
-    // window, no Tauri runtime, and no renderer. It must be decided before
-    // anything Tauri is built — a worker tick must never open the UI.
-    if std::env::args().nth(1).as_deref() == Some("kickoff-worker") {
+    if std::env::args().nth(1).as_deref() == Some("background-service") {
         if let Some(home) = std::env::var_os("HOME") {
             if let Some(dir) = shared::logging::app_log_dir_from_home(&home) {
                 let _ = shared::logging::init(Arc::new(shared::clock::SystemClock), dir);
             }
         }
-        std::process::exit(run_kickoff_worker());
+        std::process::exit(run_background_service());
+    }
+    // The headless kickoff worker: the system scheduler starts this same
+    // binary with the `kickoff-worker` argument once a minute, with no app
+    // window, no Tauri runtime, and no renderer. It must be decided before
+    // anything Tauri is built — a worker tick must never open the UI.
+    if std::env::args().nth(1).as_deref() == Some("kickoff-worker") {
+        if modules::background::agent::is_installed() && is_service_running() {
+            return;
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            if let Some(dir) = shared::logging::app_log_dir_from_home(&home) {
+                let _ = shared::logging::init(Arc::new(shared::clock::SystemClock), dir);
+            }
+        }
+        std::process::exit(run_kickoff_worker(&ProviderRegistry::new()));
+    }
+    if std::env::args().nth(1).as_deref() == Some("widget-refresh-worker") {
+        if modules::background::agent::is_installed() && is_service_running() {
+            return;
+        }
+        std::process::exit(process_widget_refresh(&ProviderRegistry::new()));
     }
 
     // Built once here and shared: the watcher and the command dispatcher must
@@ -108,8 +140,12 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(move |app| {
+            if let Ok(executable) = std::env::current_exe() {
+                if let Err(error) = modules::background::agent::install(&executable) {
+                    log::warn!("background service registration failed: {}", error.message);
+                }
+            }
             // Where every durable store lives: the app-data directory,
             // resolved once here and handed to the modules that own
             // persistence. No module reaches for a global. Debug builds may
@@ -147,13 +183,16 @@ pub fn run() {
                 .with_legacy(data_dir.clone().map(|dir| dir.join("onboarding.json")));
             let settings = SettingsStore::new(Arc::clone(&database))
                 .with_legacy(data_dir.clone().map(|dir| dir.join("settings.json")));
+            let volume_access = VolumeAccessStore::new(Arc::clone(&database));
 
             // The automation runner owns its persisted per-sub choices: the
             // same durability rule as preferences, and the same fallback.
             let automation = {
                 let store = AutomationStore::new(Arc::clone(&database))
                     .with_legacy(data_dir.clone().map(|dir| dir.join("automation.json")));
-                let mut runner = AutomationRunner::new(Arc::clone(&registry)).with_store(store);
+                let mut runner = AutomationRunner::new(Arc::clone(&registry))
+                    .with_store(store)
+                    .with_external_service();
                 // Every monitor reading also feeds the kickoff schedule, so
                 // its worker stays on the freshest window boundary without
                 // polling providers itself.
@@ -172,12 +211,8 @@ pub fn run() {
                 }
                 // The persisted choices run again before the first frame
                 // renders.
-                runner.resume_persisted();
                 Arc::new(runner)
             };
-
-            let app_registry = Arc::clone(&registry);
-            let has_kickoff_store = kickoff_shared.is_some();
 
             // Behind an `Arc` because a dispatch runs its blocking read on
             // another thread: the command hands that read an owned handle
@@ -188,109 +223,10 @@ pub fn run() {
                 onboarding,
                 widget_snapshots,
                 settings,
+                volume_access,
                 kickoff: kickoff_shared,
                 app_version: app.package_info().version.to_string(),
             }));
-
-            // While the app is open it runs the kickoff tick itself, so a
-            // subscription is never silently unscheduled just because the
-            // system agent is missing or between launches. The system agent
-            // (installed on opt-in) carries the same tick when the app is
-            // closed; the two share one schedule file, and a near-simultaneous
-            // double fire costs one extra trivial prompt, never a wrong
-            // schedule — each executor re-anchors the same window.
-            if has_kickoff_store {
-                let registry = app_registry;
-                std::thread::Builder::new()
-                    .name("agentgauge-kickoff".to_string())
-                    .spawn(move || {
-                        let kick = |kind: crate::shared::domain::ProviderKind,
-                                    prompt: &str,
-                                    model: Option<&str>,
-                                    effort: Option<&str>| {
-                            log::info!(
-                                "kickoff: sending to {kind:?} model={} effort={}",
-                                model.unwrap_or("default"),
-                                effort.unwrap_or("none"),
-                            );
-                            let result = registry.kickoff(kind, prompt, model, effort);
-                            match &result {
-                                Ok(outcome) if outcome.accepted => {
-                                    log::info!(
-                                        "kickoff: {kind:?} accepted, reply={:?}",
-                                        outcome.reply.chars().take(80).collect::<String>(),
-                                    );
-                                }
-                                Ok(outcome) => {
-                                    log::warn!(
-                                        "kickoff: {kind:?} refused: {}",
-                                        outcome.reason.as_deref().unwrap_or("unknown"),
-                                    );
-                                }
-                                Err(error) => {
-                                    log::error!("kickoff: {kind:?} error: {}", error.message);
-                                }
-                            }
-                            result
-                        };
-                        loop {
-                            std::thread::sleep(std::time::Duration::from_secs(30));
-                            let Some(store) = KickoffStore::from_env() else {
-                                return;
-                            };
-                            let now = crate::shared::clock::Clock::now_ms(
-                                &crate::shared::clock::SystemClock,
-                            );
-                            if let Err(error) = modules::kickoff::worker::tick(&store, now, &kick) {
-                                log::error!("kickoff tick failed: {}", error.message);
-                            }
-                        }
-                    })
-                    .ok();
-            }
-            // System tray icon: keeps the app running in the background when the
-            // window is closed, so the kickoff thread and automation monitors
-            // continue working. Left-click shows the window; the menu offers
-            // Show and Quit.
-            let show_item = MenuItemBuilder::with_id("show", "Show AgentGauge").build(app)?;
-            let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
-            let tray_menu = MenuBuilder::new(app)
-                .items(&[&show_item, &quit_item])
-                .build()?;
-
-            let _tray = TrayIconBuilder::new()
-                .icon(resolve_tray_icon(app))
-                .menu(&tray_menu)
-                .tooltip("AgentGauge")
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                })
-                .build(app)?;
 
             Ok(())
         })
@@ -318,14 +254,9 @@ pub fn run() {
         }
         tauri::RunEvent::WindowEvent {
             label,
-            event: tauri::WindowEvent::CloseRequested { api, .. },
+            event: tauri::WindowEvent::CloseRequested { .. },
             ..
-        } if label == "main" => {
-            api.prevent_close();
-            if let Some(window) = handle.get_webview_window("main") {
-                let _ = window.hide();
-            }
-        }
+        } if label == "main" => handle.exit(0),
         _ => {}
     });
 }
@@ -337,13 +268,12 @@ pub fn run() {
 /// the schedule file for the UI to show. Only a tick that could not do its
 /// job at all (unreadable schedule) exits non-zero, so launchd's own logging
 /// stays meaningful.
-fn run_kickoff_worker() -> i32 {
+fn run_kickoff_worker(registry: &ProviderRegistry) -> i32 {
     let Some(store) = KickoffStore::from_env() else {
         log::warn!("no home directory; the kickoff worker cannot run.");
         return 0;
     };
 
-    let registry = ProviderRegistry::new();
     let now = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
     let kick = |kind: crate::shared::domain::ProviderKind,
                 prompt: &str,
@@ -385,6 +315,80 @@ fn run_kickoff_worker() -> i32 {
         Err(error) => {
             log::error!("kickoff worker failed: {}", error.message);
             1
+        }
+    }
+}
+
+fn run_background_service() -> i32 {
+    #[cfg(target_os = "macos")]
+    let Some(_lock) = modules::background::claim_service() else {
+        return 0;
+    };
+    #[cfg(not(target_os = "macos"))]
+    return 1;
+
+    #[cfg(target_os = "macos")]
+    {
+        let registry = Arc::new(ProviderRegistry::new());
+        let kickoff = KickoffStore::from_env().map(Arc::new);
+        let automation = std::env::var_os("HOME")
+            .map(|home| shared::app_support::app_support_dir(&home))
+            .and_then(|dir| {
+                Database::open(&dir.join("agentgauge.db"))
+                    .ok()
+                    .map(|db| (dir, db))
+            })
+            .map(|(dir, db)| {
+                let mut runner = AutomationRunner::new(Arc::clone(&registry)).with_store(
+                    AutomationStore::new(Arc::new(db))
+                        .with_legacy(Some(dir.join("automation.json"))),
+                );
+                if let Some(schedule) = kickoff.clone() {
+                    runner = runner.with_on_reading(Arc::new(move |kind, resets_at| {
+                        if let Some(secs) = resets_at {
+                            let now = crate::shared::clock::Clock::now_ms(
+                                &crate::shared::clock::SystemClock,
+                            );
+                            let _ = schedule.update(kind, |mut sub| {
+                                sub.apply_reset(secs, now);
+                                sub
+                            });
+                        }
+                    }));
+                }
+                runner
+            });
+        let mut widget_backoff = false;
+        let mut next_tick = std::time::Instant::now();
+        loop {
+            if !widget_backoff {
+                let code = process_widget_refresh(&registry);
+                if code != 0 {
+                    log::warn!("widget refresh returned {code}; backing off until next tick");
+                    widget_backoff = true;
+                }
+            }
+            if std::time::Instant::now() >= next_tick {
+                widget_backoff = false;
+                if let Some(runner) = &automation {
+                    runner.poll_enabled_due();
+                }
+                if let Some(schedule) = &kickoff {
+                    let now =
+                        crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
+                    let kick = |kind: crate::shared::domain::ProviderKind,
+                                prompt: &str,
+                                model: Option<&str>,
+                                effort: Option<&str>| {
+                        registry.kickoff(kind, prompt, model, effort)
+                    };
+                    if let Err(error) = modules::kickoff::worker::tick(schedule, now, &kick) {
+                        log::error!("background kickoff tick failed: {}", error.message);
+                    }
+                }
+                next_tick = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(400));
         }
     }
 }

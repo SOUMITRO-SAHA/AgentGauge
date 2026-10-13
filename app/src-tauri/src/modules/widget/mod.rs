@@ -40,8 +40,10 @@
 //! for this app, plus kinds with a fresh receipt.
 
 mod placement;
+mod refresh;
 
 pub use placement::PlacementReceiptStore;
+pub use refresh::process_pending as process_widget_refresh;
 
 use std::fs;
 use std::fs::OpenOptions;
@@ -88,6 +90,54 @@ pub const SNAPSHOT_FILE_NAME: &str = "widget-snapshot.json";
 
 static SNAPSHOT_PUBLISH_LOCK: Mutex<()> = Mutex::new(());
 static SNAPSHOT_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(target_os = "macos")]
+struct SnapshotPublishFileLock(fs::File);
+
+#[cfg(target_os = "macos")]
+impl SnapshotPublishFileLock {
+    fn acquire(snapshot_path: &std::path::Path) -> Result<Self, Error> {
+        use std::os::fd::AsRawFd;
+
+        let lock_path = snapshot_path.with_extension("lock");
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                Error::storage(format!("could not create widget lock directory: {error}"))
+            })?;
+        }
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)
+            .map_err(|error| {
+                Error::storage(format!("could not open widget publish lock: {error}"))
+            })?;
+        // SAFETY: The descriptor stays owned by this guard until its Drop unlocks it.
+        if unsafe { flock(file.as_raw_fd(), 2) } != 0 {
+            return Err(Error::storage(format!(
+                "could not lock widget snapshot: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        Ok(Self(file))
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for SnapshotPublishFileLock {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+
+        // SAFETY: This guard owns the still-open descriptor and unlocks it once.
+        let _ = unsafe { flock(self.0.as_raw_fd(), 8) };
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn flock(fd: i32, operation: i32) -> i32;
+}
 
 // ---------------------------------------------------------------------------
 // Snapshot: the wire contract with the Swift side
@@ -320,6 +370,8 @@ impl SnapshotStore {
         let _guard = SNAPSHOT_PUBLISH_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        #[cfg(target_os = "macos")]
+        let _file_guard = SnapshotPublishFileLock::acquire(&self.path)?;
         let previous = match self.read() {
             Ok(snapshot) => snapshot,
             Err(error) => {

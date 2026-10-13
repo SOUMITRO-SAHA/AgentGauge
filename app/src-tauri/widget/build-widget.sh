@@ -72,6 +72,8 @@ build_appex() {
   bash "$WIDGET_DIR/Tests/PlacementReceiptTests.sh"
   bash "$WIDGET_DIR/Tests/WidgetSigningOptionsTests.sh"
   bash "$WIDGET_DIR/Tests/WidgetHeaderTests.sh"
+  bash "$WIDGET_DIR/Tests/WidgetVisualLayoutTests.sh"
+  bash "$WIDGET_DIR/Tests/WidgetRefreshContractTests.sh"
   bash "$WIDGET_DIR/Tests/WidgetCleanTests.sh"
 
   local -a architecture_args

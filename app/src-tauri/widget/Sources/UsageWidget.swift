@@ -62,22 +62,11 @@ struct UsageWidgetView: View {
 
     var body: some View {
         content
-            .containerBackground(.regularMaterial, for: .widget)
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(.white.opacity(0.12))
-                    .frame(height: 1)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 1)
-                    .accessibilityHidden(true)
-                    .allowsHitTesting(false)
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .containerBackground(.ultraThinMaterial, for: .widget)
             .widgetURL(URL(string: "agentgauge://usage"))
     }
 
-    // One layout per family: a small widget cannot fit the full header above
-    // two comfortable quota rows — that overflow is what pushed the old header
-    // outside the container background — so each size gets its own density.
     @ViewBuilder
     private var content: some View {
         switch family {
@@ -87,13 +76,21 @@ struct UsageWidgetView: View {
         }
     }
 
-    // MARK: Small — brand mark only, tight stacked rows.
-
     private var smallLayout: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 3) {
                 WidgetBrandMark(size: 16)
-                Spacer(minLength: 4)
+                if entry.refreshFailed {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 9))
+                        .accessibilityLabel("Refresh failed; showing previous reading")
+                }
+                Text(entry.provider?.displayName ?? "")
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 controls(compact: true)
             }
             compactRow("5-HOUR", quota: entry.provider?.fiveHour)
@@ -101,25 +98,32 @@ struct UsageWidgetView: View {
         }
     }
 
-    // MARK: Medium — brand mark, provider line, cards side by side.
-
     private var mediumLayout: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 10) {
             header(showsProvider: true, markSize: 17)
-            HStack(alignment: .top, spacing: 8) {
+            if entry.refreshing { refreshingLabel }
+            if entry.refreshFailed { refreshFailure }
+            HStack(spacing: 8) {
                 cardRow("5-HOUR", quota: entry.provider?.fiveHour)
                 cardRow("WEEKLY", quota: entry.provider?.weekly)
             }
         }
     }
 
-    // MARK: Large — roomy stacked rows.
-
     private var largeLayout: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            header(showsProvider: true, markSize: 18)
-            detailedRow("5-hour", quota: entry.provider?.fiveHour)
-            detailedRow("Weekly", quota: entry.provider?.weekly)
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 9) {
+                header(showsProvider: true, markSize: 18)
+                if entry.refreshing { refreshingLabel }
+                if entry.refreshFailed { refreshFailure }
+                VStack(spacing: 8) {
+                    detailedRow("5-HOUR", quota: entry.provider?.fiveHour)
+                    detailedRow("WEEKLY", quota: entry.provider?.weekly)
+                }
+                .frame(maxHeight: .infinity)
+                largeReadingDetails
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
     }
 
@@ -127,34 +131,45 @@ struct UsageWidgetView: View {
         HStack(spacing: 10) {
             WidgetBrandMark(size: markSize)
             Spacer(minLength: 4)
-            if showsProvider {
-                providerCaption
-            }
+            if showsProvider { providerCaption }
             controls(compact: false)
         }
+    }
+
+    private var refreshFailure: some View {
+        Text("Refresh failed · showing previous reading")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.orange)
+            .lineLimit(1)
+    }
+
+    private var refreshingLabel: some View {
+        Text("Updating provider reading…")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
     private var providerCaption: some View {
         if let provider = entry.provider {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Circle()
                     .fill(freshnessColor(provider.freshness))
-                    .frame(width: 5, height: 5)
+                    .frame(width: 6, height: 6)
                 Text(provider.displayName)
-                    .font(.caption2.weight(.semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
             }
             .accessibilityLabel(
-                "\(provider.displayName), \(provider.freshness), updated \(ageLabel(provider.generatedAt))"
+                "\(provider.displayName), \(readingStatus(provider)), updated \(ageLabel(provider.generatedAt))"
             )
         }
     }
 
     private func controls(compact: Bool) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: compact ? 3 : 6) {
             switchButton("chevron.left", offset: -1, label: "Previous provider", compact: compact)
             switchButton("chevron.right", offset: 1, label: "Next provider", compact: compact)
             refreshButton(compact: compact)
@@ -168,110 +183,175 @@ struct UsageWidgetView: View {
         compact: Bool
     ) -> some View {
         Button(intent: SwitchProviderIntent(offset: offset)) {
-            Image(systemName: symbol)
-                .font(.system(size: compact ? 8 : 9, weight: .bold))
-                .foregroundStyle(.secondary)
-                .frame(width: compact ? 20 : 23, height: compact ? 20 : 23)
-                .background(.thinMaterial, in: Circle())
-                .overlay {
-                    Circle().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-                }
-                .contentShape(Circle())
+            controlSymbol(symbol, compact: compact)
         }
         .buttonStyle(.plain)
-        .disabled(!canSwitchProvider)
+        .disabled(!canSwitchProvider || entry.refreshing)
         .accessibilityLabel(label)
     }
 
     private func refreshButton(compact: Bool) -> some View {
         Button(intent: RefreshWidgetIntent()) {
-            Image(systemName: "arrow.clockwise")
-                .font(.system(size: compact ? 8 : 9, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: compact ? 20 : 23, height: compact ? 20 : 23)
-                .background(.thinMaterial, in: Circle())
-                .overlay {
-                    Circle().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-                }
-                .contentShape(Circle())
+            controlSymbol("arrow.clockwise", compact: compact)
         }
         .buttonStyle(.plain)
+        .disabled(entry.refreshing)
         .accessibilityLabel("Refresh widget")
     }
 
-    private func compactRow(_ title: String, quota: Snapshot.Provider.Quota?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                rowTitle(title, size: 8, tracking: 0.6)
-                Spacer(minLength: 4)
-                percentText(quota, size: 15)
+    private func controlSymbol(_ symbol: String, compact: Bool) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: compact ? 9 : 11, weight: .semibold))
+            .foregroundStyle(.primary.opacity(0.8))
+            .frame(width: compact ? 20 : 25, height: compact ? 20 : 25)
+            .background(.thinMaterial, in: Circle())
+            .overlay {
+                Circle().strokeBorder(.primary.opacity(0.12), lineWidth: 0.7)
             }
-            quotaBar(quota)
-            resetText(quota, size: 8)
+            .contentShape(Circle())
+    }
+
+    private func compactRow(_ title: String, quota: Snapshot.Provider.Quota?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                rowTitle(title, size: 9)
+                Spacer(minLength: 1)
+                percentText(quota, size: 17)
+            }
+            quotaBar(quota, height: 4)
+            resetText(quota, size: 9)
         }
-        .padding(8)
-        .background(cardSurface(cornerRadius: 9))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(quotaSurface)
         .accessibilityElement(children: .combine)
+        .redacted(reason: entry.refreshing ? .placeholder : [])
+        .invalidatableContent()
     }
 
     private func cardRow(_ title: String, quota: Snapshot.Provider.Quota?) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline) {
-                rowTitle(title, size: 9, tracking: 0.7)
-                Spacer(minLength: 4)
-                percentText(quota, size: 17)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                rowTitle(title, size: 10)
+                Spacer(minLength: 2)
+                percentText(quota, size: 24)
             }
-            quotaBar(quota)
-            resetText(quota, size: 9)
+            quotaBar(quota, height: 6)
+            resetText(quota, size: 10)
         }
-        .padding(9)
-        .background(cardSurface(cornerRadius: 10))
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(quotaSurface)
         .accessibilityElement(children: .combine)
+        .redacted(reason: entry.refreshing ? .placeholder : [])
+        .invalidatableContent()
     }
 
     private func detailedRow(_ title: String, quota: Snapshot.Provider.Quota?) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline) {
-                rowTitle(title, size: 9, tracking: 0.8)
+                rowTitle(title, size: 11)
                 Spacer(minLength: 4)
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    percentText(quota, size: 20)
-                    if quota != nil {
-                        Text("left")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                percentText(quota, size: 30)
+                if quota != nil {
+                    Text("left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
                 }
             }
-
-            quotaBar(quota)
-
-            HStack(spacing: 4) {
-                Image(systemName: quota == nil ? "minus.circle" : "arrow.clockwise")
-                    .font(.system(size: 8, weight: .medium))
-                resetText(quota, size: 9)
-                    .padding(0)
+            quotaBar(quota, height: 7)
+            HStack {
+                if let quota {
+                    Text("\(usedPercent(quota))% used")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                resetText(quota, size: 11)
+            }
+            HStack(alignment: .firstTextBaseline) {
+                metadataLabel("RESET DATE")
+                Spacer(minLength: 4)
+                if let resetsAt = quota?.resetsAt {
+                    Text(Date(timeIntervalSince1970: resetsAt).formatted(.dateTime.month(.abbreviated).day().hour().minute()))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.primary)
+                } else {
+                    Text("Not reported")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .background(cardSurface(cornerRadius: 11))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .background(quotaSurface)
+        .accessibilityElement(children: .combine)
+        .redacted(reason: entry.refreshing ? .placeholder : [])
+        .invalidatableContent()
+    }
+
+    private var largeReadingDetails: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    metadataLabel("READING STATUS")
+                    Text(entry.provider.map(readingStatus) ?? "No reading")
+                        .foregroundStyle(.primary)
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 4) {
+                    metadataLabel("LAST READ")
+                    Text(entry.provider.map { ageLabel($0.generatedAt) } ?? "Unavailable")
+                        .foregroundStyle(.primary)
+                }
+            }
+            .font(.system(size: 11, weight: .medium))
+            HStack(spacing: 5) {
+                metadataLabel("PLAN")
+                Text(entry.provider?.plan ?? "Plan not reported")
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                metadataLabel("READ AT")
+                Text(entry.provider.map {
+                    Date(timeIntervalSince1970: $0.generatedAt).formatted(date: .omitted, time: .shortened)
+                } ?? "—")
+                    .monospacedDigit()
+            }
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(quotaSurface)
         .accessibilityElement(children: .combine)
     }
 
-    private func cardSurface(cornerRadius: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(.ultraThinMaterial)
+    private func usedPercent(_ quota: Snapshot.Provider.Quota) -> Int {
+        100 - min(100, max(0, quota.remainingPercent))
+    }
+
+    private func metadataLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .tracking(0.8)
+            .foregroundStyle(.secondary)
+    }
+
+    private var quotaSurface: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(.thinMaterial)
             .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(.primary.opacity(0.1), lineWidth: 0.7)
             }
     }
 
-    private func rowTitle(_ title: String, size: CGFloat, tracking: CGFloat) -> some View {
+    private func rowTitle(_ title: String, size: CGFloat) -> some View {
         Text(title)
             .font(.system(size: size, weight: .bold, design: .rounded))
-            .tracking(tracking)
+            .tracking(0.9)
             .foregroundStyle(.secondary)
     }
 
@@ -279,7 +359,7 @@ struct UsageWidgetView: View {
     private func percentText(_ quota: Snapshot.Provider.Quota?, size: CGFloat) -> some View {
         if let quota {
             Text("\(quota.remainingPercent)%")
-                .font(.system(size: size, weight: .semibold, design: .rounded))
+                .font(.system(size: size, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(quotaColor(quota.remainingPercent))
         } else {
@@ -293,13 +373,14 @@ struct UsageWidgetView: View {
         Text(resetDescription(quota))
             .font(.system(size: size, weight: .medium, design: .rounded))
             .lineLimit(1)
-            .foregroundStyle(.tertiary)
+            .minimumScaleFactor(0.8)
+            .foregroundStyle(.secondary)
     }
 
-    private func quotaBar(_ quota: Snapshot.Provider.Quota?) -> some View {
+    private func quotaBar(_ quota: Snapshot.Provider.Quota?, height: CGFloat) -> some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(0.08))
+                Capsule().fill(.primary.opacity(0.12))
                 if let quota {
                     Capsule()
                         .fill(quotaColor(quota.remainingPercent))
@@ -310,7 +391,7 @@ struct UsageWidgetView: View {
                 }
             }
         }
-        .frame(height: 5)
+        .frame(height: height)
         .accessibilityHidden(true)
     }
 
@@ -336,13 +417,23 @@ struct UsageWidgetView: View {
         let minutes = max(0, Int((entry.date.timeIntervalSince1970 - generatedAt) / 60))
         if minutes < 1 { return "just now" }
         if minutes < 60 { return "\(minutes)m ago" }
-        return "\(minutes / 60)h ago"
+        if minutes < 1440 { return "\(minutes / 60)h ago" }
+        return "\(minutes / 1440)d ago"
+    }
+
+    private func readingStatus(_ provider: Snapshot.Provider) -> String {
+        switch provider.freshness {
+        case "live": "Latest reading"
+        case "cached": "Cached reading"
+        case "stale": "Stale reading"
+        default: "Unavailable"
+        }
     }
 
     private func freshnessColor(_ freshness: String) -> Color {
         switch freshness {
         case "live": .green
-        case "cached": .blue
+        case "cached": .cyan
         default: .orange
         }
     }
@@ -363,7 +454,9 @@ private enum WidgetPreviewFixtures {
         provider: Snapshot.ProviderKind,
         freshness: String,
         fiveHour: Int?,
-        weekly: Int?
+        weekly: Int?,
+        refreshing: Bool = false,
+        refreshFailed: Bool = false
     ) -> UsageEntry {
         let providerSnapshot = Snapshot.Provider(
             provider: provider,
@@ -380,26 +473,62 @@ private enum WidgetPreviewFixtures {
             }
         )
         let snapshot = Snapshot(version: Snapshot.supportedVersion, providers: [providerSnapshot])
-        return UsageEntry(date: now, snapshot: snapshot, provider: providerSnapshot)
+        return UsageEntry(
+            date: now,
+            snapshot: snapshot,
+            provider: providerSnapshot,
+            refreshFailed: refreshFailed,
+            refreshing: refreshing
+        )
     }
 }
 
-#Preview("Small · Codex", as: .systemSmall) {
+#Preview("Small · live", as: .systemSmall) {
     UsageWidget()
 } timeline: {
     WidgetPreviewFixtures.entry(provider: .codex, freshness: "live", fiveHour: 88, weekly: 46)
 }
 
-#Preview("Medium · Z.AI", as: .systemMedium) {
+#Preview("Small · unavailable", as: .systemSmall) {
+    UsageWidget()
+} timeline: {
+    WidgetPreviewFixtures.entry(provider: .kimi, freshness: "unavailable", fiveHour: nil, weekly: nil)
+}
+
+#Preview("Medium · stale", as: .systemMedium) {
     UsageWidget()
 } timeline: {
     WidgetPreviewFixtures.entry(provider: .zai, freshness: "stale", fiveHour: 51, weekly: 42)
+}
+
+#Preview("Medium · cached", as: .systemMedium) {
+    UsageWidget()
+} timeline: {
+    WidgetPreviewFixtures.entry(provider: .minimax, freshness: "cached", fiveHour: 27, weekly: 67)
+}
+
+#Preview("Medium · updating", as: .systemMedium) {
+    UsageWidget()
+} timeline: {
+    WidgetPreviewFixtures.entry(provider: .codex, freshness: "cached", fiveHour: 78, weekly: 97, refreshing: true)
+}
+
+#Preview("Large · live", as: .systemLarge) {
+    UsageWidget()
+} timeline: {
+    WidgetPreviewFixtures.entry(provider: .codex, freshness: "live", fiveHour: 85, weekly: 98)
 }
 
 #Preview("Large · no reading", as: .systemLarge) {
     UsageWidget()
 } timeline: {
     WidgetPreviewFixtures.entry(provider: .kimi, freshness: "unavailable", fiveHour: nil, weekly: nil)
+}
+
+#Preview("Large · refresh failed", as: .systemLarge) {
+    UsageWidget()
+} timeline: {
+    WidgetPreviewFixtures.entry(provider: .zai, freshness: "stale", fiveHour: 49, weekly: 65, refreshFailed: true)
 }
 
 @main

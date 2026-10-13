@@ -4,6 +4,22 @@ struct UsageEntry: TimelineEntry {
     let date: Date
     let snapshot: Snapshot?
     let provider: Snapshot.Provider?
+    let refreshFailed: Bool
+    let refreshing: Bool
+
+    init(
+        date: Date,
+        snapshot: Snapshot?,
+        provider: Snapshot.Provider?,
+        refreshFailed: Bool = false,
+        refreshing: Bool = false
+    ) {
+        self.date = date
+        self.snapshot = snapshot
+        self.provider = provider
+        self.refreshFailed = refreshFailed
+        self.refreshing = refreshing
+    }
 }
 
 struct UsageTimelineProvider: TimelineProvider {
@@ -49,7 +65,9 @@ struct UsageTimelineProvider: TimelineProvider {
         UsageEntry(
             date: date,
             snapshot: snapshot,
-            provider: snapshot.flatMap(ProviderSelectionStore.selectedProvider)
+            provider: snapshot.flatMap(ProviderSelectionStore.selectedProvider),
+            refreshFailed: WidgetRefreshRequest.result()?.state == "failure" && !WidgetRefreshRequest.isPending,
+            refreshing: WidgetRefreshRequest.isPending
         )
     }
 }

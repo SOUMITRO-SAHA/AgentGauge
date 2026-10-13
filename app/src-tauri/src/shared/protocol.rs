@@ -18,6 +18,7 @@ use crate::modules::automation::AutomationState;
 use crate::modules::cli_detection::CliToolStatus;
 use crate::modules::kickoff::KickoffOverview;
 use crate::modules::onboarding::{OnboardingProgress, OnboardingStep};
+use crate::modules::permissions::VolumeAccessStatus;
 use crate::modules::process_insights::ProcessInsights as ProcessInsightsReport;
 use crate::modules::updates::UpdateChannel;
 use crate::modules::widget::SystemWidgetStatus;
@@ -145,6 +146,17 @@ pub enum AppRequest {
     /// the app can only report what is true and explain the procedure — it cannot
     /// install it, and must not pretend to have done so.
     SystemWidgetStatus,
+    /// Whether the data paths this app reads are on a removable volume and
+    /// whether the user has consented to the access through the in-app modal.
+    ///
+    /// The check resolves data roots from the environment without touching the
+    /// removable volume itself, so it never triggers a macOS TCC dialog.
+    VolumeAccess,
+    /// Records the user's in-app consent for removable-volume access.
+    ///
+    /// The consent is durable — once granted it survives a relaunch, so the
+    /// in-app modal shows at most once per database lifetime.
+    GrantVolumeAccess,
     /// The renderer's persisted preferences, so a choice survives a relaunch.
     UiState,
     /// Persists the renderer's preferences.
@@ -194,6 +206,8 @@ impl AppRequest {
             Self::OnboardingProgress => "onboardingProgress",
             Self::SetOnboardingStep { .. } => "setOnboardingStep",
             Self::SystemWidgetStatus => "systemWidgetStatus",
+            Self::VolumeAccess => "volumeAccess",
+            Self::GrantVolumeAccess => "grantVolumeAccess",
             Self::UiState => "uiState",
             Self::SetUiState { .. } => "setUiState",
         }
@@ -262,6 +276,9 @@ pub enum AppResponse {
     },
     SystemWidget {
         status: SystemWidgetStatus,
+    },
+    VolumeAccess {
+        status: VolumeAccessStatus,
     },
     /// The renderer's persisted preferences.
     UiState {
@@ -471,6 +488,8 @@ mod tests {
                 dismissed: false,
             },
             AppRequest::SystemWidgetStatus,
+            AppRequest::VolumeAccess,
+            AppRequest::GrantVolumeAccess,
         ];
         let mut names: Vec<&str> = all.iter().map(AppRequest::name).collect();
         let count = names.len();
@@ -578,6 +597,8 @@ mod tests {
                 dismissed: false,
             },
             AppRequest::SystemWidgetStatus,
+            AppRequest::VolumeAccess,
+            AppRequest::GrantVolumeAccess,
         ];
         for request in &all {
             let json = serde_json::to_value(request).expect("serializes");
