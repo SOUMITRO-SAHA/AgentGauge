@@ -93,6 +93,7 @@ function codexAccountUsage() {
     windowDays: null,
     dailyUsageBuckets: [{ startDate: "2026-10-07", tokens: 2300 }],
     models: [],
+    cacheStats: null,
     local: {
       projects: [],
       models: [
@@ -176,6 +177,11 @@ function zaiAccountUsage() {
         requests: null,
       },
     ],
+    cacheStats: {
+      hitRate: 0.9747,
+      promptTokens: 16_000_000_000,
+      cachedPromptTokens: 15_594_000_000,
+    },
     local: null,
   };
 }
@@ -593,11 +599,14 @@ it("shows token shares and API-equivalent estimates without cost-share bars", as
   expect(within(flash).getByText(/≈ \$/)).toBeTruthy();
   expect(within(flash).queryByText(/% of est\. cost/)).toBeNull();
 
-  // 8.47B at $2.00/M + 13.23B at $0.22/M ≈ $19,855, ≈ 248× the $80 Pro plan.
+  // 8.47B at $2.00/M + 13.23B at $0.22/M ≈ $19,855.
   const cost = screen.getByTestId("stats-est-cost");
   expect(cost.textContent ?? "").toMatch(/19[.,]855/);
-  const ratio = screen.getByTestId("stats-value-ratio");
-  expect(ratio.textContent ?? "").toContain("248");
+  // Z.AI publishes its own cache-hit rate, and it is the second card.
+  const cache = screen.getByTestId("stats-model-mix-cache");
+  expect(cache.textContent ?? "").toContain("97.5%");
+  expect(cache.textContent ?? "").toContain("16B prompt tokens were cache reads");
+  expect(screen.queryByTestId("stats-value-ratio")).toBeNull();
 
   const source = screen.getByTestId("stats-model-mix-source");
   expect(source.textContent ?? "").toContain("price list 2026-10-11");
@@ -605,6 +614,72 @@ it("shows token shares and API-equivalent estimates without cost-share bars", as
   expect(source.textContent ?? "").toContain("80% input");
   expect(source.textContent ?? "").toContain("20% output");
   expect(screen.queryByTestId("stats-unpriced-tokens")).toBeNull();
+});
+
+it("reads the prompt-cache rate off the vendor's own number when it publishes one", () => {
+  render(
+    createElement(ModelMixBlock, {
+      kind: "zai",
+      models: [
+        { id: "glm-5.3", displayName: "GLM-5.3", tokens: 1_000_000, requests: null },
+      ],
+      windowDays: 30,
+      pricingState: "ready",
+      priceList: PRICE_LIST,
+      cacheStats: {
+        hitRate: 0.9747,
+        promptTokens: 2_000_000_000,
+        cachedPromptTokens: 1_950_000_000,
+      },
+    }),
+  );
+
+  const cache = screen.getByTestId("stats-model-mix-cache");
+  // The vendor's rate, to the precision it published it in.
+  expect(cache.textContent ?? "").toContain("97.5%");
+  expect(cache.textContent ?? "").toContain("2B prompt tokens were cache reads");
+  expect(cache.textContent ?? "").toContain("30 days");
+});
+
+it("falls back to the token split when the vendor publishes no rate", () => {
+  render(
+    createElement(ModelMixBlock, {
+      kind: "zai",
+      models: [
+        { id: "glm-5.3", displayName: "GLM-5.3", tokens: 1_000_000, requests: null },
+      ],
+      windowDays: 30,
+      pricingState: "ready",
+      priceList: PRICE_LIST,
+      cacheStats: {
+        hitRate: null,
+        promptTokens: 1_000_000_000,
+        cachedPromptTokens: 960_000_000,
+      },
+    }),
+  );
+
+  expect(screen.getByTestId("stats-model-mix-cache").textContent ?? "").toContain(
+    "96%",
+  );
+});
+
+it("leaves the cache card off a provider that publishes no split", () => {
+  render(
+    createElement(ModelMixBlock, {
+      kind: "zai",
+      models: [
+        { id: "glm-5.3", displayName: "GLM-5.3", tokens: 1_000_000, requests: null },
+      ],
+      windowDays: 30,
+      pricingState: "ready",
+      priceList: PRICE_LIST,
+      cacheStats: null,
+    }),
+  );
+
+  expect(screen.queryByTestId("stats-model-mix-cache")).toBeNull();
+  expect(screen.getByTestId("stats-est-cost")).toBeTruthy();
 });
 
 it("counts models without a reference price as tokens, never as $0", () => {
@@ -616,9 +691,9 @@ it("counts models without a reference price as tokens, never as $0", () => {
         { id: "glm-next", displayName: "GLM Next", tokens: 9_000_000, requests: null },
       ],
       windowDays: 30,
-      plan: "pro",
       pricingState: "ready",
       priceList: PRICE_LIST,
+      cacheStats: null,
     }),
   );
 
@@ -642,9 +717,9 @@ it("keeps the model mix honest when the price list cannot be read", () => {
         { id: "glm-5.3", displayName: "GLM-5.3", tokens: 1_000, requests: null },
       ],
       windowDays: 30,
-      plan: "pro",
       pricingState: "failed",
       priceList: null,
+      cacheStats: null,
     }),
   );
 
@@ -894,6 +969,7 @@ function localOnlyUsage() {
     windowDays: null,
     dailyUsageBuckets: [],
     models: [],
+    cacheStats: null,
     local: {
       projects: [],
       models: [

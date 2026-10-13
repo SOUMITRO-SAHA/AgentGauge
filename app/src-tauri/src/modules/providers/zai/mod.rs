@@ -7,12 +7,13 @@
 pub(crate) mod protocol;
 
 use crate::modules::providers::coding_plan::{self, PlanSpec};
+use crate::modules::providers::http::{self, AuthHeader};
 use crate::modules::providers::zai::protocol::{
-    decode_auth_failure, decode_model_usage, decode_quota, is_auth_refusal, model_usage_query,
-    QUOTA_PATH,
+    decode_auth_failure, decode_cache_stats, decode_model_usage, decode_quota, is_auth_refusal,
+    model_usage_query, usage_detail_query, QUOTA_PATH,
 };
 use crate::shared::domain::{
-    AccountUsage, KickoffModelInfo, PlanKind, ProviderKind, UsageSnapshot,
+    AccountUsage, CacheStats, KickoffModelInfo, PlanKind, ProviderKind, UsageSnapshot,
 };
 use crate::shared::error::Error;
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
@@ -39,6 +40,23 @@ impl ZaiProvider {
     }
 }
 
+/// The vendor's prompt-cache split, from the one endpoint that publishes it.
+///
+/// Optional by contract: this is a second slice of a panel that has already
+/// answered, so a refused, empty, vanished, or self-contradicting endpoint
+/// costs the cache card and never the model mix beside it. Swapping the path on
+/// the already-resolved URL keeps this on the credential the account read
+/// resolved, over the identical window.
+fn read_cache_stats(
+    usage_url: &str,
+    usage_path: &str,
+    auth: &AuthHeader,
+    now_ms: i64,
+) -> Option<CacheStats> {
+    let detail_url = usage_url.replace(usage_path, &usage_detail_query(now_ms));
+    decode_cache_stats(&http::get_json(&detail_url, auth).ok()?).ok()?
+}
+
 impl Provider for ZaiProvider {
     fn kind(&self) -> ProviderKind {
         ProviderKind::Zai
@@ -61,11 +79,11 @@ impl Provider for ZaiProvider {
 
     fn read_account_usage(&self) -> Result<AccountUsage, Error> {
         let now_ms = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
-        coding_plan::read_monitor_json(
-            &Self::spec(),
-            &model_usage_query(now_ms),
-            decode_model_usage,
-        )
+        let usage_path = model_usage_query(now_ms);
+        let (url, auth) = coding_plan::monitor_request(&Self::spec(), &usage_path)?;
+        let mut usage = decode_model_usage(&http::get_json(&url, &auth)?, now_ms)?;
+        usage.cache_stats = read_cache_stats(&url, &usage_path, &auth, now_ms);
+        Ok(usage)
     }
 
     fn account(&self) -> Result<Option<PlanKind>, Error> {
@@ -158,6 +176,15 @@ mod tests {
             ),
             Err(error) => println!("LIVE_ZAI_ANALYTICS_ERR>>> {:?} {}", error.kind, error.message),
         }
+    }
+
+    #[test]
+    #[ignore = "live probe: hits the real Z.AI endpoint with the key OpenCode stores"]
+    fn live_zai_account_usage_carries_the_prompt_cache_split() {
+        let usage = ZaiProvider::new()
+            .read_account_usage()
+            .expect("the monitor answers");
+        println!("LIVE_ZAI_CACHE>>> {usage:?}");
     }
 
     #[test]

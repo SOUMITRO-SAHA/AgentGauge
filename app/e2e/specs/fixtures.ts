@@ -984,6 +984,7 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               },
               windowDays: null,
               models: [],
+              cacheStats: null,
               local: null,
               dailyUsageBuckets: [
                 { startDate: "2026-10-07", tokens: 2300 },
@@ -1862,6 +1863,11 @@ export function zaiAccountUsage() {
         requests: null,
       },
     ],
+    cacheStats: {
+      hitRate: 0.9747,
+      promptTokens: 16000000000,
+      cachedPromptTokens: 15594000000,
+    },
     local: null,
   };
 }
@@ -2230,6 +2236,7 @@ export function localOnlyAccountUsage() {
     windowDays: null,
     dailyUsageBuckets: [],
     models: [],
+    cacheStats: null,
     local: openCodeLocalUsage(),
   };
 }

@@ -72,6 +72,7 @@ impl Provider for KimiProvider {
                 daily_usage_buckets: Vec::new(),
                 models: Vec::new(),
                 model_daily_usage: Vec::new(),
+                cache_stats: None,
                 local: Some(local),
                 window_days: None,
             })

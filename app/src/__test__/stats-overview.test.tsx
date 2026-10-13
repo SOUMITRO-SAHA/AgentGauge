@@ -103,6 +103,7 @@ function zaiAccountUsage() {
         requests: null,
       },
     ],
+    cacheStats: null,
     local: null,
   };
 }
@@ -121,6 +122,7 @@ function codexAccountUsage() {
     windowDays: null,
     dailyUsageBuckets: [{ startDate: "2026-10-07", tokens: 2300 }],
     models: [],
+    cacheStats: null,
     local: {
       projects: [],
       models: [

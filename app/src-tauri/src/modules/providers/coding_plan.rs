@@ -8,8 +8,7 @@
 use crate::modules::opencode::{self, quota_host, OpenCodeCatalog, OPENCODE_EXECUTABLE};
 use crate::modules::providers::http::{self, AuthHeader};
 use crate::shared::domain::{
-    kickoff_model_label, AccountUsage, KickoffEffortInfo, KickoffModelInfo, ProviderKind,
-    UsageSnapshot,
+    kickoff_model_label, KickoffEffortInfo, KickoffModelInfo, ProviderKind, UsageSnapshot,
 };
 use crate::shared::error::{Error, ErrorKind};
 use crate::shared::provider::{PingOutcome, ProviderStatus};
@@ -135,19 +134,22 @@ pub(crate) fn read_usage(
     }
 }
 
-/// Reads any authenticated monitor endpoint for the plan, decoding the reply.
+/// The decided fetch for one monitor path, with the credential resolved.
 ///
-/// The same decide-half as [`read_usage`] — OpenCode reachable, plan
-/// connected, usable key, known host — with a caller-supplied path (which may
-/// carry a query string), so one provider can read several endpoints without
-/// duplicating the decision. "No data" outcomes are errors here, unlike the
-/// usage path: account analytics has no unavailable-snapshot shape, and the
-/// stats UI renders the failure as its own state.
-pub(crate) fn read_monitor_json(
+/// The same decide-half as [`read_usage`] — OpenCode reachable, plan connected,
+/// usable key, known host — with a caller-supplied path that may carry a query
+/// string, so one provider can read several endpoints without duplicating the
+/// decision. "No data" outcomes are errors here, unlike the usage path:
+/// account analytics has no unavailable-snapshot shape, and the stats UI
+/// renders the failure as its own state.
+///
+/// Resolving the credential spawns OpenCode to export its secrets, so a panel
+/// made of two endpoint reads calls this once and swaps the path on the
+/// resolved URL rather than asking for the key once per endpoint.
+pub(crate) fn monitor_request(
     spec: &PlanSpec,
     path_with_query: &str,
-    decode: impl Fn(&str, i64) -> Result<AccountUsage, Error>,
-) -> Result<AccountUsage, Error> {
+) -> Result<(String, AuthHeader), Error> {
     let catalog = OpenCodeCatalog::read().map_err(|error| {
         Error::new(
             ErrorKind::ProviderMissing,
@@ -158,25 +160,18 @@ pub(crate) fn read_monitor_json(
         )
     })?;
 
-    let swapped_path = path_with_query;
-    let (url, auth) = match plan_request(&catalog, spec, swapped_path) {
-        PlanRequest::Unavailable(snapshot) => {
-            return Err(Error::new(
-                ErrorKind::ProviderMissing,
-                snapshot.reason.unwrap_or_else(|| {
-                    format!(
-                        "The {} analytics read is unavailable.",
-                        spec.kind.display_name()
-                    )
-                }),
-            ));
-        }
-        PlanRequest::Fetch { url, auth } => (url, auth),
-    };
-
-    let payload = http::get_json(&url, &auth)?;
-    let now_ms = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
-    decode(&payload, now_ms)
+    match plan_request(&catalog, spec, path_with_query) {
+        PlanRequest::Unavailable(snapshot) => Err(Error::new(
+            ErrorKind::ProviderMissing,
+            snapshot.reason.unwrap_or_else(|| {
+                format!(
+                    "The {} analytics read is unavailable.",
+                    spec.kind.display_name()
+                )
+            }),
+        )),
+        PlanRequest::Fetch { url, auth } => Ok((url, auth)),
+    }
 }
 
 /// The provider status for a plan: everything routes through the `opencode`

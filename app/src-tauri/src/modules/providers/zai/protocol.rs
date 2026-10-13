@@ -15,7 +15,7 @@
 use serde::Deserialize;
 
 use crate::shared::domain::{
-    AccountUsage, AccountUsageSummary, DailyUsageBucket, Freshness, KickoffEffortInfo,
+    AccountUsage, AccountUsageSummary, CacheStats, DailyUsageBucket, Freshness, KickoffEffortInfo,
     ModelDayUsage, ModelUsage, PlanKind, ProviderKind, UsagePermission, UsageSnapshot, UsageWindow,
 };
 use crate::shared::error::{Error, ErrorKind};
@@ -25,6 +25,10 @@ pub const QUOTA_PATH: &str = "/api/monitor/usage/quota/limit";
 
 /// The vendor's historical model-usage path, appended to the region host.
 pub const MODEL_USAGE_PATH: &str = "/api/monitor/usage/model-usage";
+
+/// The vendor's per-model credit and cache detail path. Same auth as the quota
+/// read, and the only Z.AI endpoint that publishes a prompt-cache split.
+pub const USAGE_DETAIL_PATH: &str = "/api/monitor/credit-usage/usage-detail";
 
 /// How many days of history one analytics read asks for. The endpoint rejects
 /// spans above 31, and 30 keeps every request legal without chunking.
@@ -246,6 +250,92 @@ struct WireModelSummary {
     sort_order: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+struct WireUsageDetail {
+    code: i64,
+    msg: String,
+    #[serde(default)]
+    data: Option<WireUsageDetailData>,
+    #[serde(default)]
+    success: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct WireUsageDetailData {
+    #[serde(default)]
+    summary: Option<WireCreditSummary>,
+    #[serde(default, rename = "modelUsage")]
+    model_usage: WireCreditModelUsage,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireCreditSummary {
+    #[serde(default, rename = "cacheHitRate")]
+    cache_hit_rate: Option<WireMetric>,
+}
+
+/// One reported metric: a value plus a period-over-period trend.
+#[derive(Debug, Deserialize)]
+struct WireMetric {
+    #[serde(default)]
+    value: Option<WireNumber>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct WireCreditModelUsage {
+    #[serde(default, rename = "modelDataList")]
+    model_data_list: Vec<WireCreditModelRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireCreditModelRow {
+    #[serde(default, rename = "inputTokensUsage")]
+    input_tokens_usage: Vec<WireNumber>,
+    #[serde(default, rename = "cachedInputTokensUsage")]
+    cached_input_tokens_usage: Vec<WireNumber>,
+}
+
+/// A vendor number, which the live endpoint sends as a JSON number in token
+/// arrays and as a quoted decimal in every summary value.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum WireNumber {
+    Count(u64),
+    Decimal(f64),
+    Quoted(String),
+}
+
+impl WireNumber {
+    fn as_u64(&self) -> Option<u64> {
+        match self {
+            WireNumber::Count(value) => Some(*value),
+            WireNumber::Decimal(value) => {
+                (*value >= 0.0 && value.is_finite()).then_some(*value as u64)
+            }
+            WireNumber::Quoted(text) => text
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .and_then(|value| (value >= 0.0 && value.is_finite()).then_some(value as u64)),
+        }
+    }
+
+    /// The value as a share of one.
+    ///
+    /// The vendor publishes `"0.9747"` for its cache-hit rate, so the fraction
+    /// form is the one that is read. A rate above 1 is not reinterpreted as a
+    /// percentage — no shape change gets to invent a unit — it is dropped, and
+    /// the rate is then read off the token counts instead.
+    fn as_fraction(&self) -> Option<f64> {
+        let value = match self {
+            WireNumber::Count(value) => *value as f64,
+            WireNumber::Decimal(value) => *value,
+            WireNumber::Quoted(text) => text.trim().parse::<f64>().ok()?,
+        };
+        (value.is_finite() && (0.0..=1.0).contains(&value)).then_some(value)
+    }
+}
+
 /// The query string for one analytics read: the model-usage path plus a
 /// 30-day range ending at `now_ms`.
 ///
@@ -260,6 +350,21 @@ pub fn model_usage_query(now_ms: i64) -> String {
         encode_query_value(format_utc8(start_secs)),
         encode_query_value(format_utc8(end_secs)),
     )
+}
+
+/// The cache read's query: the model-scoped detail endpoint over the very same
+/// window [`model_usage_query`] asks for, so one panel's figures all describe
+/// one span.
+///
+/// `usageType=MODEL` is not optional. The endpoint answers an empty body
+/// without it, which reads as "no cache data" for a window that has plenty.
+pub fn usage_detail_query(now_ms: i64) -> String {
+    let window = model_usage_query(now_ms);
+    let range = window
+        .split_once('?')
+        .map(|(_, query)| query)
+        .unwrap_or_default();
+    format!("{USAGE_DETAIL_PATH}?usageType=MODEL&{range}")
 }
 
 fn encode_query_value(value: String) -> String {
@@ -430,9 +535,70 @@ pub fn decode_model_usage(payload: &str, now_ms: i64) -> Result<AccountUsage, Er
         daily_usage_buckets: buckets,
         models,
         model_daily_usage,
+        cache_stats: None,
         local: None,
         window_days: Some(ANALYTICS_WINDOW_DAYS as u64),
     })
+}
+
+/// Decodes a `usage-detail` reply into the vendor's prompt-cache split.
+///
+/// `None` is the honest answer whenever the reply carries no cache figures:
+/// the shape is unpublished and the endpoint answers an empty body when it
+/// declines a scope, so "not reported" must not be rendered as a zero hit rate.
+pub fn decode_cache_stats(payload: &str) -> Result<Option<CacheStats>, Error> {
+    let wire: WireUsageDetail = serde_json::from_str(payload).map_err(|error| {
+        Error::new(
+            ErrorKind::InvalidPayload,
+            format!("The Z.AI cache reply could not be decoded ({error})."),
+        )
+    })?;
+
+    if !wire.success || wire.code != 200 {
+        return Err(Error::new(
+            ErrorKind::ProviderError,
+            format!("Z.AI refused the cache read ({}).", wire.msg),
+        ));
+    }
+
+    let data = wire.data.unwrap_or_default();
+    let prompt_tokens: u64 = data
+        .model_usage
+        .model_data_list
+        .iter()
+        .flat_map(|model| model.input_tokens_usage.iter())
+        .filter_map(WireNumber::as_u64)
+        .sum();
+    let cached_prompt_tokens: u64 = data
+        .model_usage
+        .model_data_list
+        .iter()
+        .flat_map(|model| model.cached_input_tokens_usage.iter())
+        .filter_map(WireNumber::as_u64)
+        .sum();
+
+    let hit_rate = data
+        .summary
+        .and_then(|summary| summary.cache_hit_rate)
+        .and_then(|rate| rate.value)
+        .and_then(|rate| rate.as_fraction());
+
+    if prompt_tokens == 0 && hit_rate.is_none() {
+        return Ok(None);
+    }
+
+    // Cached prompt tokens above the prompt tokens themselves is a reply that
+    // contradicts itself. There is no share to read off it and no honest way to
+    // repair one, so it is not reported rather than clamped into range.
+    if cached_prompt_tokens > prompt_tokens {
+        return Ok(None);
+    }
+
+    Ok(Some(CacheStats {
+        hit_rate,
+        prompt_tokens,
+        cached_prompt_tokens,
+    }))
 }
 
 /// Consecutive activity-day runs over the daily buckets, most recent last.
@@ -968,5 +1134,163 @@ mod tests {
         let usage = decode_model_usage(payload, 0).expect("decodes");
         assert_eq!(usage.daily_usage_buckets[0].start_date, "2026-01-01");
         assert_eq!(usage.daily_usage_buckets[1].start_date, "2026-01-02");
+    }
+
+    // -- usage-detail (prompt cache) --------------------------------------
+
+    /// The `usage-detail` shape as captured 2026-10-13 against the live
+    /// endpoint; field names and the rate's string form are verbatim, the
+    /// bucket values are trimmed to two days.
+    const USAGE_DETAIL: &str = r#"{
+        "code": 200,
+        "msg": "Operation successful",
+        "data": {
+            "granularity": "DAY",
+            "timezone": "Asia/Shanghai",
+            "summary": {
+                "cacheHitRate": {"value": "0.9747", "trend": "0.0007"},
+                "offPeakUsageRate": {"value": "0.7389", "trend": "-0.0339"},
+                "totalCredits": {"value": "245696.5068", "trend": "0.7759"}
+            },
+            "modelUsage": {
+                "xTime": ["2026-10-11", "2026-10-12"],
+                "totalUsage": {"totalTokens": 1434, "totalCredits": "12.5"},
+                "modelDataList": [
+                    {
+                        "modelCode": "glm-5.3",
+                        "modelName": "GLM-5.3",
+                        "sortOrder": 1,
+                        "inputTokensUsage": [700, 800],
+                        "uncachedInputTokensUsage": [20, 30],
+                        "cachedInputTokensUsage": [680, 770],
+                        "outputTokensUsage": [40, 50],
+                        "totalTokensUsage": [740, 850]
+                    },
+                    {
+                        "modelCode": "glm-5.3-flash",
+                        "modelName": "GLM-5.3-Flash",
+                        "sortOrder": 2,
+                        "inputTokensUsage": [100, 100],
+                        "uncachedInputTokensUsage": [5, 5],
+                        "cachedInputTokensUsage": [95, 95],
+                        "outputTokensUsage": [10, 9],
+                        "totalTokensUsage": [110, 109]
+                    }
+                ]
+            }
+        },
+        "success": true
+    }"#;
+
+    #[test]
+    fn the_cache_split_keeps_the_vendors_own_rate() {
+        let stats = decode_cache_stats(USAGE_DETAIL).expect("decodes");
+        let stats = stats.expect("the reply reports a cache split");
+        // The vendor publishes the rate as a fraction in a string.
+        assert_eq!(stats.hit_rate, Some(0.9747));
+    }
+
+    #[test]
+    fn the_cache_split_sums_every_models_prompt_and_cached_tokens() {
+        let stats = decode_cache_stats(USAGE_DETAIL)
+            .expect("decodes")
+            .expect("the reply reports a cache split");
+        // 700+800+100+100 prompt tokens, 680+770+95+95 of them cache reads.
+        assert_eq!(stats.prompt_tokens, 1_700);
+        assert_eq!(stats.cached_prompt_tokens, 1_640);
+    }
+
+    #[test]
+    fn a_reply_without_a_cache_rate_still_reports_its_token_split() {
+        let payload = r#"{"code":200,"msg":"ok","success":true,"data":{
+            "summary": {"totalCredits": {"value": "10"}},
+            "modelUsage": {"modelDataList": [
+                {"modelName": "GLM-5.3", "inputTokensUsage": [400],
+                 "cachedInputTokensUsage": [300]}
+            ]}
+        }}"#;
+        let stats = decode_cache_stats(payload)
+            .expect("decodes")
+            .expect("the token split is a cache reading on its own");
+        assert_eq!(stats.hit_rate, None);
+        assert_eq!(stats.prompt_tokens, 400);
+        assert_eq!(stats.cached_prompt_tokens, 300);
+    }
+
+    #[test]
+    fn a_rate_outside_zero_to_one_is_not_reported() {
+        // No shape change may put "9747" or a negative rate on screen.
+        for value in ["9747", "-0.2", "2"] {
+            let payload = format!(
+                r#"{{"code":200,"msg":"ok","success":true,"data":{{
+                    "summary": {{"cacheHitRate": {{"value": "{value}"}}}},
+                    "modelUsage": {{"modelDataList": [
+                        {{"modelName": "GLM-5.3", "inputTokensUsage": [100],
+                         "cachedInputTokensUsage": [90]}}
+                    ]}}
+                }}}}"#
+            );
+            let stats = decode_cache_stats(&payload)
+                .expect("decodes")
+                .expect("the token split still stands");
+            assert_eq!(stats.hit_rate, None, "rejected rate {value}");
+        }
+    }
+
+    #[test]
+    fn a_reply_with_no_cache_figures_is_not_reported() {
+        let payload = r#"{"code":200,"msg":"ok","success":true,"data":{
+            "summary": {"totalCredits": {"value": "10"}},
+            "modelUsage": {"totalUsage": {"totalTokens": 500}}
+        }}"#;
+        assert_eq!(decode_cache_stats(payload).expect("decodes"), None);
+    }
+
+    #[test]
+    fn a_cached_total_above_the_prompt_total_is_not_reported() {
+        // A split that contradicts itself is not a share to guess at.
+        let payload = r#"{"code":200,"msg":"ok","success":true,"data":{
+            "summary": {"cacheHitRate": {"value": "0.9"}},
+            "modelUsage": {"modelDataList": [
+                {"modelName": "GLM-5.3", "inputTokensUsage": [100],
+                 "cachedInputTokensUsage": [900]}
+            ]}
+        }}"#;
+        assert_eq!(decode_cache_stats(payload).expect("decodes"), None);
+    }
+
+    #[test]
+    fn a_refused_usage_detail_reply_is_an_error() {
+        let payload = r#"{"code":403,"msg":"forbidden","success":false}"#;
+        assert!(decode_cache_stats(payload).is_err());
+    }
+
+    #[test]
+    fn garbage_is_rejected_by_the_cache_decoder() {
+        assert!(decode_cache_stats("not json").is_err());
+    }
+
+    #[test]
+    fn the_cache_query_asks_for_the_model_scope_over_the_same_window() {
+        let query = usage_detail_query(1_767_225_600_000);
+        assert!(query.starts_with(USAGE_DETAIL_PATH), "path first: {query}");
+        assert!(
+            query.contains("usageType=MODEL"),
+            "the endpoint answers an empty body without the scope: {query}"
+        );
+        let window = model_usage_query(1_767_225_600_000);
+        for field in ["startTime", "endTime"] {
+            let expected = window
+                .split_once(&format!("{field}="))
+                .expect("the model-usage query names the field")
+                .1
+                .split('&')
+                .next()
+                .expect("the field carries a value");
+            assert!(
+                query.contains(&format!("{field}={expected}")),
+                "{field} matches the model mix's own window: {query}"
+            );
+        }
     }
 }

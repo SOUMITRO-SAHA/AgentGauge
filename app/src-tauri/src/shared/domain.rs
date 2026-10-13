@@ -128,6 +128,9 @@ pub struct AccountUsage {
     /// Per-model daily totals when the provider reports that series.
     #[serde(default)]
     pub model_daily_usage: Vec<ModelDayUsage>,
+    /// The prompt-cache split when the provider reports one.
+    #[serde(default)]
+    pub cache_stats: Option<CacheStats>,
     /// Local harness usage when a provider includes it in this account read.
     /// Codex reads its rollout files through the separate local-usage request
     /// so the account API result does not wait for that scan.
@@ -178,6 +181,24 @@ pub struct ModelUsage {
     /// Model calls attributed to this model, when the provider counts them.
     #[serde(default)]
     pub requests: Option<u64>,
+}
+
+/// The prompt-cache split a provider publishes for its reported window.
+///
+/// Only a provider with a published cache split fills this in; `None` on the
+/// account reading means the vendor reported none, which is not the same as a
+/// zero cache hit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheStats {
+    /// The vendor's own cache-hit rate as a fraction of one, when it publishes
+    /// one. `None` leaves the rate to be read off the token counts instead,
+    /// which is the same arithmetic the vendor's own rate is built from.
+    pub hit_rate: Option<f64>,
+    /// Prompt tokens in the window, cache reads included.
+    pub prompt_tokens: u64,
+    /// The part of `prompt_tokens` the vendor served from its cache.
+    pub cached_prompt_tokens: u64,
 }
 
 /// One provider-reported model total for a calendar day.
@@ -1074,6 +1095,7 @@ mod tests {
             daily_usage_buckets: Vec::new(),
             models: Vec::new(),
             model_daily_usage: Vec::new(),
+            cache_stats: None,
             local: Some(LocalUsage {
                 model_days: Vec::new(),
                 projects: Vec::new(),

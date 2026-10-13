@@ -46,6 +46,7 @@ export const config: WebdriverIO.Config = {
       path.join(here, "specs", "features", "stats", "all-plans.e2e.ts"),
       path.join(here, "specs", "features", "stats", "codex-loading.e2e.ts"),
       path.join(here, "specs", "features", "stats", "model-cost-display.e2e.ts"),
+      path.join(here, "specs", "features", "stats", "model-mix-cache.e2e.ts"),
       path.join(here, "specs", "features", "stats", "heatmap.e2e.ts"),
       path.join(here, "specs", "features", "stats", "cost-trends.e2e.ts"),
       path.join(here, "specs", "features", "stats", "local-sessions.e2e.ts"),

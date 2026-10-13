@@ -155,15 +155,6 @@ function normalizePlanName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-/** The estimate as a multiple of the plan price — null when unpriceable. */
-export function valueRatio(
-  estimatedUsd: number,
-  planPriceUsd: number | null,
-): number | null {
-  if (planPriceUsd === null || planPriceUsd <= 0) return null;
-  return estimatedUsd / planPriceUsd;
-}
-
 /** Whole dollars once the amount is large enough for cents not to matter. */
 export function formatUsd(value: number): string {
   const fractionDigits = Math.abs(value) >= 100 ? 0 : 2;

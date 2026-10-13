@@ -309,7 +309,7 @@ describe("stats", () => {
     ).toBe(false);
   });
 
-  it("shows the model mix with both shares and the plan value", async () => {
+  it("shows the model mix with token shares and API-equivalent estimates", async () => {
     await dashboardWithZaiAnalytics();
     await gotoView("stats");
 
@@ -318,10 +318,9 @@ describe("stats", () => {
     await expectDisplayed('[data-testid="stats-model-row-glm-5.3"]');
     await expectDisplayed('[data-testid="stats-model-row-glm-5.3-flash"]');
     await expectDisplayed('[data-testid="stats-est-cost"]');
-    await expectDisplayed('[data-testid="stats-value-ratio"]');
 
-    // The two lenses read as text, locale-free: the vendor's primary model
-    // leads with 39% of tokens but 85% of the estimated dollars.
+    // The vendor's own ranking leads: GLM-5.3 is sortOrder 1 even though Flash
+    // carried more tokens.
     const shares = await browser.execute(() => {
       const read = (id: string) =>
         document
@@ -330,15 +329,15 @@ describe("stats", () => {
       return {
         glm: read("stats-model-row-glm-5.3"),
         flash: read("stats-model-row-glm-5.3-flash"),
-        ratio: read("stats-value-ratio"),
+        cost: read("stats-est-cost"),
         source: read("stats-model-mix-source"),
       };
     });
     expect(shares.glm).toContain("39% of tokens");
-    expect(shares.glm).toContain("85% of est. cost");
+    expect(shares.glm).toMatch(/≈ \$/);
     expect(shares.flash).toContain("61% of tokens");
-    expect(shares.flash).toContain("15% of est. cost");
-    expect(shares.ratio).toContain("248");
+    expect(shares.flash).toMatch(/≈ \$/);
+    expect(shares.cost).toMatch(/19[.,]855/);
     // The provenance travels with the estimate: price-list date, the
     // input-share assumption, and the not-a-bill disclaimer.
     expect(shares.source).toContain("price list 2026-10-11");
@@ -374,10 +373,11 @@ describe("stats", () => {
     expect(reading.cost).toContain("$115");
     // The cache share is the reason that figure stays small.
     expect(reading.cache).toContain("96%");
-    // Token share and cost share disagree, which is why both lenses render:
-    // Luna carries about half the tokens for 2% of the dollars.
-    expect(reading.gpt55).toContain("98% of est. cost");
-    expect(reading.luna).toContain("2% of est. cost");
+    // Each row carries its own exact estimate and its token share: Luna runs
+    // about half the tokens for $2.05 against GPT-5.5's $112.46.
+    expect(reading.gpt55).toMatch(/≈ \$112/);
+    expect(reading.gpt55).toContain("49% of tokens");
+    expect(reading.luna).toMatch(/≈ \$2[.,]05/);
     expect(reading.luna).toContain("51% of tokens");
     // A model the price list cannot cover stays a token count, never $0.
     expect(reading.unpriced).toContain("No reference price");
@@ -415,7 +415,7 @@ describe("stats", () => {
     expect(reading.cost).toMatch(/42[.,]50/);
     expect(reading.cache).toContain("33%");
     expect(reading.row).toMatch(/42[.,]50/);
-    expect(reading.row).toContain("100% of est. cost");
+    expect(reading.row).toContain("100% of tokens");
     // The provenance names OpenCode as the source, not the plan vendor: these
     // numbers came from OpenCode's database on this machine.
     expect(reading.source).toContain("OpenCode");

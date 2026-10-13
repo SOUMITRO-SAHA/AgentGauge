@@ -16,7 +16,6 @@ import {
   formatUsd,
   modelPrice,
   planPriceUsd,
-  valueRatio,
   type PriceList,
 } from "~/lib/pricing";
 
@@ -144,16 +143,6 @@ describe("planPriceUsd", () => {
     expect(planPriceUsd(LIST, "zai-coding-plan", null)).toBeNull();
     expect(planPriceUsd(LIST, "zai-coding-plan", "unknown")).toBeNull();
     expect(planPriceUsd(LIST, "opencode", "pro")).toBeNull();
-  });
-});
-
-describe("valueRatio", () => {
-  it("expresses the estimate as a multiple of the plan price", () => {
-    expect(valueRatio(3_371.47, 80)).toBeCloseTo(42.14, 2);
-  });
-
-  it("is null without a plan price to compare against", () => {
-    expect(valueRatio(3_371.26, null)).toBeNull();
   });
 });
 

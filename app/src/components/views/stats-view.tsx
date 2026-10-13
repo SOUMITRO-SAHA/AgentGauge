@@ -19,6 +19,7 @@
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
+import * as Effect from "effect/Effect";
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 import {
   useCallback,
@@ -50,6 +51,7 @@ import {
   usageForAtom,
 } from "~/atoms";
 import { PANEL, PanelHeader } from "~/components/dashboard/panel";
+import { VolumeAccessDialog } from "~/components/permissions/volume-access-gate";
 import { FreshnessPill } from "~/components/usage/provider-status-card";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -73,7 +75,6 @@ import {
   formatUsd,
   planPriceUsd,
   PRICING_PROVIDER_IDS,
-  valueRatio,
   type ModelCostEstimate,
   type ModelCostRow,
   type PriceList,
@@ -108,12 +109,35 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
   const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
+  const [volumeGate, setVolumeGate] = useState<
+    "loading" | "needed" | "granting" | "clear"
+  >("loading");
+
   useEffect(() => {
-    if (visible && !mounted) {
+    if (!visible) return;
+    Effect.runPromise(Ipc.getVolumeAccess()).then(
+      (status) =>
+        setVolumeGate(
+          status.needsConsent && !status.consented ? "needed" : "clear",
+        ),
+      () => setVolumeGate("clear"),
+    );
+  }, [visible]);
+
+  useEffect(() => {
+    if (visible && !mounted && volumeGate === "clear") {
       setMounted(true);
       setLastRefreshed(Date.now());
     }
-  }, [visible, mounted]);
+  }, [visible, mounted, volumeGate]);
+
+  const handleGrantAccess = useCallback(() => {
+    setVolumeGate("granting");
+    Effect.runPromise(Ipc.grantVolumeAccess()).then(
+      () => setVolumeGate("clear"),
+      () => setVolumeGate("clear"),
+    );
+  }, []);
 
   const tabs = statsTabsFrom(
     AsyncResult.match(subscriptions, {
@@ -164,6 +188,14 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
             />
           ))
         : null}
+
+      {volumeGate === "needed" || volumeGate === "granting" ? (
+        <VolumeAccessDialog
+          granting={volumeGate === "granting"}
+          onGrant={handleGrantAccess}
+          onDismiss={() => setVolumeGate("clear")}
+        />
+      ) : null}
 
       <Tabs
         value={active}
@@ -1672,13 +1704,7 @@ function PlanAnalytics({
                 kind={kind}
                 models={result.value.models}
                 windowDays={result.value.windowDays}
-                plan={AsyncResult.match(readings, {
-                  onInitial: () => null,
-                  onSuccess: (reading) =>
-                    reading.value.find((item) => item.provider === kind)
-                      ?.plan ?? null,
-                  onFailure: () => null,
-                })}
+                cacheStats={result.value.cacheStats}
                 pricingState={AsyncResult.match(priceList, {
                   onInitial: () => "loading" as const,
                   onSuccess: () => "ready" as const,
@@ -2219,8 +2245,9 @@ function CostTrajectory({
 }
 
 /**
- * The model mix: which models carried the tokens, and what that mix would
- * have cost at API prices.
+ * The model mix: which models carried the tokens, what that mix would have cost
+ * at API prices, and how much of the prompt traffic the provider served from
+ * its cache.
  *
  * The two lenses are the point — a cheap model can carry most of the volume
  * for a sliver of the dollars, and only seeing both shares says so. Estimates
@@ -2233,16 +2260,16 @@ export function ModelMixBlock({
   kind,
   models,
   windowDays,
-  plan,
   pricingState,
   priceList,
+  cacheStats,
 }: {
   readonly kind: Ipc.ProviderKind;
   readonly models: readonly Ipc.ModelUsage[];
   readonly windowDays: number | null;
-  readonly plan: Ipc.PlanKind | null;
   readonly pricingState: "loading" | "ready" | "failed";
   readonly priceList: PriceList | null;
+  readonly cacheStats: Ipc.CacheStats | null;
 }) {
   if (pricingState === "loading") {
     return <ModelMixSkeleton />;
@@ -2253,12 +2280,6 @@ export function ModelMixBlock({
     pricingState === "ready" && priceList !== null
       ? estimateModelCosts(models, priceList, providerId)
       : null;
-  const planPrice =
-    estimate !== null && plan !== null
-      ? planPriceUsd(priceList as PriceList, providerId, plan)
-      : null;
-  const ratio =
-    estimate !== null ? valueRatio(estimate.estimatedTotalUsd, planPrice) : null;
 
   return (
     <div
@@ -2283,34 +2304,27 @@ export function ModelMixBlock({
           cost estimates.
         </p>
       ) : null}
-      {ratio !== null && estimate !== null ? (
+      {estimate !== null || cacheStats !== null ? (
         <div className="grid gap-3 sm:grid-cols-2">
-          <div
-            className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
-            data-testid="stats-est-cost"
-          >
-            <span className="text-xs text-muted-foreground">
-              If you had paid per token
-            </span>
-            <span className="text-xl font-semibold tabular text-foreground">
-              ≈ {formatUsd(estimate.estimatedTotalUsd)}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              API-equivalent in {windowDays ?? "the reported"} days
-            </span>
-          </div>
-          <div
-            className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
-            data-testid="stats-value-ratio"
-          >
-            <span className="text-xs text-muted-foreground">Plan value</span>
-            <span className="text-xl font-semibold tabular text-foreground">
-              ≈ {Math.round(ratio)}× the {formatPlan(plan)} price
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {formatUsd(planPrice ?? 0)}/month plan, estimates only — not a bill
-            </span>
-          </div>
+          {estimate !== null ? (
+            <div
+              className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
+              data-testid="stats-est-cost"
+            >
+              <span className="text-xs text-muted-foreground">
+                If you had paid per token
+              </span>
+              <span className="text-xl font-semibold tabular text-foreground">
+                ≈ {formatUsd(estimate.estimatedTotalUsd)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                API-equivalent in {windowDays ?? "the reported"} days
+              </span>
+            </div>
+          ) : null}
+          {cacheStats !== null ? (
+            <PromptCacheCard stats={cacheStats} windowDays={windowDays} />
+          ) : null}
         </div>
       ) : null}
       <div className="flex flex-col gap-3">
@@ -2342,6 +2356,57 @@ export function ModelMixBlock({
           ? `Estimates use reference rates of ${priceList?.meta.currency} ${priceList?.meta.unit} · assumes ${Math.round(estimate.inputShare * 100)}% input / ${Math.round((1 - estimate.inputShare) * 100)}% output · price list ${priceList?.meta.updated} · not a bill.`
           : "Token shares as reported; no estimates without the price list."}
       </p>
+    </div>
+  );
+}
+
+/**
+ * The provider's prompt-cache card: how much of the window's prompt traffic it
+ * served from cache, the same question the local log panels answer from the
+ * machine's own session files.
+ *
+ * The headline is the provider's own rate when it publishes one, at the
+ * precision it published it — a vendor figure of 0.9747 is not the same claim
+ * as a whole-number share of a token count. When the vendor publishes no rate
+ * the share is read off its own token counts, which is the arithmetic that rate
+ * is built from. A provider that publishes no split renders no card at all:
+ * that is "not reported", never a zero hit rate.
+ */
+function PromptCacheCard({
+  stats,
+  windowDays,
+}: {
+  readonly stats: Ipc.CacheStats;
+  readonly windowDays: number | null;
+}) {
+  const share =
+    stats.hitRate ??
+    (stats.promptTokens > 0
+      ? stats.cachedPromptTokens / stats.promptTokens
+      : null);
+  const reportedWindow =
+    windowDays === null ? "the reported window" : `${windowDays} days`;
+
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 bg-surface/60 p-3"
+      data-testid="stats-model-mix-cache"
+    >
+      <span className="text-xs text-muted-foreground">Prompt cache</span>
+      <span className="text-xl font-semibold tabular text-foreground">
+        {share === null
+          ? "—"
+          : stats.hitRate !== null
+            ? `${(share * 100).toFixed(1)}%`
+            : `${Math.round(share * 100)}%`}
+      </span>
+      <span className="text-xs text-muted-foreground">
+        {share === null
+          ? "The provider published no prompt-token split"
+          : stats.promptTokens === 0
+            ? `the provider's reported rate for ${reportedWindow}`
+            : `of ${formatCompactCount(stats.promptTokens)} prompt tokens were cache reads in ${reportedWindow}`}
+      </span>
     </div>
   );
 }
