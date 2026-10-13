@@ -10,8 +10,8 @@
 
 Multiple coding agents may work in this repo at the same time. All work is
 coordinated through one registry at `.agents/tasks/` — no off-registry tasks.
-Most of `.agents/tasks/` is git-ignored and local to the clone — **except**
-`.agents/tasks/research/`, which is committed so findings persist across clones.
+All of `.agents/` is git-ignored and local to the clone; nothing under it is
+ever committed to git, so registry state never travels with the repository.
 
 ### Every session, in order
 
@@ -61,14 +61,16 @@ If a task is primarily research (spike, investigation, literature review, librar
 - Follow the normal task lifecycle (claim, plan, complete).
 - Write a detailed findings document at
   `.agents/tasks/research/<research_task_name>.md`. Include: goal, sources consulted, key findings, options considered, recommendation, and any open questions.
-- **This file is committed** — it is the permanent record for the team.
-  Stage and commit it when the task is done.
-- The corresponding `planning/<task_id>/` folder is still ignored and should be moved to `completed/` as usual.
+- This file is local to the clone like everything else under `.agents/` — it
+  is never staged or committed.
+- The corresponding `planning/<task_id>/` folder should be moved to `completed/` as usual.
 
 ### Git rules
 
-- Never stage, add, or commit anything under `.agents/tasks/` **except**
-  `.agents/tasks/research/` (research findings are intentionally committed).
+- Never stage, add, or commit anything under `.agents/` — the registry,
+  contexts, references, and research findings are all local to the clone. The
+  only tracked file there is `.agents/.gitignore`, which enforces this by
+  ignoring everything else under `.agents/`.
 
 </critical_rules>
 
