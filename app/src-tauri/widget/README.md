@@ -21,6 +21,8 @@ bunx tauri build --bundles app            # build the .app
 bun run widget:embed path/to/App.app      # embed + re-sign
 # or all three:
 bun run build:mac
+
+bun run clean:widget                      # remove widget build output (both configurations)
 ```
 
 The extension **must** be built from a real Xcode app-extension target
@@ -277,6 +279,6 @@ If it is missing, check `codesign -dvvv --entitlements -` on the embedded
 | `Sources/RefreshWidgetIntent.swift`   | Requests a timeline reload from the latest published snapshot.                         |
 | `Sources/ProviderSwitchIntent.swift`  | Cycles providers without opening the host app.                                       |
 | `Sources/WidgetBridge.swift`          | In-process WidgetKit status query and timeline reload, built as `libWidgetBridge.dylib`. |
-| `build-widget.sh`                     | Build, embed, sign, and run the widget build-time checks.                            |
+| `build-widget.sh`                     | Build, clean, embed, sign, and run the widget build-time checks.                     |
 | `signing-options.sh`                  | Selects ad-hoc local signing or Developer ID runtime/timestamp options.              |
 | `app/scripts/widget-dev.ts`            | Isolated debug app and native widget rebuild watcher.                                |

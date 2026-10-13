@@ -33,6 +33,7 @@
 #   build-widget.sh build                    # build the .appex only
 #   build-widget.sh embed /path/to/App.app    # embed into an existing bundle
 #   build-widget.sh all                      # build, then embed into the newest bundle
+#   build-widget.sh clean                    # remove the widget build output
 
 set -euo pipefail
 
@@ -41,7 +42,8 @@ PROJECT="$WIDGET_DIR/AIStatsWidget.xcodeproj"
 SCHEME="AIStatsWidget"
 CONFIGURATION="${AGENTGAUGE_WIDGET_CONFIGURATION:-Release}"
 WIDGET_ARCH="${AGENTGAUGE_WIDGET_ARCH:-$(uname -m)}"
-DERIVED="$WIDGET_DIR/build/$CONFIGURATION"
+BUILD_ROOT="${AGENTGAUGE_WIDGET_BUILD_ROOT:-$WIDGET_DIR/build}"
+DERIVED="$BUILD_ROOT/$CONFIGURATION"
 BRIDGE_NAME="libWidgetBridge.dylib"
 source "$WIDGET_DIR/signing-options.sh"
 
@@ -70,6 +72,7 @@ build_appex() {
   bash "$WIDGET_DIR/Tests/PlacementReceiptTests.sh"
   bash "$WIDGET_DIR/Tests/WidgetSigningOptionsTests.sh"
   bash "$WIDGET_DIR/Tests/WidgetHeaderTests.sh"
+  bash "$WIDGET_DIR/Tests/WidgetCleanTests.sh"
 
   local -a architecture_args
   if [ "$WIDGET_ARCH" = "universal" ]; then
@@ -194,10 +197,18 @@ embed_into() {
   log "Done: $app/Contents/PlugIns/$SCHEME.appex"
 }
 
+clean_build() {
+  log "Cleaning $BUILD_ROOT"
+  rm -rf "$BUILD_ROOT"
+}
+
 case "${1:-all}" in
   build)
     build_appex >/dev/null
     log "Built $SCHEME.appex"
+    ;;
+  clean)
+    clean_build
     ;;
   embed)
     shift
