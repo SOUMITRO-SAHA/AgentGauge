@@ -1,25 +1,30 @@
 //! Read-only process and storage insights for the agent toolchain.
 //!
 //! One bounded capability: a snapshot of what Codex and OpenCode are doing
-//! to this machine — running processes with their memory, age, and listening
-//! ports, and the on-disk footprint each one owns. The app itself is
-//! deliberately not a group: the screen is for the toolchain's cost, not
-//! ours. Everything here is a read; there is deliberately no capability to
-//! stop, signal, or delete anything.
+//! to this machine — running processes with their memory, CPU share, age,
+//! and listening ports (with the interface each port is bound to), and the
+//! on-disk footprint each one owns, broken into the components the tools
+//! actually create. The app itself is deliberately not a group: the screen
+//! is for the toolchain's cost, not ours. Everything here is a read; there
+//! is deliberately no capability to stop, signal, or delete anything.
 //!
 //! [`RawProcess`] is the provider-agnostic process record. The matching and
 //! grouping functions over it are pure and unit-tested; the `sysinfo` adapter
 //! is a thin translation at the edge so the logic can be exercised without a
 //! live process table. Storage is measured with a plain filesystem walk —
 //! logical file sizes, symlinks not followed — and an unreadable subtree
-//! contributes nothing rather than failing the whole read.
+//! contributes nothing rather than failing the whole read. Roots the tools
+//! relocated through their environment (`CODEX_SQLITE_HOME`,
+//! `OPENCODE_DB`) are measured beside the data directory and reported as
+//! rows outside the root's total, never folded into it.
 
+use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 /// One running process, as the renderer renders it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessSummary {
     pub pid: u32,
@@ -32,6 +37,13 @@ pub struct ProcessSummary {
     pub started_at: Option<u64>,
     /// Resident set size in bytes.
     pub memory_bytes: Option<u64>,
+    /// The process's CPU share over the read's sampling interval, in percent
+    /// of one core — above 100 means several cores. `None` when the platform
+    /// did not report a sample.
+    pub cpu_usage: Option<f32>,
+    /// Present only for states a user must know about (`stopped`, `zombie`,
+    /// `dead`); normal states carry nothing so routine rows stay untagged.
+    pub status: Option<String>,
     /// The TCP ports this process is listening on, sorted. Empty is a real
     /// answer — a stdio server listens on nothing.
     pub listening_ports: Vec<u16>,
@@ -43,6 +55,23 @@ pub struct ProcessSummary {
 pub struct ProcessPort {
     pub pid: u32,
     pub port: u16,
+    /// The interface the socket is bound to (`127.0.0.1`, `::1`, `*` for
+    /// every interface). `None` when the node did not name one.
+    pub address: Option<String>,
+}
+
+/// The running OpenCode background service, as recorded by the tool itself in
+/// its state directory (`service.json`; `server.json` on dev builds).
+///
+/// Only `version`, `url`, and `pid` are read. The sibling `password` field is
+/// a secret: it is deliberately never parsed, stored, or logged, so it cannot
+/// reach the renderer by construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceInfo {
+    pub version: Option<String>,
+    pub url: Option<String>,
+    pub pid: Option<u32>,
 }
 
 /// The group-level answer to "which ports are these processes listening on?".
@@ -87,6 +116,11 @@ pub enum StorageReport {
         total_bytes: u64,
         total_files: u64,
         rows: Vec<StorageRow>,
+        /// Footprint the tool relocated outside the data directory through
+        /// its own environment (`CODEX_SQLITE_HOME`, `OPENCODE_DB`). These
+        /// bytes are deliberately **not** part of `total_bytes` — the total
+        /// describes the walked root and nothing else.
+        external_rows: Vec<StorageRow>,
     },
     Absent {
         reason: String,
@@ -94,16 +128,21 @@ pub enum StorageReport {
 }
 
 /// Everything the screen shows about one group of processes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessGroup {
     pub id: String,
     pub display_name: String,
     pub processes: Vec<ProcessSummary>,
     pub total_memory_bytes: u64,
+    /// The group's summed CPU share, `None` when no member reported a sample.
+    pub total_cpu_usage: Option<f32>,
     pub storage: StorageReport,
     /// Whether and where this group's processes are listening on TCP.
     pub ports: PortScan,
+    /// The tool's self-recorded background service, attached only when its
+    /// recorded pid is one of this group's live processes.
+    pub service: Option<ServiceInfo>,
 }
 
 /// The whole read: one row per group, in the order the screen shows them.
@@ -119,7 +158,7 @@ pub struct ProcessInsights {
 ///
 /// Built from `sysinfo` at the edge; tests construct them directly so the
 /// matching rules are exercised without a live process table.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RawProcess {
     pub pid: u32,
     pub parent_pid: Option<u32>,
@@ -132,17 +171,29 @@ pub struct RawProcess {
     pub memory_bytes: u64,
     /// Epoch seconds.
     pub started_at: u64,
+    /// Percent of one core over the sampling interval; filled only for the
+    /// tracked tools' processes, whose pids are sampled twice.
+    pub cpu_usage: Option<f32>,
+    /// Only abnormal states (`stopped`, `zombie`, `dead`); normal is `None`.
+    pub status: Option<String>,
 }
 
 /// The roots each group's storage is measured from.
 ///
 /// Resolved by the caller so tests inject temporary directories; `None`
 /// means the root cannot be known (no home directory), which renders as an
-/// absent footprint with a reason.
+/// absent footprint with a reason. The relocation fields are `Some` only
+/// when the tool's own environment moved that footprint elsewhere.
 #[derive(Debug, Clone, Default)]
 pub struct PathEnv {
     pub codex_home: Option<PathBuf>,
+    /// `$CODEX_SQLITE_HOME`, when set: where Codex keeps its runtime SQLite
+    /// databases and their backups, outside `codex_home`.
+    pub codex_sqlite_home: Option<PathBuf>,
     pub opencode_data: Option<PathBuf>,
+    /// `$OPENCODE_DB`, when set: the file OpenCode was told to keep its
+    /// database in, outside `opencode_data`.
+    pub opencode_db: Option<PathBuf>,
 }
 
 /// The executables tracked as tool groups.
@@ -163,9 +214,12 @@ fn normalized_stem(value: &str) -> String {
 /// Matches the executable path or the process name directly. Command
 /// arguments count only when the process was launched by a known runtime
 /// (`npx codex`, `bun opencode`) — the runtime is the executable and the
-/// tool rides in its arguments. For anything else an argument is just a
-/// mention: `rg codex src/` takes the name as a bare argument and must not
-/// land in Codex's panel.
+/// tool rides in its arguments. A shell `-c` script matches on its **first
+/// token** only (`sh -c "opencode serve"` is OpenCode; `sh -c "echo
+/// codex"` is not), because a bare mention deeper in a script is as often a
+/// reference as a launch. For anything else an argument is just a mention:
+/// `rg codex src/` takes the name as a bare argument and must not land in
+/// Codex's panel.
 fn matches_tool(process: &RawProcess, executable: &str) -> bool {
     if process
         .exe
@@ -177,11 +231,40 @@ fn matches_tool(process: &RawProcess, executable: &str) -> bool {
     if normalized_stem(&process.name) == executable {
         return true;
     }
-    launched_by_runtime(process)
+    if launched_by_runtime(process)
         && process
             .cmd
             .iter()
             .any(|arg| normalized_stem(arg) == executable)
+    {
+        return true;
+    }
+    dash_c_first_token(&process.cmd).is_some_and(|token| normalized_stem(&token) == executable)
+}
+
+/// The first token of a shell `-c` script, when the command is one.
+///
+/// Only the token that names the program to run decides the match; every
+/// later token is an argument or a mention.
+fn dash_c_first_token(cmd: &[String]) -> Option<String> {
+    let first = cmd.first()?;
+    if !matches!(
+        normalized_stem(first).as_str(),
+        "sh" | "bash" | "zsh" | "dash"
+    ) {
+        return None;
+    }
+    let mut arguments = cmd[1..].iter();
+    while let Some(argument) = arguments.next() {
+        if argument == "-c" {
+            return arguments
+                .next()?
+                .split_whitespace()
+                .next()
+                .map(str::to_owned);
+        }
+    }
+    None
 }
 
 /// Launchers whose arguments may name the real tool being run.
@@ -261,6 +344,7 @@ fn walk_size(root: &Path) -> std::io::Result<Walked> {
 }
 
 /// One labelled piece of a footprint.
+#[derive(Debug, Clone)]
 enum Component {
     /// A subdirectory of the root, walked whole.
     Directory {
@@ -276,13 +360,15 @@ enum Component {
 /// Whether a root-level file is part of a SQLite database.
 ///
 /// The `-wal` and `-shm` siblings are part of the database's footprint and
-/// can dwarf the main file between checkpoints. A lookalike suffix
-/// (`foo.sqlitebackup`) is not a database file.
+/// can dwarf the main file between checkpoints. Only those two suffixes
+/// extend a database file; anything else must end in `.sqlite` or `.db`
+/// itself, so a lookalike (`foo.sqlitebackup`, `notes.db-old`) is not one.
 fn is_database_file(name: &str) -> bool {
-    name.ends_with(".sqlite")
-        || name.ends_with(".db")
-        || name.contains(".sqlite-")
-        || name.contains(".db-")
+    let base = name
+        .strip_suffix("-wal")
+        .or_else(|| name.strip_suffix("-shm"))
+        .unwrap_or(name);
+    base.ends_with(".sqlite") || base.ends_with(".db")
 }
 
 /// Sums the root's database files, returning the walk and the matched names.
@@ -319,8 +405,14 @@ fn walk_sqlite_files(root: &Path) -> Option<(Walked, Vec<String>)> {
 ///
 /// `total` always describes the whole root; each component that exists
 /// becomes a row, and one arithmetic "everything else" row closes the gap so
-/// the rows always sum to the total.
-fn measure_storage(root: &Path, components: &[Component]) -> StorageReport {
+/// the rows always sum to the total. `external` rows describe footprint the
+/// tool keeps outside the root and are carried beside the report without
+/// touching its arithmetic.
+fn measure_storage(
+    root: &Path,
+    components: &[Component],
+    external: Vec<StorageRow>,
+) -> StorageReport {
     let Ok(total) = walk_size(root) else {
         return StorageReport::Absent {
             reason: format!("`{}` does not exist or cannot be read.", root.display()),
@@ -371,7 +463,66 @@ fn measure_storage(root: &Path, components: &[Component]) -> StorageReport {
         total_bytes: total.bytes,
         total_files: total.file_count,
         rows,
+        external_rows: external,
     }
+}
+
+/// The root-level SQLite files at `base`, as one labelled row.
+fn sqlite_row_at(base: &Path, label: &str) -> Option<StorageRow> {
+    walk_sqlite_files(base).map(|(walked, names)| StorageRow {
+        label: label.to_owned(),
+        path: names.join(", "),
+        bytes: walked.bytes,
+        file_count: walked.file_count,
+    })
+}
+
+/// One whole walked directory, as one labelled row.
+fn directory_row(dir: &Path, label: &str) -> Option<StorageRow> {
+    walk_size(dir).ok().map(|walked| StorageRow {
+        label: label.to_owned(),
+        path: dir.display().to_string(),
+        bytes: walked.bytes,
+        file_count: walked.file_count,
+    })
+}
+
+/// One database file plus its `-wal`/`-shm` siblings, as one labelled row.
+///
+/// This is the shape of a relocation that names a file (`OPENCODE_DB`):
+/// the journal files live beside the database wherever it was moved.
+fn database_file_row(file: &Path, label: &str) -> Option<StorageRow> {
+    if !file.is_file() {
+        return None;
+    }
+    let mut bytes = 0;
+    let mut names = Vec::new();
+    for candidate in [
+        file.to_path_buf(),
+        PathBuf::from(format!("{}-wal", file.display())),
+        PathBuf::from(format!("{}-shm", file.display())),
+    ] {
+        let name = candidate.file_name()?.to_string_lossy().into_owned();
+        if !is_database_file(&name) {
+            continue;
+        }
+        if let Ok(metadata) = std::fs::symlink_metadata(&candidate) {
+            if metadata.is_file() {
+                bytes += metadata.len();
+                names.push(name);
+            }
+        }
+    }
+    if names.is_empty() {
+        return None;
+    }
+    names.sort_unstable();
+    Some(StorageRow {
+        label: label.to_owned(),
+        path: names.join(", "),
+        bytes,
+        file_count: names.len() as u64,
+    })
 }
 
 /// One tracked tool's footprint, from its resolved data root.
@@ -380,52 +531,91 @@ fn measure_storage(root: &Path, components: &[Component]) -> StorageReport {
 /// fall through to another tool's directories: a future tracked tool that
 /// reaches here without storage support would otherwise display OpenCode's
 /// footprint under its own name, and nothing would look wrong.
+///
+/// Codex relocates its runtime databases (and their backups) to
+/// `$CODEX_SQLITE_HOME` when that environment variable is set —
+/// env-relocation only, because a `sqlite_home` set inside `config.toml` is
+/// not visible to a read that does not parse config. OpenCode's
+/// `$OPENCODE_DB` names a database file. Relocated bytes are reported as
+/// rows outside the root's total, never folded into it.
 fn tool_storage(executable: &str, paths: &PathEnv) -> StorageReport {
-    let (display_name, root, components) = match executable {
-        "codex" => (
-            "Codex",
-            paths.codex_home.as_deref(),
-            [
-                Component::Directory {
-                    label: "Session transcripts",
-                    name: "sessions",
-                },
-                Component::Directory {
-                    label: "Archived transcripts",
-                    name: "archived_sessions",
-                },
-                Component::SqliteFiles {
-                    label: "Databases (SQLite)",
-                },
-            ]
-            .as_slice(),
-        ),
-        "opencode" => (
-            "OpenCode",
-            paths.opencode_data.as_deref(),
-            [
-                Component::Directory {
-                    label: "Session storage",
-                    name: "storage",
-                },
-                Component::Directory {
-                    label: "Logs",
-                    name: "log",
-                },
-                Component::SqliteFiles {
-                    label: "Databases (SQLite)",
-                },
-            ]
-            .as_slice(),
-        ),
-        other => {
-            return StorageReport::Absent {
-                reason: format!("No data directory is defined for `{other}` in this build."),
-            };
-        }
-    };
+    match executable {
+        "codex" => codex_storage(paths),
+        "opencode" => opencode_storage(paths),
+        other => StorageReport::Absent {
+            reason: format!("No data directory is defined for `{other}` in this build."),
+        },
+    }
+}
 
-    let Some(root) = root else {
+/// The components every Codex installation creates inside `$CODEX_HOME`,
+/// verified against the vendored source and the real directory.
+fn codex_components() -> Vec<Component> {
+    [
+        Component::Directory {
+            label: "Session transcripts",
+            name: "sessions",
+        },
+        Component::Directory {
+            label: "Archived transcripts",
+            name: "archived_sessions",
+        },
+        Component::Directory {
+            label: "Cache",
+            name: "cache",
+        },
+        Component::Directory {
+            label: "Temporary files",
+            name: ".tmp",
+        },
+        Component::Directory {
+            label: "Generated images",
+            name: "generated_images",
+        },
+        Component::Directory {
+            label: "Plugins",
+            name: "plugins",
+        },
+        Component::Directory {
+            label: "Logs",
+            name: "log",
+        },
+    ]
+    .to_vec()
+}
+
+/// The components every OpenCode installation creates inside its data
+/// directory, verified against the vendored source and the real directory.
+/// `storage` is the legacy JSON store (absent on v2's SQLite-only installs,
+/// which simply omit the row).
+fn opencode_components() -> Vec<Component> {
+    [
+        Component::Directory {
+            label: "Session storage",
+            name: "storage",
+        },
+        Component::Directory {
+            label: "Logs",
+            name: "log",
+        },
+        Component::Directory {
+            label: "Project snapshots (git)",
+            name: "snapshot",
+        },
+        Component::Directory {
+            label: "Shell histories",
+            name: "shell",
+        },
+        Component::Directory {
+            label: "Spilled tool output",
+            name: "tool-output",
+        },
+    ]
+    .to_vec()
+}
+
+fn codex_storage(paths: &PathEnv) -> StorageReport {
+    let Some(root) = paths.codex_home.as_deref() else {
         return StorageReport::Absent {
             reason: "No home directory is available, so the data directory cannot be located."
                 .to_owned(),
@@ -433,18 +623,86 @@ fn tool_storage(executable: &str, paths: &PathEnv) -> StorageReport {
     };
     if !root.exists() {
         return StorageReport::Absent {
-            reason: format!("{display_name} has not created `{}` yet.", root.display()),
+            reason: format!("Codex has not created `{}` yet.", root.display()),
         };
     }
-    measure_storage(root, components)
+
+    let relocated = paths
+        .codex_sqlite_home
+        .as_deref()
+        .filter(|sqlite_home| *sqlite_home != root);
+
+    let mut components = codex_components();
+    let mut external = Vec::new();
+    match relocated {
+        Some(sqlite_home) => {
+            if let Some(row) = sqlite_row_at(
+                sqlite_home,
+                "Databases (SQLite) — relocated via CODEX_SQLITE_HOME",
+            ) {
+                external.push(row);
+            }
+            if let Some(row) = directory_row(
+                &sqlite_home.join("db-backups"),
+                "Database backups — relocated via CODEX_SQLITE_HOME",
+            ) {
+                external.push(row);
+            }
+        }
+        None => {
+            components.push(Component::SqliteFiles {
+                label: "Databases (SQLite)",
+            });
+            components.push(Component::Directory {
+                label: "Database backups",
+                name: "db-backups",
+            });
+        }
+    }
+
+    measure_storage(root, &components, external)
 }
 
-/// Parses `lsof -F pcn` output into pid/port pairs.
+fn opencode_storage(paths: &PathEnv) -> StorageReport {
+    let Some(root) = paths.opencode_data.as_deref() else {
+        return StorageReport::Absent {
+            reason: "No home directory is available, so the data directory cannot be located."
+                .to_owned(),
+        };
+    };
+    if !root.exists() {
+        return StorageReport::Absent {
+            reason: format!("OpenCode has not created `{}` yet.", root.display()),
+        };
+    }
+
+    let mut components = opencode_components();
+    components.push(Component::SqliteFiles {
+        label: "Databases (SQLite)",
+    });
+
+    let mut external = Vec::new();
+    if let Some(database) = paths
+        .opencode_db
+        .as_deref()
+        .filter(|database| !database.starts_with(root))
+    {
+        if let Some(row) =
+            database_file_row(database, "Databases (SQLite) — relocated via OPENCODE_DB")
+        {
+            external.push(row);
+        }
+    }
+
+    measure_storage(root, &components, external)
+}
+
+/// Parses `lsof -F pcn` output into pid/port pairs with the bound interface.
 ///
 /// A `p` line starts a process record; the `n` lines that follow are its
-/// nodes, and only nodes ending in a parseable port count (`*` and other
-/// portless forms are skipped). Unparseable pids are skipped rather than
-/// guessed.
+/// nodes (`127.0.0.1:49374`, `*:4096`, `[::1]:4096`), and only nodes ending
+/// in a parseable port count — portless forms like `*` alone are skipped.
+/// Unparseable pids are skipped rather than guessed.
 fn parse_lsof_ports(raw: &str) -> Vec<ProcessPort> {
     let mut ports = Vec::new();
     let mut current_pid: Option<u32> = None;
@@ -456,14 +714,31 @@ fn parse_lsof_ports(raw: &str) -> Vec<ProcessPort> {
             let Some(pid) = current_pid else {
                 continue;
             };
-            let Some(port) = node.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()) else {
+            let Some((address, port)) = split_node(node) else {
                 continue;
             };
-            ports.push(ProcessPort { pid, port });
+            ports.push(ProcessPort { pid, port, address });
         }
     }
 
     ports
+}
+
+/// Splits an `lsof` node into its bound interface and port.
+///
+/// IPv6 nodes arrive bracketed (`[::1]:4096`); the interface inside the
+/// brackets is the address and never contains a colon to split on.
+fn split_node(node: &str) -> Option<(Option<String>, u16)> {
+    if let Some(rest) = node.strip_prefix('[') {
+        let close = rest.find(']')?;
+        let address = &rest[..close];
+        let port = rest[close + 1..].strip_prefix(':')?.parse().ok()?;
+        return Some((Some(address.to_owned()), port));
+    }
+
+    let (address, port) = node.rsplit_once(':')?;
+    let port = port.parse().ok()?;
+    Some((Some(address.to_owned()), port))
 }
 
 /// Asks the platform which of these processes are listening on TCP.
@@ -528,33 +803,46 @@ fn group_ports(ports: &PortScan, group: &[RawProcess]) -> PortScan {
 
 /// Builds the whole read from a process snapshot and resolved roots.
 ///
-/// The port scan is passed in rather than run here so the report assembly
-/// stays pure: tests inject a scan, production injects [`scan_ports`]'s
-/// answer for exactly the pids the groups selected. Only the tracked tools
-/// have groups — the app's own processes belong to none of them, so this
-/// process, any other `agentgauge` binary, and the widget extension simply
-/// do not appear.
+/// The port scan and the tool's self-recorded service are passed in rather
+/// than read here so report assembly stays pure: tests inject both,
+/// production injects [`scan_ports`]'s answer for exactly the pids the
+/// groups selected and whatever [`read_opencode_service`] found. Only the
+/// tracked tools have groups — the app's own processes belong to none of
+/// them, so this process, any other `agentgauge` binary, and the widget
+/// extension simply do not appear.
+///
+/// Rows are ordered by memory, heaviest first: the screen's question is
+/// what the toolchain costs this machine, and the expensive rows are the
+/// answer.
 pub fn build_report(
     processes: &[RawProcess],
     paths: &PathEnv,
     ports: PortScan,
+    service: Option<ServiceInfo>,
     now_ms: u64,
 ) -> ProcessInsights {
     let mut groups = Vec::with_capacity(TRACKED_TOOLS.len());
 
     for (executable, display_name) in TRACKED_TOOLS {
         let mut selected = select_tool(processes, executable);
-        selected.sort_by_key(|process| process.started_at);
+        selected.sort_by_key(|process| Reverse(process.memory_bytes));
+        let total_cpu_usage = selected
+            .iter()
+            .filter_map(|process| process.cpu_usage)
+            .reduce(|sum, usage| sum + usage)
+            .filter(|total| total.is_finite());
         groups.push(ProcessGroup {
             id: executable.to_owned(),
             display_name: display_name.to_owned(),
             total_memory_bytes: selected.iter().map(|process| process.memory_bytes).sum(),
+            total_cpu_usage,
             processes: selected
                 .iter()
                 .map(|process| summarize(process, &ports_for_pid(&ports, process.pid)))
                 .collect(),
             storage: tool_storage(executable, paths),
             ports: group_ports(&ports, &selected),
+            service: live_service(executable, &selected, service.as_ref()),
         });
     }
 
@@ -562,6 +850,26 @@ pub fn build_report(
         fetched_at: now_ms,
         groups,
     }
+}
+
+/// The service line this group may show: the tool's own record, attached
+/// only when the pid it names is one of the group's live processes, so the
+/// screen can never describe a service that is no longer running.
+fn live_service(
+    executable: &str,
+    selected: &[RawProcess],
+    service: Option<&ServiceInfo>,
+) -> Option<ServiceInfo> {
+    if executable != "opencode" {
+        return None;
+    }
+    service
+        .filter(|service| {
+            service
+                .pid
+                .is_some_and(|pid| selected.iter().any(|process| process.pid == pid))
+        })
+        .cloned()
 }
 
 /// One process summarized for the wire.
@@ -572,26 +880,53 @@ fn summarize(process: &RawProcess, listening_ports: &[u16]) -> ProcessSummary {
         command: display_command(&process.cmd),
         started_at: Some(process.started_at),
         memory_bytes: Some(process.memory_bytes),
+        cpu_usage: process.cpu_usage,
+        status: process.status.clone(),
         listening_ports: listening_ports.to_vec(),
     }
 }
 
 /// The command line joined and capped, or `None` when nothing was reported.
+///
+/// A capped line ends in an ellipsis so the cut is visible as a cut.
 fn display_command(cmd: &[String]) -> Option<String> {
     if cmd.is_empty() {
         return None;
     }
-    Some(cmd.join(" ").chars().take(MAX_COMMAND_CHARS).collect())
+    let joined = cmd.join(" ");
+    if joined.chars().count() > MAX_COMMAND_CHARS {
+        let capped: String = joined.chars().take(MAX_COMMAND_CHARS - 1).collect();
+        Some(format!("{capped}…"))
+    } else {
+        Some(joined)
+    }
+}
+
+/// The process states a user must know about; every other state is a
+/// process behaving normally and carries no tag.
+fn abnormal_status(status: sysinfo::ProcessStatus) -> Option<String> {
+    match status {
+        sysinfo::ProcessStatus::Stop => Some("stopped".to_owned()),
+        sysinfo::ProcessStatus::Zombie => Some("zombie".to_owned()),
+        sysinfo::ProcessStatus::Dead => Some("dead".to_owned()),
+        _ => None,
+    }
 }
 
 /// Reads a live snapshot of every process the platform reports.
+///
+/// CPU share is a rate, so the tracked tools' pids are sampled twice with
+/// the platform's minimum interval between the passes — only those pids,
+/// because nobody else's CPU reaches the screen. The second pass is what
+/// makes `cpu_usage` meaningful; a single refresh reports no interval at
+/// all.
 fn snapshot_processes() -> Vec<RawProcess> {
     use sysinfo::{ProcessesToUpdate, System};
 
     let mut system = System::new();
     system.refresh_processes(ProcessesToUpdate::All, true);
 
-    system
+    let mut processes: Vec<RawProcess> = system
         .processes()
         .iter()
         .map(|(pid, process)| RawProcess {
@@ -606,26 +941,62 @@ fn snapshot_processes() -> Vec<RawProcess> {
                 .collect(),
             memory_bytes: process.memory(),
             started_at: process.start_time(),
+            cpu_usage: None,
+            status: None,
         })
-        .collect()
+        .collect();
+
+    let tracked: Vec<sysinfo::Pid> = TRACKED_TOOLS
+        .iter()
+        .flat_map(|(executable, _)| select_tool(&processes, executable))
+        .map(|process| sysinfo::Pid::from_u32(process.pid))
+        .collect();
+    if tracked.is_empty() {
+        return processes;
+    }
+
+    std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+    system.refresh_processes(ProcessesToUpdate::Some(&tracked), true);
+    for process in &mut processes {
+        if !tracked.contains(&sysinfo::Pid::from_u32(process.pid)) {
+            continue;
+        }
+        let Some(fresh) = system.process(sysinfo::Pid::from_u32(process.pid)) else {
+            continue;
+        };
+        let usage = fresh.cpu_usage();
+        if usage.is_finite() {
+            process.cpu_usage = Some(usage);
+        }
+        process.status = abnormal_status(fresh.status());
+    }
+
+    processes
 }
 
 /// Resolves the storage roots from the environment.
 pub fn resolve_paths(home: Option<PathBuf>) -> PathEnv {
-    let codex_home = std::env::var_os("CODEX_HOME")
+    let codex_home = non_empty_env("CODEX_HOME").map(PathBuf::from);
+    let codex_sqlite_home = non_empty_env("CODEX_SQLITE_HOME").map(PathBuf::from);
+    let xdg_data = non_empty_env("XDG_DATA_HOME").map(PathBuf::from);
+    let opencode_db = non_empty_env("OPENCODE_DB").map(PathBuf::from);
+    paths_for(home, codex_home, codex_sqlite_home, xdg_data, opencode_db)
+}
+
+/// An environment variable's value when it is set to something.
+fn non_empty_env(name: &str) -> Option<String> {
+    std::env::var_os(name)
         .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    let xdg_data = std::env::var_os("XDG_DATA_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    paths_for(home, codex_home, xdg_data)
+        .map(|value| value.to_string_lossy().into_owned())
 }
 
 /// The pure root-resolution rule, with the environment already read.
 fn paths_for(
     home: Option<PathBuf>,
     codex_home: Option<PathBuf>,
+    codex_sqlite_home: Option<PathBuf>,
     xdg_data: Option<PathBuf>,
+    opencode_db: Option<PathBuf>,
 ) -> PathEnv {
     let Some(home) = home else {
         return PathEnv::default();
@@ -633,12 +1004,59 @@ fn paths_for(
 
     PathEnv {
         codex_home: Some(codex_home.unwrap_or_else(|| home.join(".codex"))),
+        codex_sqlite_home,
         opencode_data: Some(
             xdg_data
                 .unwrap_or_else(|| home.join(".local").join("share"))
                 .join("opencode"),
         ),
+        opencode_db,
     }
+}
+
+/// Reads the running OpenCode background service's own record, if it left
+/// one.
+///
+/// The installed v2 CLI writes `service.json` and dev builds write
+/// `server.json` into the state directory; both carry the live server's id,
+/// version, url, pid — and a password, which is a secret and is
+/// deliberately never read.
+pub fn read_opencode_service(home: Option<&Path>) -> Option<ServiceInfo> {
+    let state = non_empty_env("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home.map(|home| home.join(".local").join("state")))?;
+    let root = state.join("opencode");
+
+    for name in ["service.json", "server.json"] {
+        if let Ok(text) = std::fs::read_to_string(root.join(name)) {
+            if let Some(service) = parse_service(&text) {
+                return Some(service);
+            }
+        }
+    }
+    None
+}
+
+/// Picks exactly the public facts out of a service record.
+///
+/// The record also carries the server's password; this parser never touches
+/// that field, so the secret cannot reach the wire even by accident.
+fn parse_service(text: &str) -> Option<ServiceInfo> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    Some(ServiceInfo {
+        version: value
+            .get("version")
+            .and_then(|version| version.as_str())
+            .map(str::to_owned),
+        url: value
+            .get("url")
+            .and_then(|url| url.as_str())
+            .map(str::to_owned),
+        pid: value
+            .get("pid")
+            .and_then(|pid| pid.as_u64())
+            .and_then(|pid| u32::try_from(pid).ok()),
+    })
 }
 
 /// The capability behind the `processInsights` request.
@@ -649,15 +1067,20 @@ pub fn read_insights() -> ProcessInsights {
     let now = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
 
     let processes = snapshot_processes();
-    // Only the tool pids the groups will actually show are scanned: one
-    // `lsof` call, never the whole table.
     let mut scan_pids: Vec<u32> = Vec::new();
     for (executable, _) in TRACKED_TOOLS {
         scan_pids.extend(select_tool(&processes, executable).iter().map(|p| p.pid));
     }
     let ports = scan_ports(&scan_pids);
+    let service = read_opencode_service(home.as_deref());
 
-    build_report(&processes, &resolve_paths(home), ports, now.max(0) as u64)
+    build_report(
+        &processes,
+        &resolve_paths(home),
+        ports,
+        service,
+        now.max(0) as u64,
+    )
 }
 
 #[cfg(test)]
@@ -676,10 +1099,10 @@ mod tests {
             cmd: Vec::new(),
             memory_bytes: 1024,
             started_at: 1_700_000_000,
+            cpu_usage: None,
+            status: None,
         }
     }
-
-    // --- normalized_stem -------------------------------------------------
 
     #[test]
     fn a_stem_is_lowercase_and_directory_free() {
@@ -687,8 +1110,6 @@ mod tests {
         assert_eq!(normalized_stem("Codex"), "codex");
         assert_eq!(normalized_stem(r"C:\tools\codex.exe"), "codex");
     }
-
-    // --- matching --------------------------------------------------------
 
     #[test]
     fn a_tool_matches_on_executable_name_and_process_name() {
@@ -721,8 +1142,6 @@ mod tests {
 
     #[test]
     fn an_unrelated_command_mentioning_the_tool_does_not_match() {
-        // `rg codex src/` takes the tool name as a bare argument; listing it
-        // under Codex would put an unrelated process in the panel.
         let searcher = RawProcess {
             cmd: vec!["/usr/local/bin/rg".into(), "codex".into(), "src/".into()],
             ..process(4, "rg", Some("/usr/local/bin/rg"))
@@ -734,6 +1153,31 @@ mod tests {
             ..process(5, "grep", Some("/usr/bin/grep"))
         };
         assert!(!matches_tool(&grep, "codex"));
+    }
+
+    #[test]
+    fn a_shell_dash_c_script_matches_its_first_token_only() {
+        let serving = RawProcess {
+            cmd: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "opencode serve --hostname 127.0.0.1".into(),
+            ],
+            ..process(8, "sh", Some("/bin/sh"))
+        };
+        assert!(matches_tool(&serving, "opencode"));
+
+        let echoing = RawProcess {
+            cmd: vec!["/bin/sh".into(), "-c".into(), "echo codex".into()],
+            ..process(9, "sh", Some("/bin/sh"))
+        };
+        assert!(!matches_tool(&echoing, "codex"));
+
+        let non_shell_dash_c = RawProcess {
+            cmd: vec!["/usr/sbin/therm".into(), "-c".into(), "codex".into()],
+            ..process(10, "therm", Some("/usr/sbin/therm"))
+        };
+        assert!(!matches_tool(&non_shell_dash_c, "codex"));
     }
 
     #[test]
@@ -774,8 +1218,6 @@ mod tests {
         assert_eq!(select_tool(&all, "codex").len(), 1);
         assert_eq!(select_tool(&all, "opencode").len(), 1);
     }
-
-    // --- storage ---------------------------------------------------------
 
     fn temp_root(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir()
@@ -836,11 +1278,13 @@ mod tests {
                     label: "Databases (SQLite)",
                 },
             ],
+            Vec::new(),
         );
         let StorageReport::Measured {
             total_bytes,
             total_files,
             rows,
+            external_rows,
         } = report
         else {
             panic!("expected a measured report");
@@ -855,6 +1299,29 @@ mod tests {
         assert_eq!(rows[1].path, "state.sqlite");
         assert_eq!(rows[2].label, "Everything else");
         assert_eq!(rows[2].bytes, 0);
+        assert!(external_rows.is_empty());
+    }
+
+    #[test]
+    fn external_rows_are_carried_without_touching_the_total() {
+        let root = temp_root("external");
+        fs::write(root.join("history.jsonl"), vec![0u8; 30]).expect("writes history");
+
+        let external = StorageRow {
+            label: "Databases (SQLite) — relocated".to_owned(),
+            path: "state.sqlite".to_owned(),
+            bytes: 500,
+            file_count: 1,
+        };
+        let report = measure_storage(&root, &[], vec![external]);
+        let StorageReport::Measured {
+            total_bytes, rows, ..
+        } = report
+        else {
+            panic!("expected a measured report");
+        };
+        assert_eq!(total_bytes, 30, "the total describes the root only");
+        assert_eq!(rows.len(), 1);
     }
 
     #[test]
@@ -865,12 +1332,14 @@ mod tests {
         fs::write(root.join("opencode.db-shm"), vec![0u8; 5]).expect("writes shm");
         fs::write(root.join("state_5.sqlite"), vec![0u8; 7]).expect("writes state");
         fs::write(root.join("not-a-db.sqlitebackup"), vec![0u8; 1000]).expect("writes lookalike");
+        fs::write(root.join("notes.db-old"), vec![0u8; 2000]).expect("writes old backup");
 
         let report = measure_storage(
             &root,
             &[Component::SqliteFiles {
                 label: "Databases (SQLite)",
             }],
+            Vec::new(),
         );
         let StorageReport::Measured { rows, .. } = report else {
             panic!("expected a measured report");
@@ -881,8 +1350,9 @@ mod tests {
         assert!(rows[0].path.contains("opencode.db"));
         assert!(rows[0].path.contains("state_5.sqlite"));
         assert!(!rows[0].path.contains("sqlitebackup"));
+        assert!(!rows[0].path.contains("notes.db-old"));
         assert_eq!(rows[1].label, "Everything else");
-        assert_eq!(rows[1].bytes, 1000);
+        assert_eq!(rows[1].bytes, 3000);
     }
 
     #[test]
@@ -894,6 +1364,7 @@ mod tests {
             &[Component::SqliteFiles {
                 label: "Databases (SQLite)",
             }],
+            Vec::new(),
         );
         let StorageReport::Measured { rows, .. } = report else {
             panic!("expected a measured report");
@@ -910,6 +1381,7 @@ mod tests {
                 label: "Sessions",
                 name: "sessions",
             }],
+            Vec::new(),
         );
         assert!(matches!(report, StorageReport::Absent { .. }));
     }
@@ -934,6 +1406,7 @@ mod tests {
                 label: "Sessions",
                 name: "sessions",
             }],
+            Vec::new(),
         );
         let StorageReport::Measured { rows, .. } = report else {
             panic!("expected a measured report");
@@ -942,7 +1415,175 @@ mod tests {
         assert_eq!(rows[0].label, "Everything else");
     }
 
-    // --- the report ------------------------------------------------------
+    #[test]
+    fn the_real_codex_directories_are_labelled_components() {
+        let root = temp_root("codex-components");
+        for name in [
+            "sessions",
+            "archived_sessions",
+            "cache",
+            ".tmp",
+            "generated_images",
+            "plugins",
+            "log",
+            "db-backups",
+        ] {
+            fs::create_dir(root.join(name)).expect("creates component");
+            fs::write(root.join(name).join("f.bin"), vec![0u8; 1]).expect("fills component");
+        }
+        fs::write(root.join("state.sqlite"), vec![0u8; 2]).expect("writes db");
+
+        let report = tool_storage(
+            "codex",
+            &PathEnv {
+                codex_home: Some(root),
+                ..PathEnv::default()
+            },
+        );
+        let StorageReport::Measured { rows, .. } = report else {
+            panic!("expected a measured report");
+        };
+        let labels: Vec<&str> = rows.iter().map(|row| row.label.as_str()).collect();
+        for expected in [
+            "Session transcripts",
+            "Archived transcripts",
+            "Cache",
+            "Temporary files",
+            "Generated images",
+            "Plugins",
+            "Logs",
+            "Databases (SQLite)",
+            "Database backups",
+            "Everything else",
+        ] {
+            assert!(labels.contains(&expected), "missing label {expected}");
+        }
+    }
+
+    #[test]
+    fn the_real_opencode_directories_are_labelled_components() {
+        let root = temp_root("opencode-components");
+        for name in ["storage", "log", "snapshot", "shell", "tool-output"] {
+            fs::create_dir(root.join(name)).expect("creates component");
+            fs::write(root.join(name).join("f.bin"), vec![0u8; 1]).expect("fills component");
+        }
+
+        let report = tool_storage(
+            "opencode",
+            &PathEnv {
+                opencode_data: Some(root),
+                ..PathEnv::default()
+            },
+        );
+        let StorageReport::Measured { rows, .. } = report else {
+            panic!("expected a measured report");
+        };
+        let labels: Vec<&str> = rows.iter().map(|row| row.label.as_str()).collect();
+        for expected in [
+            "Session storage",
+            "Logs",
+            "Project snapshots (git)",
+            "Shell histories",
+            "Spilled tool output",
+            "Everything else",
+        ] {
+            assert!(labels.contains(&expected), "missing label {expected}");
+        }
+    }
+
+    #[test]
+    fn a_relocated_sqlite_home_is_reported_outside_the_root_total() {
+        let root = temp_root("codex-relocated");
+        fs::write(root.join("history.jsonl"), vec![0u8; 10]).expect("writes history");
+        let sqlite_home = temp_root("codex-sqlite-home");
+        fs::write(sqlite_home.join("state.sqlite"), vec![0u8; 400]).expect("writes db");
+        fs::create_dir(sqlite_home.join("db-backups")).expect("creates backups");
+        fs::write(sqlite_home.join("db-backups").join("b.bin"), vec![0u8; 50])
+            .expect("fills backups");
+
+        let report = tool_storage(
+            "codex",
+            &PathEnv {
+                codex_home: Some(root),
+                codex_sqlite_home: Some(sqlite_home),
+                ..PathEnv::default()
+            },
+        );
+        let StorageReport::Measured {
+            total_bytes,
+            rows,
+            external_rows,
+            ..
+        } = report
+        else {
+            panic!("expected a measured report");
+        };
+        assert_eq!(total_bytes, 10, "the total describes the root only");
+        let internal: Vec<&str> = rows.iter().map(|row| row.label.as_str()).collect();
+        assert!(!internal.contains(&"Databases (SQLite)"));
+        assert_eq!(external_rows.len(), 2);
+        assert!(external_rows[0].path.contains("state.sqlite"));
+        assert_eq!(external_rows[0].bytes, 400);
+        assert!(external_rows[1].label.contains("Database backups"));
+        assert_eq!(external_rows[1].bytes, 50);
+    }
+
+    #[test]
+    fn an_opencode_db_relocation_is_reported_outside_the_root_total() {
+        let root = temp_root("opencode-relocated");
+        fs::write(root.join("history.jsonl"), vec![0u8; 10]).expect("writes history");
+        let database = temp_root("opencode-db").join("moved.db");
+        fs::write(&database, vec![0u8; 700]).expect("writes db");
+        fs::write(format!("{}-wal", database.display()), vec![0u8; 30]).expect("writes wal");
+
+        let report = tool_storage(
+            "opencode",
+            &PathEnv {
+                opencode_data: Some(root),
+                opencode_db: Some(database),
+                ..PathEnv::default()
+            },
+        );
+        let StorageReport::Measured {
+            total_bytes,
+            external_rows,
+            ..
+        } = report
+        else {
+            panic!("expected a measured report");
+        };
+        assert_eq!(total_bytes, 10, "the total describes the root only");
+        assert_eq!(external_rows.len(), 1);
+        assert_eq!(external_rows[0].bytes, 730);
+        assert!(external_rows[0].path.contains("moved.db"));
+        assert!(external_rows[0].path.contains("moved.db-wal"));
+    }
+
+    #[test]
+    fn a_relocation_pointing_back_at_the_root_is_not_one() {
+        let root = temp_root("codex-same-home");
+        fs::write(root.join("state.sqlite"), vec![0u8; 40]).expect("writes db");
+
+        let report = tool_storage(
+            "codex",
+            &PathEnv {
+                codex_home: Some(root.clone()),
+                codex_sqlite_home: Some(root),
+                ..PathEnv::default()
+            },
+        );
+        let StorageReport::Measured {
+            rows,
+            external_rows,
+            ..
+        } = report
+        else {
+            panic!("expected a measured report");
+        };
+        assert!(external_rows.is_empty());
+        let internal: Vec<&str> = rows.iter().map(|row| row.label.as_str()).collect();
+        assert!(internal.contains(&"Databases (SQLite)"));
+    }
 
     #[test]
     fn the_report_lists_only_the_tool_groups_in_order() {
@@ -952,18 +1593,17 @@ mod tests {
             &[process(10, "agentgauge", None), process(11, "codex", None)],
             &PathEnv {
                 codex_home: Some(root.join("codex-home-absent")),
-                opencode_data: None,
+                ..PathEnv::default()
             },
             PortScan::Checked {
                 listening: Vec::new(),
             },
+            None,
             1_700_000_000_000,
         );
         let ids: Vec<&str> = insights.groups.iter().map(|g| g.id.as_str()).collect();
         assert_eq!(ids, ["codex", "opencode"]);
         assert_eq!(insights.fetched_at, 1_700_000_000_000);
-        // The app's own processes belong to no group: the screen is for the
-        // toolchain's cost, not ours.
         assert!(insights
             .groups
             .iter()
@@ -978,6 +1618,7 @@ mod tests {
             PortScan::Checked {
                 listening: Vec::new(),
             },
+            None,
             0,
         );
         let codex = insights
@@ -1004,11 +1645,12 @@ mod tests {
             &[a, b],
             &PathEnv {
                 codex_home: Some(root),
-                opencode_data: None,
+                ..PathEnv::default()
             },
             PortScan::Checked {
                 listening: Vec::new(),
             },
+            None,
             0,
         );
         assert_eq!(insights.groups[0].total_memory_bytes, 400);
@@ -1016,10 +1658,158 @@ mod tests {
     }
 
     #[test]
-    fn a_long_command_is_capped_and_an_empty_one_is_absent() {
+    fn rows_are_ordered_by_memory_heaviest_first() {
+        let mut light = process(10, "codex", Some("/usr/local/bin/codex"));
+        light.memory_bytes = 100;
+        light.started_at = 1;
+        let mut heavy = RawProcess {
+            parent_pid: None,
+            ..process(11, "codex", Some("/usr/local/bin/codex"))
+        };
+        heavy.memory_bytes = 900;
+        heavy.started_at = 2_000_000_000;
+
+        let insights = build_report(
+            &[light, heavy],
+            &PathEnv::default(),
+            PortScan::Checked {
+                listening: Vec::new(),
+            },
+            None,
+            0,
+        );
+        let pids: Vec<u32> = insights.groups[0]
+            .processes
+            .iter()
+            .map(|process| process.pid)
+            .collect();
+        assert_eq!(pids, [11, 10]);
+    }
+
+    #[test]
+    fn cpu_usage_sums_into_the_group_total_and_absence_stays_absent() {
+        let mut a = process(10, "codex", Some("/usr/local/bin/codex"));
+        a.cpu_usage = Some(12.5);
+        let mut b = RawProcess {
+            parent_pid: None,
+            ..process(11, "codex", Some("/usr/local/bin/codex"))
+        };
+        b.cpu_usage = Some(2.5);
+
+        let insights = build_report(
+            &[a, b],
+            &PathEnv::default(),
+            PortScan::Checked {
+                listening: Vec::new(),
+            },
+            None,
+            0,
+        );
+        let codex = &insights.groups[0];
+        assert_eq!(codex.total_cpu_usage, Some(15.0));
+        assert_eq!(codex.processes[0].cpu_usage, Some(12.5));
+
+        let none_reported = build_report(
+            &[process(12, "codex", None)],
+            &PathEnv::default(),
+            PortScan::Checked {
+                listening: Vec::new(),
+            },
+            None,
+            0,
+        );
+        assert_eq!(none_reported.groups[0].total_cpu_usage, None);
+    }
+
+    #[test]
+    fn a_service_attaches_only_to_a_live_opencode_pid() {
+        let server = process(5309, "opencode", Some("/opt/homebrew/bin/opencode"));
+        let service = ServiceInfo {
+            version: Some("2.0.27".to_owned()),
+            url: Some("http://127.0.0.1:49374".to_owned()),
+            pid: Some(5309),
+        };
+
+        let insights = build_report(
+            &[server],
+            &PathEnv::default(),
+            PortScan::Checked {
+                listening: Vec::new(),
+            },
+            Some(service.clone()),
+            0,
+        );
+        let opencode = insights
+            .groups
+            .iter()
+            .find(|g| g.id == "opencode")
+            .expect("group");
+        assert_eq!(opencode.service, Some(service));
+        assert!(insights.groups[0].service.is_none(), "codex has no service");
+
+        let stale = ServiceInfo {
+            version: Some("2.0.27".to_owned()),
+            url: Some("http://127.0.0.1:49374".to_owned()),
+            pid: Some(99),
+        };
+        let insights = build_report(
+            &[process(5309, "opencode", None)],
+            &PathEnv::default(),
+            PortScan::Checked {
+                listening: Vec::new(),
+            },
+            Some(stale),
+            0,
+        );
+        let opencode = insights
+            .groups
+            .iter()
+            .find(|g| g.id == "opencode")
+            .expect("group");
+        assert_eq!(opencode.service, None);
+    }
+
+    #[test]
+    fn parse_service_reads_only_the_public_facts() {
+        let text = r#"{
+            "id": "abc",
+            "version": "2.0.27",
+            "url": "http://127.0.0.1:49374",
+            "pid": 12966,
+            "password": "a-secret-that-must-never-leave-this-file"
+        }"#;
+        let service = parse_service(text).expect("parses");
+        assert_eq!(service.version.as_deref(), Some("2.0.27"));
+        assert_eq!(service.url.as_deref(), Some("http://127.0.0.1:49374"));
+        assert_eq!(service.pid, Some(12966));
+        let serialized = serde_json::to_string(&service).expect("serializes");
+        assert!(!serialized.contains("password"));
+        assert!(!serialized.contains("a-secret"));
+
+        assert!(parse_service("not json").is_none());
+        assert!(parse_service("{}").is_some());
+    }
+
+    #[test]
+    fn abnormal_status_tags_only_the_abnormal_states() {
+        assert_eq!(
+            abnormal_status(sysinfo::ProcessStatus::Stop),
+            Some("stopped".to_owned())
+        );
+        assert_eq!(
+            abnormal_status(sysinfo::ProcessStatus::Zombie),
+            Some("zombie".to_owned())
+        );
+        assert_eq!(abnormal_status(sysinfo::ProcessStatus::Run), None);
+        assert_eq!(abnormal_status(sysinfo::ProcessStatus::Sleep), None);
+    }
+
+    #[test]
+    fn a_long_command_is_capped_visibly_and_an_empty_one_is_absent() {
         let long: Vec<String> = vec!["argument".to_owned(); 100];
         let capped = display_command(&long).expect("capped");
         assert!(capped.chars().count() <= MAX_COMMAND_CHARS);
+        assert!(capped.ends_with('…'), "the cut must be visible as a cut");
         assert_eq!(display_command(&[]), None);
     }
 
@@ -1031,22 +1821,27 @@ mod tests {
             command: Some("codex app-server".into()),
             started_at: Some(1_700_000_000),
             memory_bytes: Some(2048),
+            cpu_usage: Some(3.5),
+            status: None,
             listening_ports: Vec::new(),
         };
         let value = serde_json::to_value(&summary).expect("serializes");
         assert_eq!(value["startedAt"], 1_700_000_000);
         assert_eq!(value["memoryBytes"], 2048);
+        assert_eq!(value["cpuUsage"], 3.5);
 
         let checked = serde_json::to_value(PortScan::Checked {
             listening: vec![ProcessPort {
                 pid: 12966,
                 port: 49374,
+                address: Some("127.0.0.1".into()),
             }],
         })
         .expect("serializes");
         assert_eq!(checked["state"], "checked");
         assert_eq!(checked["listening"][0]["pid"], 12966);
         assert_eq!(checked["listening"][0]["port"], 49374);
+        assert_eq!(checked["listening"][0]["address"], "127.0.0.1");
 
         let unavailable = serde_json::to_value(PortScan::Unavailable {
             reason: "lsof was not found.".into(),
@@ -1066,27 +1861,59 @@ mod tests {
             total_bytes: 10,
             total_files: 1,
             rows: Vec::new(),
+            external_rows: Vec::new(),
         })
         .expect("serializes");
         assert_eq!(measured["state"], "measured");
         assert_eq!(measured["totalBytes"], 10);
+        assert!(measured["externalRows"]
+            .as_array()
+            .expect("external rows are always present on the wire")
+            .is_empty());
+
+        let group = serde_json::to_value(ProcessGroup {
+            id: "opencode".into(),
+            display_name: "OpenCode".into(),
+            processes: Vec::new(),
+            total_memory_bytes: 0,
+            total_cpu_usage: Some(4.0),
+            storage: StorageReport::Absent {
+                reason: "none".into(),
+            },
+            ports: PortScan::Checked {
+                listening: Vec::new(),
+            },
+            service: Some(ServiceInfo {
+                version: Some("2.0.27".into()),
+                url: Some("http://127.0.0.1:49374".into()),
+                pid: Some(5309),
+            }),
+        })
+        .expect("serializes");
+        assert_eq!(group["totalCpuUsage"], 4.0);
+        assert_eq!(group["service"]["version"], "2.0.27");
     }
 
-    // --- listening ports -------------------------------------------------
-
     #[test]
-    fn lsof_field_output_parses_into_pid_port_pairs() {
-        let raw = "p12966\ncopencode\nf7\nn127.0.0.1:49374\np12964\ncopencode\nf12\nn[::1]:4096\n";
+    fn lsof_field_output_parses_into_pid_port_pairs_with_interfaces() {
+        let raw = "p12966\ncopencode\nf7\nn127.0.0.1:49374\np12964\ncopencode\nf12\nn[::1]:4096\np12970\ncopencode\nf9\nn*:4096\n";
         assert_eq!(
             parse_lsof_ports(raw),
             vec![
                 ProcessPort {
                     pid: 12966,
-                    port: 49374
+                    port: 49374,
+                    address: Some("127.0.0.1".into()),
                 },
                 ProcessPort {
                     pid: 12964,
-                    port: 4096
+                    port: 4096,
+                    address: Some("::1".into()),
+                },
+                ProcessPort {
+                    pid: 12970,
+                    port: 4096,
+                    address: Some("*".into()),
                 },
             ]
         );
@@ -1101,6 +1928,7 @@ mod tests {
     #[test]
     fn a_portless_node_line_is_skipped_rather_than_guessed() {
         assert_eq!(parse_lsof_ports("p12966\nn*\n"), Vec::new());
+        assert_eq!(parse_lsof_ports("p12966\nn*:*\n"), Vec::new());
     }
 
     #[test]
@@ -1117,13 +1945,16 @@ mod tests {
                     ProcessPort {
                         pid: 12966,
                         port: 49375,
+                        address: Some("127.0.0.1".into()),
                     },
                     ProcessPort {
                         pid: 12966,
                         port: 49374,
+                        address: Some("127.0.0.1".into()),
                     },
                 ],
             },
+            None,
             0,
         );
         let opencode = insights
@@ -1148,6 +1979,7 @@ mod tests {
             PortScan::Unavailable {
                 reason: "lsof was not found.".into(),
             },
+            None,
             0,
         );
         let codex = insights
@@ -1168,19 +2000,27 @@ mod tests {
         let paths = paths_for(
             Some(home.clone()),
             Some(PathBuf::from("/custom/codex")),
+            Some(PathBuf::from("/custom/sqlite")),
             Some(PathBuf::from("/custom/data")),
+            Some(PathBuf::from("/custom/moved.db")),
         );
         assert_eq!(paths.codex_home, Some(PathBuf::from("/custom/codex")));
+        assert_eq!(
+            paths.codex_sqlite_home,
+            Some(PathBuf::from("/custom/sqlite"))
+        );
         assert_eq!(
             paths.opencode_data,
             Some(PathBuf::from("/custom/data/opencode"))
         );
+        assert_eq!(paths.opencode_db, Some(PathBuf::from("/custom/moved.db")));
 
-        let defaults = paths_for(Some(home), None, None);
+        let defaults = paths_for(Some(home), None, None, None, None);
         assert_eq!(
             defaults.codex_home,
             Some(PathBuf::from("/tmp/fake-home/.codex"))
         );
+        assert_eq!(defaults.codex_sqlite_home, None);
         assert_eq!(
             defaults.opencode_data,
             Some(PathBuf::from("/tmp/fake-home/.local/share/opencode"))
@@ -1189,7 +2029,7 @@ mod tests {
 
     #[test]
     fn without_a_home_no_storage_root_is_known() {
-        let paths = paths_for(None, None, None);
+        let paths = paths_for(None, None, None, None, None);
         assert!(paths.codex_home.is_none());
         assert!(paths.opencode_data.is_none());
     }

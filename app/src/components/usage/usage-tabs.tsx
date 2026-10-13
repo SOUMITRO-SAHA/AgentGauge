@@ -28,6 +28,7 @@ import {
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import type * as Ipc from "~/lib/ipc";
+import { failureReason } from "~/lib/ipc";
 import {
   effectiveFreshness,
   formatCountdown,
@@ -406,9 +407,5 @@ function SnapshotHeader({
  * problem.
  */
 function failureMessage(cause: Cause.Cause<Ipc.AppError>): string {
-  const squashed = Cause.squash(cause);
-  if (squashed instanceof Error && squashed.message.length > 0) {
-    return squashed.message;
-  }
-  return "The app could not be reached.";
+  return failureReason(cause) ?? "The app could not be reached.";
 }

@@ -366,11 +366,13 @@ export function processGroup(id: string, overrides: Record<string, unknown> = {}
     displayName: displayNames[id] ?? id,
     processes: [] as Array<Record<string, unknown>>,
     totalMemoryBytes: 0,
+    totalCpuUsage: null,
     storage: {
       state: "absent",
       reason: `${displayNames[id] ?? id} has not created its data directory yet.`,
     },
     ports: { state: "checked", listening: [] as Array<Record<string, unknown>> },
+    service: null,
     ...overrides,
   };
 }
@@ -383,6 +385,8 @@ export function processSummary(overrides: Record<string, unknown> = {}) {
     command: "codex app-server",
     startedAt: Math.floor(Date.now() / 1000) - 3_600,
     memoryBytes: 432_000_000,
+    cpuUsage: null,
+    status: null,
     listeningPorts: [] as number[],
     ...overrides,
   };
@@ -434,6 +438,7 @@ export function processInsightsReport() {
               fileCount: 1,
             },
           ],
+          externalRows: [],
         },
       }),
       processGroup("opencode", {
@@ -502,7 +507,7 @@ export async function processScreenWithPorts(): Promise<void> {
   ];
   opencode.ports = {
     state: "checked",
-    listening: [{ pid: 5309, port: 49374 }],
+    listening: [{ pid: 5309, port: 49374, address: null }],
   };
   const codex = report.groups.find(
     (group) => group.id === "codex",
@@ -521,6 +526,144 @@ export async function processScreenWithPorts(): Promise<void> {
     widgetSupported: true,
     automationRunning: true,
     processInsights: report,
+  });
+}
+
+/**
+ * The enriched screen: CPU shares with one abnormal state, endpoints with
+ * their interfaces (one wildcard bind), the tool's recorded background
+ * service with a live pid, a labelled snapshot component, a share bar to
+ * scale, and relocated databases outside the root's total — every fact the
+ * verified improvements added, in one boot.
+ */
+export async function processScreenEnriched(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+    processInsights: {
+      fetchedAt: Date.now() - 30_000,
+      groups: [
+        processGroup("codex", {
+          processes: [
+            processSummary({
+              pid: 4242,
+              cpuUsage: 12.46,
+              memoryBytes: 432_000_000,
+            }),
+            processSummary({
+              pid: 4243,
+              name: "codex",
+              command: "codex exec --resume",
+              memoryBytes: 80_000_000,
+              cpuUsage: 0,
+              status: "zombie",
+            }),
+          ],
+          totalMemoryBytes: 512_000_000,
+          totalCpuUsage: 12.46,
+          storage: {
+            state: "measured",
+            totalBytes: 1_000_000_000,
+            totalFiles: 120,
+            rows: [
+              {
+                label: "Session transcripts",
+                path: "/Users/dev/.codex/sessions",
+                bytes: 550_000_000,
+                fileCount: 100,
+              },
+              {
+                label: "Databases (SQLite)",
+                path: "state_5.sqlite, thread_history_1.sqlite",
+                bytes: 300_000_000,
+                fileCount: 6,
+              },
+              {
+                label: "Everything else",
+                path: "/Users/dev/.codex",
+                bytes: 150_000_000,
+                fileCount: 14,
+              },
+            ],
+            externalRows: [
+              {
+                label: "Databases (SQLite) — relocated via CODEX_SQLITE_HOME",
+                path: "state_5.sqlite",
+                bytes: 120_000_000,
+                fileCount: 2,
+              },
+            ],
+          },
+        }),
+        processGroup("opencode", {
+          processes: [
+            processSummary({
+              pid: 5309,
+              name: "opencode",
+              command: "opencode serve --service",
+              memoryBytes: 220_000_000,
+              cpuUsage: 3.2,
+              listeningPorts: [49374, 4096],
+            }),
+          ],
+          totalMemoryBytes: 220_000_000,
+          totalCpuUsage: 3.2,
+          storage: {
+            state: "measured",
+            totalBytes: 900_000_000,
+            totalFiles: 40,
+            rows: [
+              {
+                label: "Project snapshots (git)",
+                path: "/Users/dev/.local/share/opencode/snapshot",
+                bytes: 230_000_000,
+                fileCount: 30,
+              },
+              {
+                label: "Databases (SQLite)",
+                path: "opencode.db",
+                bytes: 670_000_000,
+                fileCount: 3,
+              },
+            ],
+            externalRows: [],
+          },
+          ports: {
+            state: "checked",
+            listening: [
+              { pid: 5309, port: 49374, address: "127.0.0.1" },
+              { pid: 5309, port: 4096, address: "*" },
+            ],
+          },
+          service: {
+            version: "2.0.27",
+            url: "http://127.0.0.1:49374",
+            pid: 5309,
+          },
+        }),
+      ],
+    },
+  });
+}
+
+/** The same boot, but the process read itself fails with its own reason. */
+export async function processScreenFailed(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+    processInsightsFailure: {
+      message: "the process table was unreadable",
+    },
   });
 }
 
@@ -636,6 +779,11 @@ export interface DispatchFixtures {
    * skeleton a first read shows instead of a blocking switch.
    */
   readonly processInsightsDelay?: { readonly ms: number };
+  /**
+   * Fails the `processInsights` read with this message, so specs can observe
+   * the error state and its re-read instead of a successful answer.
+   */
+  readonly processInsightsFailure?: { readonly message: string };
   /**
    * Whether this build contains the widget extension.
    *
@@ -872,6 +1020,15 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
             ],
           };
         case "processInsights":
+          if (data.processInsightsFailure) {
+            return {
+              type: "failure",
+              error: {
+                kind: "internal",
+                message: data.processInsightsFailure.message,
+              },
+            };
+          }
           if (data.processInsightsDelay) {
             await new Promise((resolve) =>
               setTimeout(resolve, data.processInsightsDelay?.ms ?? 0),
@@ -1323,9 +1480,19 @@ export async function boot(
   // verified as exactly the specs that assert fixture-only values failing.
   // Spawning `codex app-server` takes seconds, hence the generous bound; a
   // read that already finished (or never started) passes straight through.
+  // The processes skeleton gets the same wait: a remount that resumes on the
+  // Processes destination starts its read at mount, and the real read spans
+  // process enumeration, lsof, and a storage walk — long enough that the
+  // nudge's refresh would coalesce into it and the fixture never lands.
   for (let waited = 0; waited < 20_000; waited += 500) {
-    const loading = await $('[data-testid="usage-loading"]');
-    if (!(await loading.isExisting())) break;
+    const usageLoading = await $('[data-testid="usage-loading"]');
+    const processLoading = await $('[data-testid="process-loading-skeleton"]');
+    if (
+      !(await usageLoading.isExisting()) &&
+      !(await processLoading.isExisting())
+    ) {
+      break;
+    }
     await browser.pause(500);
   }
 

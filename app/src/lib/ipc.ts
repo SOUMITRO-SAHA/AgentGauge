@@ -11,6 +11,7 @@
  * runtime.
  */
 
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -158,6 +159,10 @@ export const ProcessSummary = Schema.Struct({
   command: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.Number),
   memoryBytes: Schema.NullOr(Schema.Number),
+  /** Percent of one core over the read's sampling interval; >100 is several cores. */
+  cpuUsage: Schema.NullOr(Schema.Number),
+  /** Present only for states a user must know about (`stopped`, `zombie`, `dead`). */
+  status: Schema.NullOr(Schema.String),
   listeningPorts: Schema.Array(Schema.Number),
 });
 export type ProcessSummary = typeof ProcessSummary.Type;
@@ -166,8 +171,23 @@ export type ProcessSummary = typeof ProcessSummary.Type;
 export const ProcessPort = Schema.Struct({
   pid: Schema.Number,
   port: Schema.Number,
+  /** The interface the socket is bound to; `*` means every interface. */
+  address: Schema.NullOr(Schema.String),
 });
 export type ProcessPort = typeof ProcessPort.Type;
+
+/**
+ * The running OpenCode background service, as the tool itself recorded it.
+ *
+ * The registry file also carries the server's password; Rust never reads
+ * that field, so it cannot appear here.
+ */
+export const ServiceInfo = Schema.Struct({
+  version: Schema.NullOr(Schema.String),
+  url: Schema.NullOr(Schema.String),
+  pid: Schema.NullOr(Schema.Number),
+});
+export type ServiceInfo = typeof ServiceInfo.Type;
 
 /**
  * Whether the group's listening ports could be determined, and where they
@@ -210,6 +230,12 @@ export const StorageReport = Schema.Union([
     totalBytes: Schema.Number,
     totalFiles: Schema.Number,
     rows: Schema.Array(StorageRow),
+    /**
+     * Footprint the tool relocated outside its data directory
+     * (`CODEX_SQLITE_HOME`, `OPENCODE_DB`). Not part of `totalBytes`, which
+     * describes the walked root only.
+     */
+    externalRows: Schema.Array(StorageRow),
   }),
   Schema.Struct({
     state: Schema.Literal("absent"),
@@ -228,8 +254,12 @@ export const ProcessGroup = Schema.Struct({
   displayName: Schema.String,
   processes: Schema.Array(ProcessSummary),
   totalMemoryBytes: Schema.Number,
+  /** The group's summed CPU share, `null` when no member reported a sample. */
+  totalCpuUsage: Schema.NullOr(Schema.Number),
   storage: StorageReport,
   ports: PortScan,
+  /** The tool's self-recorded background service, only when its pid is live. */
+  service: Schema.NullOr(ServiceInfo),
 });
 export type ProcessGroup = typeof ProcessGroup.Type;
 
@@ -813,6 +843,20 @@ function describe(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
   if (typeof cause === "string") return cause;
   return "The request failed for an unknown reason.";
+}
+
+/**
+ * A failed read's own reason, or `null` when it did not carry one.
+ *
+ * The atom exposes failures as an `AsyncResult` Failure whose cause holds the
+ * protocol's `AppError`; the message is this app's or the backend's own
+ * wording, so callers present it verbatim rather than inventing a paraphrase.
+ */
+export function failureReason(cause: Cause.Cause<AppError>): string | null {
+  const squashed = Cause.squash(cause);
+  return squashed instanceof Error && squashed.message.length > 0
+    ? squashed.message
+    : null;
 }
 
 /**

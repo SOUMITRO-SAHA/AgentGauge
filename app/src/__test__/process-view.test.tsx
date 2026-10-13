@@ -3,8 +3,10 @@
  * report — the groups the backend sends are the groups on screen, so a
  * future CLI needs no renderer change — and every state must be an honest
  * one: absent storage shows its reason (never `0 B`), a group with nothing
- * running says so, and the only interactive elements on the whole screen are
- * refreshes, because the capability has no write.
+ * running says so, and the only interactive elements on the whole screen
+ * are refreshes, because the capability has no write. The one exception is
+ * the error state's re-read, which is the same refresh offered where the
+ * panels cannot.
  *
  * Each test resets the module registry before importing: the insights atom
  * is a session-retained singleton, so a second test would inherit the first
@@ -40,6 +42,8 @@ function summary(overrides: Record<string, unknown> = {}) {
     command: "codex app-server",
     startedAt: Math.floor(Date.now() / 1000) - HOUR_SEC,
     memoryBytes: 432_000_000,
+    cpuUsage: null,
+    status: null,
     listeningPorts: [],
     ...overrides,
   };
@@ -51,11 +55,24 @@ function group(id: string, overrides: Record<string, unknown> = {}) {
     displayName: id === "codex" ? "Codex" : "OpenCode",
     processes: [],
     totalMemoryBytes: 0,
+    totalCpuUsage: null,
     storage: {
       state: "absent",
       reason: "has not created its data directory yet.",
     },
     ports: { state: "checked", listening: [] },
+    service: null,
+    ...overrides,
+  };
+}
+
+function measuredStorage(overrides: Record<string, unknown> = {}) {
+  return {
+    state: "measured",
+    totalBytes: 3_000,
+    totalFiles: 4,
+    rows: [],
+    externalRows: [],
     ...overrides,
   };
 }
@@ -141,8 +158,6 @@ it("mirrors the success shape while loading: one skeleton panel per group plus t
   const panels = await screen.findAllByTestId("process-loading-panel");
   expect(panels).toHaveLength(2);
   expect(await screen.findByTestId("process-loading-note")).toBeTruthy();
-  // The refresh-status slot exists even before there is anything to say, so
-  // its text appearing later cannot move the panels.
   expect(screen.getByTestId("process-refreshing")).toBeTruthy();
 
   releaseProcessRead();
@@ -152,7 +167,6 @@ it("keeps the refresh-status slot mounted when a re-read completes", async () =>
   installDispatch([group("codex"), group("opencode")]);
   await renderView();
 
-  // Swap in a mock whose one read hangs until released, then refresh.
   let holder: ((value: Record<string, unknown>) => void) | null = null;
   (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
     dispatch: ({ request }: { request: Request }) => {
@@ -185,8 +199,6 @@ it("keeps the refresh-status slot mounted when a re-read completes", async () =>
     },
   });
   await screen.findByTestId("process-panel-codex");
-  // The slot stays in the layout — hidden by visibility, not unmounted — so
-  // completing a refresh never shifts the panels upward.
   const settled = screen.getByTestId("process-refreshing");
   expect(settled.className).toContain("invisible");
 });
@@ -216,10 +228,7 @@ it("shows each process with its memory and uptime beside the group totals", asyn
         }),
       ],
       totalMemoryBytes: 400,
-      storage: {
-        state: "measured",
-        totalBytes: 3_000,
-        totalFiles: 4,
+      storage: measuredStorage({
         rows: [
           {
             label: "Session transcripts",
@@ -234,7 +243,7 @@ it("shows each process with its memory and uptime beside the group totals", asyn
             fileCount: 1,
           },
         ],
-      },
+      }),
     }),
     group("opencode"),
   ]);
@@ -262,7 +271,82 @@ it("shows each process with its memory and uptime beside the group totals", asyn
   );
 });
 
-it("renders listening ports per process and in the group totals", async () => {
+it("renders rows in the report's order; ordering is the backend's decision", async () => {
+  installDispatch([
+    group("codex", {
+      processes: [
+        summary({ pid: 101, memoryBytes: 900 }),
+        summary({ pid: 100, memoryBytes: 100 }),
+      ],
+    }),
+    group("opencode"),
+  ]);
+  await renderView();
+
+  const rows = screen.getAllByTestId(/^process-row-/);
+  expect(rows.map((row) => row.getAttribute("data-testid"))).toEqual([
+    "process-row-101",
+    "process-row-100",
+  ]);
+});
+
+it("renders cpu share per process and summed in the group totals", async () => {
+  const pid = 4242;
+  installDispatch([
+    group("codex", {
+      processes: [summary({ pid, cpuUsage: 12.46 })],
+      totalMemoryBytes: 432_000_000,
+      totalCpuUsage: 12.46,
+    }),
+    group("opencode"),
+  ]);
+  await renderView();
+
+  expect(screen.getByTestId(`process-cpu-${pid}`)?.textContent).toBe("12.5%");
+  expect(screen.getByTestId("process-totals-codex")?.textContent).toContain(
+    "CPU",
+  );
+  expect(screen.getByTestId("process-totals-codex")?.textContent).toContain(
+    "12.5%",
+  );
+  expect(screen.getByTestId(`process-details-${pid}`)?.textContent).toContain(
+    "CPU 12.5%",
+  );
+});
+
+it("shows a dash for cpu the platform did not sample", async () => {
+  const pid = 4242;
+  installDispatch([
+    group("codex", { processes: [summary({ pid })] }),
+    group("opencode"),
+  ]);
+  await renderView();
+
+  expect(screen.getByTestId(`process-cpu-${pid}`)?.textContent).toBe("—");
+  expect(screen.getByTestId("process-totals-codex")?.textContent).toContain(
+    "CPU",
+  );
+});
+
+it("tags only abnormal process states", async () => {
+  installDispatch([
+    group("codex", {
+      processes: [
+        summary({ pid: 10, status: "zombie" }),
+        summary({ pid: 11, status: null }),
+        summary({ pid: 12, status: "stopped" }),
+      ],
+    }),
+    group("opencode"),
+  ]);
+  await renderView();
+
+  expect(screen.getByTestId("process-status-10")?.textContent).toBe("zombie");
+  expect(screen.getByTestId("process-status-12")?.textContent).toBe("stopped");
+  expect(screen.queryByTestId("process-status-11")).toBeNull();
+});
+
+it("renders listening endpoints with their interfaces, wildcard binds called out", async () => {
   installDispatch([
     group("codex"),
     group("opencode", {
@@ -273,18 +357,35 @@ it("renders listening ports per process and in the group totals", async () => {
           command: "opencode serve --hostname 127.0.0.1",
           listeningPorts: [49374],
         }),
+        summary({
+          pid: 5310,
+          name: "opencode",
+          listeningPorts: [4096],
+        }),
       ],
       ports: {
         state: "checked",
-        listening: [{ pid: 5309, port: 49374 }],
+        listening: [
+          { pid: 5309, port: 49374, address: "127.0.0.1" },
+          { pid: 5310, port: 4096, address: "*" },
+        ],
       },
     }),
   ]);
   await renderView();
 
-  expect(screen.getByTestId("process-ports-5309")?.textContent).toBe(":49374");
+  expect(screen.getByTestId("process-ports-5309")?.textContent).toBe(
+    "127.0.0.1:49374",
+  );
+  expect(screen.getByTestId("process-ports-5310")?.textContent).toBe("*:4096");
   expect(screen.getByTestId("process-totals-opencode")?.textContent).toContain(
-    "49374",
+    "127.0.0.1:49374",
+  );
+  expect(screen.getByTestId("process-totals-opencode")?.textContent).toContain(
+    "*:4096 · all interfaces",
+  );
+  expect(screen.getByTestId("process-details-5309")?.textContent).toContain(
+    "Ports 127.0.0.1:49374",
   );
 });
 
@@ -298,10 +399,14 @@ it("keeps every process fact in a compact shadcn table row", async () => {
           pid,
           name: "opencode",
           command: "opencode serve --hostname 127.0.0.1",
+          cpuUsage: 3.2,
           listeningPorts: [49374],
         }),
       ],
-      ports: { state: "checked", listening: [{ pid, port: 49374 }] },
+      ports: {
+        state: "checked",
+        listening: [{ pid, port: 49374, address: null }],
+      },
     }),
   ]);
   await renderView();
@@ -315,6 +420,7 @@ it("keeps every process fact in a compact shadcn table row", async () => {
   expect(table?.className).toContain("table-fixed");
   expect(compactDetails?.textContent).toContain(`PID ${pid}`);
   expect(compactDetails?.textContent).toContain("Ports :49374");
+  expect(compactDetails?.textContent).toContain("CPU 3.2%");
   expect(compactDetails?.textContent).toContain("Uptime");
   expect(compactDetails?.className).toContain("2xl:hidden");
 });
@@ -331,29 +437,50 @@ it("says none are listening when the scan checked and found nothing", async () =
 
 it("carries the reason when ports cannot be inspected at all", async () => {
   installDispatch([
-    group("codex"),
-    group("opencode", {
+    group("codex", {
+      processes: [summary({ pid: 4242 })],
       ports: {
         state: "unavailable",
         reason: "Listening ports could not be inspected: program not found.",
+      },
+    }),
+    group("opencode"),
+  ]);
+  await renderView();
+
+  expect(
+    screen.getByTestId("process-ports-unavailable-codex")?.textContent,
+  ).toContain("could not be inspected");
+  expect(screen.getByTestId("process-totals-codex")?.textContent).not.toContain(
+    "None listening",
+  );
+  expect(screen.getByTestId("process-ports-4242")?.textContent).toBe("—");
+});
+
+it("renders the tool's recorded background service when its pid is live", async () => {
+  installDispatch([
+    group("codex"),
+    group("opencode", {
+      processes: [summary({ pid: 5309, name: "opencode" })],
+      service: {
+        version: "2.0.27",
+        url: "http://127.0.0.1:49374",
+        pid: 5309,
       },
     }),
   ]);
   await renderView();
 
   expect(
-    screen.getByTestId("process-ports-unavailable-opencode")?.textContent,
-  ).toContain("could not be inspected");
-  expect(
-    screen.getByTestId("process-totals-opencode")?.textContent,
-  ).not.toContain("None listening");
+    screen.getByTestId("process-service-opencode")?.textContent,
+  ).toBe("Background service · v2.0.27 · http://127.0.0.1:49374");
+  expect(screen.queryByTestId("process-service-codex")).toBeNull();
 });
 
 it("names the databases inside the storage breakdown", async () => {
   installDispatch([
     group("codex", {
-      storage: {
-        state: "measured",
+      storage: measuredStorage({
         totalBytes: 500_000_000,
         totalFiles: 95,
         rows: [
@@ -370,7 +497,7 @@ it("names the databases inside the storage breakdown", async () => {
             fileCount: 90,
           },
         ],
-      },
+      }),
     }),
     group("opencode"),
   ]);
@@ -399,6 +526,56 @@ it("names the databases inside the storage breakdown", async () => {
   expect(value?.className).toContain("whitespace-nowrap");
 });
 
+it("scales a share bar to each row's fraction of the measured total", async () => {
+  installDispatch([
+    group("codex", {
+      storage: measuredStorage({
+        totalBytes: 500,
+        rows: [
+          { label: "Session transcripts", path: "/sessions", bytes: 450, fileCount: 9 },
+          { label: "Everything else", path: "/codex", bytes: 50, fileCount: 1 },
+        ],
+      }),
+    }),
+    group("opencode"),
+  ]);
+  await renderView();
+
+  const shares = screen.getAllByTestId("process-storage-share-codex");
+  expect(shares.map((share) => share.style.width)).toEqual(["90%", "10%"]);
+});
+
+it("carries relocated footprint outside the measured total", async () => {
+  installDispatch([
+    group("codex", {
+      storage: measuredStorage({
+        totalBytes: 30,
+        rows: [
+          { label: "Everything else", path: "/Users/dev/.codex", bytes: 30, fileCount: 1 },
+        ],
+        externalRows: [
+          {
+            label: "Databases (SQLite) — relocated via CODEX_SQLITE_HOME",
+            path: "state_5.sqlite",
+            bytes: 400,
+            fileCount: 1,
+          },
+        ],
+      }),
+    }),
+    group("opencode"),
+  ]);
+  await renderView();
+
+  const external = screen.getByTestId("process-storage-external-codex");
+  expect(external.textContent).toContain("Outside the data directory");
+  expect(external.textContent).toContain("not part of the total above");
+  expect(external.textContent).toContain("400 B");
+  expect(
+    screen.getAllByTestId("process-storage-share-codex").length,
+  ).toBe(1);
+});
+
 it("renders an absent footprint as its reason, never as zero bytes", async () => {
   installDispatch([
     group("codex"),
@@ -414,7 +591,6 @@ it("renders an absent footprint as its reason, never as zero bytes", async () =>
 
   const absent = screen.getByTestId("process-storage-absent-opencode");
   expect(absent.textContent).toContain("has not created");
-  // A measured zero would read as emptiness; absence must stay a reason.
   expect(absent.textContent).not.toContain("0 B");
   expect(screen.queryByTestId("process-storage-opencode")).toBeNull();
 });
@@ -424,7 +600,7 @@ it("says explicitly when a group has nothing running", async () => {
     group("codex"),
     group("opencode", {
       processes: [],
-      storage: { state: "measured", totalBytes: 5, totalFiles: 1, rows: [] },
+      storage: measuredStorage({}),
     }),
   ]);
   await renderView();
@@ -434,22 +610,119 @@ it("says explicitly when a group has nothing running", async () => {
   );
 });
 
+it("marks the reading's age and the toolchain summary below the panels", async () => {
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: ({ request }: { request: Request }) => {
+      if (request.type !== "processInsights") {
+        return { type: "failure", error: { kind: "protocolMismatch", message: "x" } };
+      }
+      return {
+        type: "processInsights",
+        insights: {
+          fetchedAt: Date.now() - 30_000,
+          groups: [
+            group("codex", {
+              processes: [summary()],
+              totalMemoryBytes: 432_000_000,
+              storage: measuredStorage({ totalBytes: 500_000_000 }),
+            }),
+            group("opencode"),
+          ],
+        },
+      };
+    },
+  };
+  await renderView();
+
+  const pill = screen.getByTestId("freshness-pill");
+  expect(pill.getAttribute("data-freshness")).toBe("live");
+  expect(pill.textContent).toContain("Read just now");
+
+  const summaryText = screen.getByTestId("process-summary")?.textContent;
+  expect(summaryText).toContain("2 groups");
+  expect(summaryText).toContain("1 process");
+  expect(summaryText).toContain("432 MB memory");
+  expect(summaryText).toContain("500 MB on disk");
+  expect(summaryText).toContain("measured roots only");
+});
+
+it("turns the freshness pill stale past fifteen minutes", async () => {
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: ({ request }: { request: Request }) => {
+      if (request.type !== "processInsights") {
+        return { type: "failure", error: { kind: "protocolMismatch", message: "x" } };
+      }
+      return {
+        type: "processInsights",
+        insights: {
+          fetchedAt: Date.now() - 16 * 60_000,
+          groups: [group("codex"), group("opencode")],
+        },
+      };
+    },
+  };
+  await renderView();
+
+  const pill = screen.getByTestId("freshness-pill");
+  expect(pill.getAttribute("data-freshness")).toBe("stale");
+  expect(pill.textContent).toContain("Stale · read");
+});
+
+it("explains cpu above one hundred percent in the read-only note", async () => {
+  installDispatch([group("codex"), group("opencode")]);
+  await renderView();
+
+  expect(
+    screen.getByTestId("process-readonly-note")?.textContent,
+  ).toContain("100%");
+});
+
 it("marks a re-read in flight instead of rendering it as fresh", async () => {
   installDispatch([group("codex"), group("opencode")]);
   await renderView();
 
-  // Swap the mock for one that never answers, then refresh: the retained
-  // snapshot must stay on screen *and* say a re-read is running.
   (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
     dispatch: () =>
       new Promise(() => {
-        // Deliberately unresolved: the read stays in flight.
+        return undefined;
       }),
   };
   fireEvent.click(screen.getByTestId("refresh-processes-codex"));
 
   expect(await screen.findByTestId("process-refreshing")).toBeTruthy();
   expect(screen.getByTestId("process-panel-codex")).toBeTruthy();
+});
+
+it("shows the read's own reason and a re-read when the read fails", async () => {
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: ({ request }: { request: Request }) => {
+      if (request.type !== "processInsights") {
+        return { type: "failure", error: { kind: "protocolMismatch", message: "x" } };
+      }
+      return {
+        type: "failure",
+        error: {
+          kind: "internal",
+          message: "the process table was unreadable",
+        },
+      };
+    },
+  };
+  const { ProcessView } = await import("~/components/views/process-view");
+  render(
+    createElement(ProcessView as ComponentType<{ visible: boolean }>, {
+      visible: true,
+    }),
+  );
+
+  const error = await screen.findByTestId("process-error");
+  expect(error.textContent).toContain("the process table was unreadable");
+  const retry = screen.getByTestId("retry-processes");
+  expect(retry).toBeTruthy();
+
+  installDispatch([group("codex"), group("opencode")]);
+  fireEvent.click(retry);
+  expect(await screen.findByTestId("process-panel-codex")).toBeTruthy();
 });
 
 it("offers no control beyond refresh, because the capability has no write", async () => {

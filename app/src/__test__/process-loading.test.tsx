@@ -10,8 +10,10 @@ function processGroup(id: string) {
     displayName: id === "codex" ? "Codex" : "OpenCode",
     processes: [],
     totalMemoryBytes: 0,
+    totalCpuUsage: null,
     storage: { state: "absent", reason: "No data yet." },
     ports: { state: "checked", listening: [] },
+    service: null,
   };
 }
 
