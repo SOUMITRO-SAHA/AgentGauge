@@ -14,3 +14,4 @@ pub mod logging;
 pub mod platform;
 pub mod protocol;
 pub mod provider;
+pub mod stats_store;
