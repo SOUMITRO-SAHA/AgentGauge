@@ -21,8 +21,9 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::shared::domain::{
-    price_local_models, project_name, LocalDayUsage, LocalModelUsage, LocalProjectUsage,
-    LocalUsage, NO_PROJECT,
+    bundled_price_catalog, median_u64, price_local_model_with_catalog, price_local_models,
+    project_name, LocalDayUsage, LocalModelDayUsage, LocalModelUsage, LocalProjectUsage,
+    LocalSessionDayUsage, LocalUsage, NO_PROJECT,
 };
 
 /// The price-list provider Codex's model slugs are priced against. Codex
@@ -127,16 +128,26 @@ struct TokenUsagePayload {
     usage: Option<ResponseUsage>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct SessionMetaPayload {
+    #[serde(default)]
+    timestamp: Option<String>,
+}
+
 /// Accumulates a scan across many rollout files.
 #[derive(Debug, Default)]
 struct Scanner {
     models: BTreeMap<String, ModelTokens>,
+    model_days: BTreeMap<(String, String), ModelTokens>,
     projects: BTreeMap<String, ProjectModels>,
     days: BTreeMap<String, u64>,
+    session_days: BTreeMap<String, u64>,
+    session_token_counts: Vec<u64>,
     files_scanned: u64,
     files_unreadable: u64,
     files_compressed: u64,
     sessions: u64,
+    compactions: u64,
 }
 
 impl Scanner {
@@ -149,6 +160,8 @@ impl Scanner {
         // A turn's model and its directory arrive in the same record, so they
         // travel together.
         let mut turns: HashMap<String, TurnRecord> = HashMap::new();
+        let mut session_day = None;
+        let mut session_tokens = 0;
         // Most lines in a rollout are conversation content, not accounting.
         // Checking for the two record kinds first keeps a multi-hundred-
         // megabyte history from paying full JSON parse for every line.
@@ -157,7 +170,11 @@ impl Scanner {
                 self.files_unreadable += 1;
                 return;
             };
-            if !line.contains("token_usage_record") && !line.contains("turn_context") {
+            if !line.contains("token_usage_record")
+                && !line.contains("turn_context")
+                && !line.contains("session_meta")
+                && !line.contains("compacted")
+            {
                 continue;
             }
             let Ok(envelope) = serde_json::from_str::<RolloutEnvelope>(&line) else {
@@ -198,20 +215,43 @@ impl Scanner {
                             let project = turn
                                 .and_then(|turn| turn.project.clone())
                                 .unwrap_or_else(|| NO_PROJECT.to_string());
-                            self.record_usage(&envelope.timestamp, &model, &project, &usage);
+                            self.record_usage(
+                                &envelope.timestamp,
+                                &model,
+                                &project,
+                                &usage,
+                                &mut session_day,
+                                &mut session_tokens,
+                            );
                         }
                     }
                 }
+                "session_meta" => {
+                    if let Ok(meta) = serde_json::from_value::<SessionMetaPayload>(envelope.payload)
+                    {
+                        session_day = meta
+                            .timestamp
+                            .as_deref()
+                            .map(day_of)
+                            .filter(|day| !day.is_empty())
+                            .or(session_day);
+                    }
+                }
+                "compacted" => self.compactions += 1,
                 _ => {}
             }
         }
         self.files_scanned += 1;
         self.sessions += 1;
+        self.session_token_counts.push(session_tokens);
+        if let Some(day) = session_day {
+            *self.session_days.entry(day).or_default() += 1;
+        }
     }
 
     /// Ranks the models, prices what the price list covers, and reports what
     /// it could not price or read as explicit counters.
-    fn finish(self) -> LocalUsage {
+    fn finish(mut self) -> LocalUsage {
         let mut models: Vec<LocalModelUsage> = self
             .models
             .into_iter()
@@ -224,6 +264,26 @@ impl Scanner {
                 .then_with(|| left.id.cmp(&right.id))
         });
         let pricing = price_local_models(&mut models, CODEX_PRICE_PROVIDER);
+        let catalog = bundled_price_catalog();
+
+        let model_days = self
+            .model_days
+            .into_iter()
+            .map(|((day, id), tokens)| {
+                let mut model = tokens.into_usage(&id);
+                let priced = catalog.as_ref().is_some_and(|catalog| {
+                    price_local_model_with_catalog(&mut model, CODEX_PRICE_PROVIDER, catalog)
+                });
+                let tokens = model.total_tokens();
+                LocalModelDayUsage {
+                    day,
+                    id,
+                    display_name: model.display_name,
+                    tokens,
+                    cost_usd: priced.then_some(model.cost_usd).flatten(),
+                }
+            })
+            .collect();
 
         let mut projects: Vec<LocalProjectUsage> = self
             .projects
@@ -265,12 +325,22 @@ impl Scanner {
             .into_iter()
             .map(|(day, tokens)| LocalDayUsage { day, tokens })
             .collect();
+        let session_days = self
+            .session_days
+            .into_iter()
+            .map(|(day, sessions)| LocalSessionDayUsage { day, sessions })
+            .collect();
+        let median_tokens_per_session = median_u64(&mut self.session_token_counts);
         LocalUsage {
             models,
+            model_days,
             projects,
             first_day: days.first().map(|day| day.day.clone()),
             last_day: days.last().map(|day| day.day.clone()),
             days,
+            session_days,
+            median_tokens_per_session,
+            compactions: Some(self.compactions),
             cost_usd: pricing.total_cost_usd,
             unpriced_tokens: pricing.unpriced_tokens,
             sessions: self.sessions,
@@ -280,7 +350,15 @@ impl Scanner {
         }
     }
 
-    fn record_usage(&mut self, timestamp: &str, model: &str, project: &str, usage: &ResponseUsage) {
+    fn record_usage(
+        &mut self,
+        timestamp: &str,
+        model: &str,
+        project: &str,
+        usage: &ResponseUsage,
+        session_day: &mut Option<String>,
+        session_tokens: &mut u64,
+    ) {
         let tokens = self.models.entry(model.to_string()).or_default();
         tokens.input += usage.input_tokens;
         tokens.cached_input += usage.cached_input_tokens.min(usage.input_tokens);
@@ -303,7 +381,18 @@ impl Scanner {
         split.responses += 1;
 
         let day = day_of(timestamp);
-        *self.days.entry(day).or_insert(0) += usage.input_tokens + usage.output_tokens;
+        *self.days.entry(day.clone()).or_insert(0) += usage.input_tokens + usage.output_tokens;
+        if !day.is_empty() {
+            session_day.get_or_insert_with(|| day.clone());
+            let daily_model = self.model_days.entry((day, model.to_string())).or_default();
+            daily_model.input += usage.input_tokens;
+            daily_model.cached_input += usage.cached_input_tokens.min(usage.input_tokens);
+            daily_model.cache_write += usage.cache_write_input_tokens;
+            daily_model.output += usage.output_tokens;
+            daily_model.reasoning += usage.reasoning_output_tokens.min(usage.output_tokens);
+            daily_model.responses += 1;
+        }
+        *session_tokens += usage.input_tokens + usage.output_tokens;
     }
 }
 
@@ -469,6 +558,55 @@ mod tests {
     }
 
     #[test]
+    fn local_session_metrics_preserve_per_day_models_medians_and_compactions() {
+        let tree = TempTree::new("session-metrics");
+        tree.write(
+            "sessions/2026/10/01/rollout-a.jsonl",
+            &[
+                session_meta("2026-10-01T10:00:00.000Z"),
+                turn_context("2026-10-01T10:00:01.000Z", "t1", "gpt-6-luna"),
+                usage_record("2026-10-01T10:00:02.000Z", "t1", 100, 90, 10, 4),
+                record(
+                    "2026-10-01T10:00:03.000Z",
+                    "compacted",
+                    serde_json::json!({ "message": "summary" }),
+                ),
+                String::new(),
+            ]
+            .join("\n"),
+        );
+        tree.write(
+            "sessions/2026/10/02/rollout-b.jsonl",
+            &[
+                session_meta("2026-10-02T10:00:00.000Z"),
+                turn_context("2026-10-02T10:00:01.000Z", "t2", "gpt-5.5"),
+                usage_record("2026-10-02T10:00:02.000Z", "t2", 300, 0, 0, 0),
+                String::new(),
+            ]
+            .join("\n"),
+        );
+
+        let usage = scan_codex_home(&tree.0);
+
+        assert_eq!(usage.sessions, 2);
+        assert_eq!(usage.median_tokens_per_session, Some(205));
+        assert_eq!(usage.compactions, Some(1));
+        assert_eq!(
+            usage
+                .session_days
+                .iter()
+                .map(|day| (day.day.as_str(), day.sessions))
+                .collect::<Vec<_>>(),
+            vec![("2026-10-01", 1), ("2026-10-02", 1)]
+        );
+        assert_eq!(usage.model_days.len(), 2);
+        assert_eq!(usage.model_days[0].day, "2026-10-01");
+        assert_eq!(usage.model_days[0].id, "gpt-6-luna");
+        assert_eq!(usage.model_days[0].tokens, 110);
+        assert!(usage.model_days[0].cost_usd.is_some());
+    }
+
+    #[test]
     fn a_response_with_no_model_stays_visible_as_an_unpriced_bucket() {
         let tree = TempTree::new("unknown-bucket");
         tree.write(
@@ -560,6 +698,14 @@ mod tests {
 
     fn turn_context(timestamp: &str, turn_id: &str, model: &str) -> String {
         turn_context_in(timestamp, turn_id, model, "/tmp/project")
+    }
+
+    fn session_meta(timestamp: &str) -> String {
+        record(
+            timestamp,
+            "session_meta",
+            serde_json::json!({ "timestamp": timestamp }),
+        )
     }
 
     fn turn_context_in(timestamp: &str, turn_id: &str, model: &str, cwd: &str) -> String {

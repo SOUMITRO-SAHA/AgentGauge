@@ -316,6 +316,14 @@ export const ModelUsage = Schema.Struct({
 });
 export type ModelUsage = typeof ModelUsage.Type;
 
+export const ModelDayUsage = Schema.Struct({
+  day: Schema.String,
+  modelId: Schema.String,
+  displayName: Schema.String,
+  tokens: Schema.Number,
+});
+export type ModelDayUsage = typeof ModelDayUsage.Type;
+
 /**
  * One model's usage as read from the user's own local harness logs.
  *
@@ -360,6 +368,21 @@ export const LocalDayUsage = Schema.Struct({
 });
 export type LocalDayUsage = typeof LocalDayUsage.Type;
 
+export const LocalModelDayUsage = Schema.Struct({
+  day: Schema.String,
+  id: Schema.String,
+  displayName: Schema.String,
+  tokens: Schema.Number,
+  costUsd: Schema.NullOr(Schema.Number),
+});
+export type LocalModelDayUsage = typeof LocalModelDayUsage.Type;
+
+export const LocalSessionDayUsage = Schema.Struct({
+  day: Schema.String,
+  sessions: Schema.Number,
+});
+export type LocalSessionDayUsage = typeof LocalSessionDayUsage.Type;
+
 /**
  * What the app read from the user's own local logs.
  *
@@ -370,9 +393,13 @@ export type LocalDayUsage = typeof LocalDayUsage.Type;
  */
 export const LocalUsage = Schema.Struct({
   models: Schema.Array(LocalModelUsage),
+  modelDays: Schema.optional(Schema.Array(LocalModelDayUsage)),
   /** Ranked by tokens. Empty when the source records no working directory. */
   projects: Schema.Array(LocalProjectUsage),
   days: Schema.Array(LocalDayUsage),
+  sessionDays: Schema.optional(Schema.Array(LocalSessionDayUsage)),
+  medianTokensPerSession: Schema.optional(Schema.NullOr(Schema.Number)),
+  compactions: Schema.optional(Schema.NullOr(Schema.Number)),
   /** API-equivalent cost of every priced model. Exact: the logs carry a real
    * per-response split, so no blended average is involved. */
   costUsd: Schema.Number,
@@ -408,6 +435,7 @@ export const AccountUsage = Schema.Struct({
    * provider totals only — a real answer, not a failed read.
    */
   models: Schema.Array(ModelUsage),
+  modelDailyUsage: Schema.optional(Schema.Array(ModelDayUsage)),
   /**
    * The local harness logs' own reading, when the provider has a local
    * record to read. Null means absent — no Codex home, or one with no

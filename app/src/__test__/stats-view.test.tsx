@@ -717,6 +717,51 @@ it("leaves the local panel off a tab with no local record", async () => {
   expect(screen.queryByTestId("stats-local-logs")).toBeNull();
 });
 
+it("renders the local session metrics and weekly model-share timeline", () => {
+  const local = codexAccountUsage().local;
+  render(
+    createElement(LocalLogPanel, {
+      usage: {
+        ...local,
+        modelDays: [
+          {
+            day: "2026-09-04",
+            id: "gpt-5.5",
+            displayName: "GPT-5.5",
+            tokens: 120,
+            costUsd: null,
+          },
+          {
+            day: "2026-09-24",
+            id: "gpt-6-luna",
+            displayName: "GPT-6 Luna",
+            tokens: 180,
+            costUsd: null,
+          },
+        ],
+        sessionDays: [
+          { day: "2026-09-04", sessions: 4 },
+          { day: "2026-09-24", sessions: 8 },
+        ],
+        medianTokensPerSession: 1_250_000,
+        compactions: 6,
+      },
+    }),
+  );
+
+  expect(screen.getByTestId("stats-local-session-chart")).toBeTruthy();
+  expect(screen.getByTestId("stats-local-median-session").textContent).toMatch(
+    /1[.,]25M/,
+  );
+  expect(screen.getByTestId("stats-local-compactions").textContent).toContain("6");
+  expect(screen.getByTestId("stats-model-timeline")).toBeTruthy();
+  const chartLabel = screen
+    .getByTestId("stats-model-timeline-chart")
+    .getAttribute("aria-label");
+  expect(chartLabel).toContain("GPT-5.5");
+  expect(chartLabel).toContain("GPT-6 Luna");
+});
+
 /**
  * A coding-plan tab with no provider analytics of its own, answered from
  * OpenCode's local session database: this is the MiniMax/Kimi shape.
@@ -751,6 +796,18 @@ function localOnlyUsage() {
         },
       ],
       days: [{ day: "2026-09-24", tokens: 940_000_000 }],
+      modelDays: [
+        {
+          day: "2026-09-24",
+          id: "MiniMax-M3",
+          displayName: "minimax-M3",
+          tokens: 940_000_000,
+          costUsd: 42.5,
+        },
+      ],
+      sessionDays: [{ day: "2026-09-24", sessions: 94 }],
+      medianTokensPerSession: 9_400_000,
+      compactions: null,
       costUsd: 42.5,
       unpricedTokens: 0,
       sessions: 94,
@@ -783,6 +840,16 @@ it("answers a coding-plan tab from OpenCode's local sessions", () => {
   expect(cost.textContent ?? "").toMatch(/42[.,]50/);
   const cache = screen.getByTestId("stats-local-cache");
   expect(cache.textContent ?? "").toContain("33%");
+  expect(screen.getByTestId("stats-local-session-chart")).toBeTruthy();
+  expect(screen.getByTestId("stats-local-median-session").textContent).toContain(
+    "9.4M",
+  );
+  expect(screen.getByTestId("stats-local-compactions").textContent).toContain(
+    "Not reported",
+  );
+  expect(
+    screen.getByTestId("stats-model-timeline-chart").getAttribute("aria-label"),
+  ).toContain("minimax-M3");
 });
 
 it("shows a local reading on a coding-plan tab that reports nothing itself", async () => {

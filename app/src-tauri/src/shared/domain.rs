@@ -125,6 +125,9 @@ pub struct AccountUsage {
     /// answer ("this provider totals only"), never a failed decode.
     #[serde(default)]
     pub models: Vec<ModelUsage>,
+    /// Per-model daily totals when the provider reports that series.
+    #[serde(default)]
+    pub model_daily_usage: Vec<ModelDayUsage>,
     /// What the app read from the user's own local harness logs, when the
     /// provider's local record was readable. `None` means the local record is
     /// absent — no Codex home, or a home with no rollouts — which is different
@@ -176,6 +179,16 @@ pub struct ModelUsage {
     /// Model calls attributed to this model, when the provider counts them.
     #[serde(default)]
     pub requests: Option<u64>,
+}
+
+/// One provider-reported model total for a calendar day.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDayUsage {
+    pub day: String,
+    pub model_id: String,
+    pub display_name: String,
+    pub tokens: u64,
 }
 
 /// One model's usage read from the user's own local logs, with the token split
@@ -264,12 +277,46 @@ pub fn project_name(directory: &str) -> Option<&str> {
         .filter(|name| !name.is_empty() && *name != trimmed)
 }
 
+pub fn median_u64(values: &mut [u64]) -> Option<u64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable();
+    let middle = values.len() / 2;
+    if values.len() % 2 == 1 {
+        values.get(middle).copied()
+    } else {
+        let lower = values.get(middle - 1).copied()?;
+        let upper = values.get(middle).copied()?;
+        Some(lower / 2 + upper / 2 + (lower % 2 + upper % 2) / 2)
+    }
+}
+
 /// One calendar day's total tokens across every model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalDayUsage {
     pub day: String,
     pub tokens: u64,
+}
+
+/// One locally recorded model's usage and API-equivalent price for a day.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalModelDayUsage {
+    pub day: String,
+    pub id: String,
+    pub display_name: String,
+    pub tokens: u64,
+    pub cost_usd: Option<f64>,
+}
+
+/// The number of local sessions recorded on one calendar day.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSessionDayUsage {
+    pub day: String,
+    pub sessions: u64,
 }
 
 /// What the app read from the user's own local harness logs.
@@ -287,11 +334,19 @@ pub struct LocalDayUsage {
 #[serde(rename_all = "camelCase")]
 pub struct LocalUsage {
     pub models: Vec<LocalModelUsage>,
+    #[serde(default)]
+    pub model_days: Vec<LocalModelDayUsage>,
     /// Ranked by tokens. Empty when the source records no working directory,
     /// which is a fact about the data rather than a failure to read it.
     #[serde(default)]
     pub projects: Vec<LocalProjectUsage>,
     pub days: Vec<LocalDayUsage>,
+    #[serde(default)]
+    pub session_days: Vec<LocalSessionDayUsage>,
+    #[serde(default)]
+    pub median_tokens_per_session: Option<u64>,
+    #[serde(default)]
+    pub compactions: Option<u64>,
     /// API-equivalent cost of every priced model, summed. Zero when nothing
     /// could be priced — paired with `unpriced_tokens` so the two read
     /// together.
@@ -1019,7 +1074,9 @@ mod tests {
             },
             daily_usage_buckets: Vec::new(),
             models: Vec::new(),
+            model_daily_usage: Vec::new(),
             local: Some(LocalUsage {
+                model_days: Vec::new(),
                 projects: Vec::new(),
                 models: vec![LocalModelUsage {
                     id: "gpt-6-luna".to_string(),
@@ -1033,6 +1090,9 @@ mod tests {
                     cost_usd: Some(0.5),
                 }],
                 days: Vec::new(),
+                session_days: Vec::new(),
+                median_tokens_per_session: Some(12),
+                compactions: Some(0),
                 cost_usd: 0.5,
                 unpriced_tokens: 0,
                 sessions: 1,
@@ -1053,6 +1113,17 @@ mod tests {
         assert_eq!(local["models"][0]["displayName"], "GPT-6 Luna");
         assert_eq!(local["models"][0]["cachedInput"], 4u64);
         assert_eq!(local["firstDay"], "2026-10-01");
+    }
+
+    #[test]
+    fn median_handles_odd_even_empty_and_large_inputs() {
+        assert_eq!(median_u64(&mut []), None);
+        assert_eq!(median_u64(&mut [9, 1, 5]), Some(5));
+        assert_eq!(median_u64(&mut [8, 2, 4, 6]), Some(5));
+        assert_eq!(
+            median_u64(&mut [u64::MAX - 1, u64::MAX]),
+            Some(u64::MAX - 1)
+        );
     }
 
     /// A split at real magnitudes — the research worked example saw Codex pass a

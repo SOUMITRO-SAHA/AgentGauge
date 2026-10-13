@@ -1552,11 +1552,48 @@ export function codexLocalUsage() {
       },
     ],
     days: [
-      { day: "2026-09-04", tokens: 120000000 },
+      { day: "2026-09-04", tokens: 133780354 },
       // 2026-09-05 is deliberately absent: a day with no record.
       { day: "2026-09-07", tokens: 0 },
-      { day: "2026-09-24", tokens: 180000000 },
+      { day: "2026-09-24", tokens: 137897308 },
     ],
+    modelDays: [
+      {
+        day: "2026-09-04",
+        id: "gpt-5.5",
+        displayName: "GPT-5.5",
+        tokens: 132680354,
+        costUsd: null,
+      },
+      {
+        day: "2026-09-04",
+        id: "gpt-5.5-preview",
+        displayName: "gpt-5.5-preview",
+        tokens: 1100000,
+        costUsd: null,
+      },
+      {
+        day: "2026-09-07",
+        id: "gpt-5.5",
+        displayName: "GPT-5.5",
+        tokens: 0,
+        costUsd: null,
+      },
+      {
+        day: "2026-09-24",
+        id: "gpt-6-luna",
+        displayName: "GPT-6 Luna",
+        tokens: 137897308,
+        costUsd: null,
+      },
+    ],
+    sessionDays: [
+      { day: "2026-09-04", sessions: 48 },
+      { day: "2026-09-07", sessions: 12 },
+      { day: "2026-09-24", sessions: 108 },
+    ],
+    medianTokensPerSession: 1250000,
+    compactions: 6,
     projects: [
       {
         name: "ai-sub-stats-widget",
@@ -1620,6 +1657,75 @@ export function zaiAccountUsage() {
     ],
     local: null,
   };
+}
+
+export async function dashboardWithStatsTrends(): Promise<void> {
+  const base = zaiAccountUsage();
+  const dates = [
+    "2026-10-01",
+    "2026-10-02",
+    "2026-10-03",
+    "2026-10-05",
+    "2026-10-06",
+    "2026-10-07",
+    "2026-10-08",
+    "2026-10-09",
+    "2026-10-10",
+    "2026-10-11",
+  ];
+  const modelTokens = [
+    [1_000_000_000, 1_500_000_000],
+    [1_000_000_000, 1_500_000_000],
+    [1_000_000_000, 1_500_000_000],
+    [1_000_000_000, 1_500_000_000],
+    [1_000_000_000, 1_500_000_000],
+    [1_000_000_000, 1_500_000_000],
+    [1_000_000_000, 1_500_000_000],
+    [1_472_310_570, 2_727_689_430],
+    [0, 0],
+    [0, 0],
+  ];
+  const dailyUsageBuckets = dates.map((startDate, index) => ({
+    startDate,
+    tokens: modelTokens[index]![0] + modelTokens[index]![1],
+  }));
+  const modelDailyUsage = dates.flatMap((day, index) => [
+    {
+      day,
+      modelId: "glm-5.3",
+      displayName: "GLM-5.3",
+      tokens: modelTokens[index]![0],
+    },
+    {
+      day,
+      modelId: "glm-5.3-flash",
+      displayName: "GLM-5.3-Flash",
+      tokens: modelTokens[index]![1],
+    },
+  ]);
+
+  await boot(
+    {
+      ...zaiAnalyticsFixture(),
+      accountUsageByProvider: {
+        zai: {
+          ...base,
+          summary: {
+            ...base.summary,
+            totalTokens: 21_700_000_000,
+            peakDailyTokens: 4_200_000_000,
+          },
+          dailyUsageBuckets,
+          modelDailyUsage,
+        },
+      },
+    },
+    {
+      initialRoute: "home",
+      nudges: [{ view: "stats", control: "stats-reload" }],
+      finalRoute: "stats",
+    },
+  );
 }
 
 /**
@@ -1696,6 +1802,26 @@ export async function dashboardWithHeatmapYear(): Promise<void> {
       lastDay: heatmapYearDays().at(-1)?.day ?? local.lastDay,
     },
   });
+}
+
+export async function statsWithCodexLocalAnalytics(): Promise<E2EView | null> {
+  return boot(
+    {
+      visible: false,
+      usage: liveSnapshot(),
+      installed: true,
+      version: "codex-cli 0.159.0",
+      widgetEmbedded: true,
+      widgetSupported: true,
+      automationRunning: true,
+      codexLocalUsage: codexLocalUsage(),
+    },
+    {
+      initialRoute: "home",
+      nudges: [{ view: "stats", control: "stats-reload" }],
+      finalRoute: "stats",
+    },
+  );
 }
 
 export async function dashboardWithZaiWeek(): Promise<void> {
@@ -1790,6 +1916,18 @@ export function openCodeLocalUsage() {
       },
     ],
     days: [{ day: "2026-09-24", tokens: 940000000 }],
+    modelDays: [
+      {
+        day: "2026-09-24",
+        id: "MiniMax-M3",
+        displayName: "minimax-M3",
+        tokens: 940000000,
+        costUsd: 42.5,
+      },
+    ],
+    sessionDays: [{ day: "2026-09-24", sessions: 94 }],
+    medianTokensPerSession: 9400000,
+    compactions: null,
     projects: [
       {
         name: "maximize-app-mono",

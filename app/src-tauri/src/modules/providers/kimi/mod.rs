@@ -71,6 +71,7 @@ impl Provider for KimiProvider {
                 summary: AccountUsageSummary::default(),
                 daily_usage_buckets: Vec::new(),
                 models: Vec::new(),
+                model_daily_usage: Vec::new(),
                 local: Some(local),
                 window_days: None,
             })

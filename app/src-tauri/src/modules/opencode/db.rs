@@ -20,13 +20,15 @@
 //!   against the bundled price list, so every figure carries the same
 //!   provenance as every other estimate in the app.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use rusqlite::{params_from_iter, Connection, OpenFlags};
 
 use crate::shared::domain::{
-    bundled_price_catalog, price_local_model_with_catalog, project_name, LocalDayUsage,
-    LocalModelUsage, LocalProjectUsage, LocalUsage, NO_PROJECT,
+    bundled_price_catalog, median_u64, price_local_model_with_catalog, project_name, LocalDayUsage,
+    LocalModelDayUsage, LocalModelUsage, LocalProjectUsage, LocalSessionDayUsage, LocalUsage,
+    NO_PROJECT,
 };
 
 /// The table this module prefers. Discovered by shape, so a rename degrades
@@ -205,6 +207,47 @@ fn summarize(rows: Vec<SessionRow>) -> LocalUsage {
             .then_with(|| left.id.cmp(&right.id))
     });
 
+    let mut model_days_by_group: BTreeMap<(String, String, String), LocalModelUsage> =
+        BTreeMap::new();
+    for row in &rows {
+        let day = day_of_millis(row.created_ms);
+        let model = model_days_by_group
+            .entry((day, row.provider_id.clone(), row.model_id.clone()))
+            .or_insert_with(|| LocalModelUsage {
+                id: row.model_id.clone(),
+                display_name: row.model_id.clone(),
+                input: 0,
+                cached_input: 0,
+                cache_write: 0,
+                output: 0,
+                reasoning: 0,
+                responses: 0,
+                cost_usd: None,
+            });
+        model.input += row.input;
+        model.cached_input += row.cache_read.min(row.input);
+        model.cache_write += row.cache_write;
+        model.output += row.output;
+        model.reasoning += row.reasoning.min(row.output);
+        model.responses += 1;
+    }
+    let model_days = model_days_by_group
+        .into_iter()
+        .map(|((day, provider, id), mut model)| {
+            let priced = catalog.as_ref().is_some_and(|catalog| {
+                price_local_model_with_catalog(&mut model, &provider, catalog)
+            });
+            let tokens = model.total_tokens();
+            LocalModelDayUsage {
+                day,
+                id,
+                display_name: model.display_name,
+                tokens,
+                cost_usd: priced.then_some(model.cost_usd).flatten(),
+            }
+        })
+        .collect();
+
     let mut days: Vec<(String, u64)> = Vec::new();
     for row in &rows {
         let day = day_of_millis(row.created_ms);
@@ -215,17 +258,34 @@ fn summarize(rows: Vec<SessionRow>) -> LocalUsage {
     }
     days.sort();
 
+    let mut sessions_per_day = BTreeMap::new();
+    for row in &rows {
+        *sessions_per_day
+            .entry(day_of_millis(row.created_ms))
+            .or_insert(0) += 1;
+    }
+    let session_days = sessions_per_day
+        .into_iter()
+        .map(|(day, sessions)| LocalSessionDayUsage { day, sessions })
+        .collect();
+    let mut session_tokens: Vec<u64> = rows.iter().map(SessionRow::total_tokens).collect();
+    let median_tokens_per_session = median_u64(&mut session_tokens);
+
     let first_day = days.first().map(|(day, _)| day.clone());
     let last_day = days.last().map(|(day, _)| day.clone());
 
     let projects = rank_projects(&rows, catalog.as_ref());
     LocalUsage {
         models,
+        model_days,
         projects,
         days: days
             .into_iter()
             .map(|(day, tokens)| LocalDayUsage { day, tokens })
             .collect(),
+        session_days,
+        median_tokens_per_session,
+        compactions: None,
         cost_usd,
         unpriced_tokens,
         sessions: rows.len() as u64,
@@ -869,6 +929,42 @@ mod tests {
         );
         assert_eq!(usage.first_day.as_deref(), Some("1970-01-01"));
         assert_eq!(usage.last_day.as_deref(), Some("2026-10-11"));
+    }
+
+    #[test]
+    fn session_metrics_include_daily_counts_median_and_exact_model_costs() {
+        let connection = sessions_db(SESSIONS_TABLE);
+        for (created_ms, input) in [
+            (1_767_225_600_000_i64, 100),
+            (1_767_225_600_001, 300),
+            (1_767_312_000_000, 200),
+        ] {
+            insert(
+                &connection,
+                Session {
+                    provider: "zai-coding-plan",
+                    model: "glm-5.3",
+                    input,
+                    output: 10,
+                    reasoning: 2,
+                    cache_read: 0,
+                    created_ms,
+                    directory: "/Users/dev/code/app",
+                },
+            );
+        }
+
+        let usage = read_from(&connection, &["zai-coding-plan"]).expect("usage");
+
+        assert_eq!(usage.median_tokens_per_session, Some(210));
+        assert_eq!(usage.compactions, None);
+        assert_eq!(usage.session_days.len(), 2);
+        assert_eq!(usage.session_days[0].sessions, 2);
+        assert_eq!(usage.session_days[1].sessions, 1);
+        assert_eq!(usage.model_days.len(), 2);
+        assert_eq!(usage.model_days[0].day, "2026-01-01");
+        assert_eq!(usage.model_days[0].tokens, 420);
+        assert!(usage.model_days[0].cost_usd.is_some());
     }
 
     #[test]

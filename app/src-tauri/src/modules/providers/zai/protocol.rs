@@ -15,8 +15,8 @@
 use serde::Deserialize;
 
 use crate::shared::domain::{
-    AccountUsage, AccountUsageSummary, DailyUsageBucket, Freshness, KickoffEffortInfo, ModelUsage,
-    PlanKind, ProviderKind, UsagePermission, UsageSnapshot, UsageWindow,
+    AccountUsage, AccountUsageSummary, DailyUsageBucket, Freshness, KickoffEffortInfo,
+    ModelDayUsage, ModelUsage, PlanKind, ProviderKind, UsagePermission, UsageSnapshot, UsageWindow,
 };
 use crate::shared::error::{Error, ErrorKind};
 
@@ -191,6 +191,16 @@ struct WireModelUsageData {
     #[serde(default)]
     #[serde(rename = "totalUsage")]
     total_usage: Option<WireTotalUsage>,
+    #[serde(default, rename = "modelDataList")]
+    model_data_list: Vec<WireModelDailyUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireModelDailyUsage {
+    #[serde(rename = "modelName")]
+    model_name: String,
+    #[serde(default, rename = "tokensUsage")]
+    tokens_usage: Vec<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -378,6 +388,26 @@ pub fn decode_model_usage(payload: &str, now_ms: i64) -> Result<AccountUsage, Er
         .into_iter()
         .map(|(_, model)| model)
         .collect::<Vec<_>>();
+    let mut model_daily_usage: Vec<ModelDayUsage> = data
+        .model_data_list
+        .iter()
+        .flat_map(|model| {
+            data.x_time
+                .iter()
+                .zip(&model.tokens_usage)
+                .map(|(stamp, tokens)| ModelDayUsage {
+                    day: stamp.date(),
+                    model_id: model.model_name.to_lowercase(),
+                    display_name: model.model_name.clone(),
+                    tokens: *tokens,
+                })
+        })
+        .collect();
+    model_daily_usage.sort_by(|left, right| {
+        left.day
+            .cmp(&right.day)
+            .then_with(|| left.model_id.cmp(&right.model_id))
+    });
 
     Ok(AccountUsage {
         fetched_at: now_ms,
@@ -399,6 +429,7 @@ pub fn decode_model_usage(payload: &str, now_ms: i64) -> Result<AccountUsage, Er
         },
         daily_usage_buckets: buckets,
         models,
+        model_daily_usage,
         local: None,
         window_days: Some(ANALYTICS_WINDOW_DAYS as u64),
     })
@@ -762,6 +793,11 @@ mod tests {
         assert_eq!(usage.daily_usage_buckets[0].tokens, Some(700));
         assert_eq!(usage.daily_usage_buckets[1].start_date, "2026-01-02");
         assert_eq!(usage.daily_usage_buckets[1].tokens, Some(500));
+        assert_eq!(usage.model_daily_usage.len(), 2);
+        assert_eq!(usage.model_daily_usage[0].model_id, "glm-4.6");
+        assert_eq!(usage.model_daily_usage[0].tokens, 600);
+        assert_eq!(usage.model_daily_usage[1].day, "2026-01-02");
+        assert_eq!(usage.model_daily_usage[1].tokens, 200);
     }
 
     #[test]

@@ -29,7 +29,16 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Bar, BarChart, CartesianGrid, XAxis } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { ArrowClockwise, Fire, Lightning } from "@phosphor-icons/react";
 
 import {
@@ -44,6 +53,8 @@ import { FreshnessPill } from "~/components/usage/provider-status-card";
 import { Button } from "~/components/ui/button";
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -53,6 +64,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { ViewHeader } from "~/components/views/view-header";
 import * as Ipc from "~/lib/ipc";
 import {
+  DEFAULT_INPUT_SHARE,
   estimateModelCosts,
   formatUsd,
   planPriceUsd,
@@ -62,6 +74,14 @@ import {
   type ModelCostRow,
   type PriceList,
 } from "~/lib/pricing";
+import {
+  calendarDateRange,
+  costThresholdDay,
+  cumulativeCostSeries,
+  providerDailyCostValues,
+  rollingSevenDayAverage,
+  weeklyModelTimeline,
+} from "~/lib/stats-analytics";
 import {
   effectiveFreshness,
   formatCountdown,
@@ -610,6 +630,204 @@ export function reportsOwnAnalytics(usage: Ipc.AccountUsage): boolean {
   );
 }
 
+function LocalSessionStats({ usage }: { readonly usage: Ipc.LocalUsage }) {
+  const sessionDays = usage.sessionDays ?? [];
+  const sessionCounts = new Map(
+    sessionDays.map((item) => [item.day, item.sessions]),
+  );
+  const sessionChartData = calendarDateRange(
+    sessionDays.map((item) => item.day),
+  ).map((day) => ({
+    day,
+    sessions: sessionCounts.get(day) ?? null,
+  }));
+  const medianTokens = usage.medianTokensPerSession ?? null;
+  const compactions = usage.compactions ?? null;
+
+  if (
+    sessionDays.length === 0 &&
+    medianTokens === null &&
+    compactions === null
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-3" data-testid="stats-local-session-stats">
+      <h4 className="text-xs font-medium text-foreground">Session stats</h4>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <MetricCard
+          label="Median tokens per session"
+          tokenValue={medianTokens}
+          testId="stats-local-median-session"
+        />
+        <MetricCard
+          label="Compactions in readable logs"
+          value={
+            compactions === null ? "Not reported" : formatCount(compactions)
+          }
+          testId="stats-local-compactions"
+          detail={
+            usage.filesUnreadable + usage.filesCompressed > 0
+              ? "Some local logs could not be counted."
+              : "From the source's readable session records."
+          }
+        />
+      </div>
+      {sessionDays.length > 0 ? (
+        <div
+          className="flex flex-col gap-2"
+          data-testid="stats-local-session-chart"
+        >
+          <ChartContainer
+            config={sessionChartConfig}
+            className="aspect-auto h-40 w-full"
+            aria-label="Locally recorded sessions per day"
+          >
+            <BarChart
+              accessibilityLayer
+              data={sessionChartData}
+              margin={{ left: 4, right: 4 }}
+            >
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="day"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                minTickGap={24}
+                tickFormatter={formatDateTick}
+              />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    labelFormatter={(value) => formatDate(value)}
+                    formatter={(value) =>
+                      value === null || value === undefined
+                        ? "No local record"
+                        : formatCount(Number(value))
+                    }
+                  />
+                }
+              />
+              <Bar
+                dataKey="sessions"
+                fill="var(--color-sessions)"
+                radius={4}
+                maxBarSize={28}
+              />
+            </BarChart>
+          </ChartContainer>
+          <p className="text-xs text-muted-foreground">
+            Session records per day; dates without a local record remain blank,
+            not zero.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ModelMigrationTimeline({
+  modelDays,
+}: {
+  readonly modelDays: readonly Ipc.LocalModelDayUsage[];
+}) {
+  const timeline = useMemo(
+    () =>
+      weeklyModelTimeline(
+        modelDays.map((model) => ({
+          day: model.day,
+          modelId: model.id,
+          displayName: model.displayName,
+          tokens: model.tokens,
+        })),
+      ),
+    [modelDays],
+  );
+  if (timeline.rows.length === 0 || timeline.series.length === 0) return null;
+
+  const config = timeline.series.reduce<ChartConfig>(
+    (result, series, index) => {
+      result[series.key] = {
+        label: series.displayName,
+        color: `var(--chart-${Math.min(index + 1, 5)})`,
+      };
+      return result;
+    },
+    {},
+  );
+
+  return (
+    <div
+      className="flex flex-col gap-2"
+      data-testid="stats-model-timeline"
+    >
+      <div className="flex flex-col gap-1">
+        <h4 className="text-xs font-medium text-foreground">
+          Model mix over time
+        </h4>
+        <p className="text-xs text-muted-foreground">
+          Share of local tokens by UTC week, starting Monday; weeks without a
+          local record are omitted.
+        </p>
+      </div>
+      <ChartContainer
+        config={config}
+        className="aspect-auto h-48 w-full"
+        data-testid="stats-model-timeline-chart"
+        aria-label={`Weekly model share of local tokens: ${timeline.series
+          .map((series) => series.displayName)
+          .join(", ")}`}
+      >
+        <BarChart
+          accessibilityLayer
+          data={timeline.rows}
+          margin={{ left: 4, right: 4 }}
+        >
+          <CartesianGrid vertical={false} />
+          <XAxis
+            dataKey="weekStart"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            minTickGap={24}
+            tickFormatter={formatDateTick}
+          />
+          <YAxis
+            domain={[0, 100]}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={(value: number) => `${value}%`}
+          />
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                labelFormatter={(value) => formatDate(value)}
+                formatter={(value) => `${Math.round(Number(value))}%`}
+              />
+            }
+          />
+          {timeline.series.map((series) => (
+            <Bar
+              key={series.key}
+              dataKey={series.key}
+              stackId="weekly-model-share"
+              fill={`var(--color-${series.key})`}
+              maxBarSize={32}
+              isAnimationActive={false}
+            />
+          ))}
+          <ChartLegend
+            content={<ChartLegendContent />}
+            wrapperStyle={{ paddingTop: 8 }}
+          />
+        </BarChart>
+      </ChartContainer>
+    </div>
+  );
+}
+
 /** The Codex tab: token activity, with the window reading below. */
 /**
  * The local log reading: what a harness's own session files say, priced
@@ -711,6 +929,8 @@ export function LocalLogPanel({
         projects={usage.projects}
         totalTokens={totalTokens}
       />
+      <LocalSessionStats usage={usage} />
+      <ModelMigrationTimeline modelDays={usage.modelDays ?? []} />
       <ActivityHeatmap
         days={usage.days}
         source={`The last year, shaded by tokens. ${coverageSentence(usage.firstDay, usage.lastDay, `${usage.sessions} local logs`)}. A gap is a day with no record, not a day with none.`}
@@ -1316,6 +1536,22 @@ function PlanAnalytics({
   const refresh = useAtomRefresh(accountUsageForAtom(kind));
   const priceList = useAtomValue(priceListAtom);
   const readings = useAtomValue(usageForAtom(kind));
+  const catalog = AsyncResult.match(priceList, {
+    onInitial: () => null,
+    onSuccess: (result) => result.value,
+    onFailure: () => null,
+  });
+  const pricingState = AsyncResult.match(priceList, {
+    onInitial: () => "loading" as const,
+    onSuccess: () => "ready" as const,
+    onFailure: () => "failed" as const,
+  });
+  const plan = AsyncResult.match(readings, {
+    onInitial: () => null,
+    onSuccess: (result) =>
+      result.value.find((item) => item.provider === kind)?.plan ?? null,
+    onFailure: () => null,
+  });
 
   return (
     <section
@@ -1346,6 +1582,14 @@ function PlanAnalytics({
                 read from this machine&apos;s OpenCode session logs.
               </p>
             )}
+            <CostTrajectory
+              usage={result.value}
+              kind={kind}
+              label={label}
+              plan={plan}
+              pricingState={pricingState}
+              priceList={catalog}
+            />
             {result.value.local !== null && result.value.models.length === 0 ? (
               <LocalLogPanel usage={result.value.local} source="OpenCode" />
             ) : result.value.local === null &&
@@ -1550,8 +1794,13 @@ function ReadingBody({
   );
 }
 
+const sessionChartConfig = {
+  sessions: { label: "Sessions", color: "var(--chart-1)" },
+} satisfies ChartConfig;
+
 const activityChartConfig = {
   tokens: { label: "Tokens", color: "var(--chart-1)" },
+  rollingAverage: { label: "7-day average", color: "var(--chart-2)" },
 } satisfies ChartConfig;
 
 function AnalyticsContent({
@@ -1564,9 +1813,18 @@ function AnalyticsContent({
   const buckets = [...usage.dailyUsageBuckets].sort((left, right) =>
     left.startDate.localeCompare(right.startDate),
   );
-  const chartData = buckets.map((bucket) => ({
-    date: bucket.startDate,
+  const tokensByDay = new Map(
+    buckets.map((bucket) => [bucket.startDate, bucket.tokens]),
+  );
+  const chartData = rollingSevenDayAverage(
+    calendarDateRange(buckets.map((bucket) => bucket.startDate)).map((day) => ({
+      day,
+      tokens: tokensByDay.get(day) ?? null,
+    })),
+  ).map((bucket) => ({
+    date: bucket.day,
     tokens: bucket.tokens,
+    rollingAverage: bucket.rollingAverage,
   }));
   const knownBuckets = buckets.filter((bucket) => bucket.tokens !== null);
   const range = buckets.length
@@ -1645,7 +1903,7 @@ function AnalyticsContent({
           data-testid="stats-daily-chart"
           aria-label={`Daily Codex token activity, ${range}`}
         >
-          <BarChart
+          <ComposedChart
             accessibilityLayer
             data={chartData}
             margin={{ left: 4, right: 4 }}
@@ -1663,7 +1921,11 @@ function AnalyticsContent({
               content={
                 <ChartTooltipContent
                   labelFormatter={(value) => formatDate(value)}
-                  formatter={tokenTooltipFormatter}
+                  formatter={(value, name) =>
+                    name === "rollingAverage"
+                      ? rollingAverageTooltipFormatter(value)
+                      : tokenTooltipFormatter(value)
+                  }
                 />
               }
             />
@@ -1673,9 +1935,24 @@ function AnalyticsContent({
               radius={4}
               maxBarSize={28}
             />
-          </BarChart>
+            <Line
+              type="monotone"
+              dataKey="rollingAverage"
+              stroke="var(--color-rollingAverage)"
+              strokeWidth={2}
+              dot={false}
+              activeDot={false}
+              connectNulls={false}
+            />
+          </ComposedChart>
         </ChartContainer>
       )}
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="stats-rolling-average-note"
+      >
+        Line: 7-day average, shown after seven consecutive reported dates.
+      </p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
         <span data-testid="stats-reported-total">
           {knownBuckets.length === buckets.length
@@ -1689,6 +1966,192 @@ function AnalyticsContent({
           </span>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+const costTrajectoryConfig = {
+  cumulativeUsd: { label: "Cumulative estimate", color: "var(--chart-1)" },
+  planPrice: { label: "Monthly plan price", color: "var(--chart-2)" },
+  breakEven: { label: "Break-even", color: "var(--chart-3)" },
+} satisfies ChartConfig;
+
+function CostTrajectory({
+  usage,
+  kind,
+  label,
+  plan,
+  pricingState,
+  priceList,
+}: {
+  readonly usage: Ipc.AccountUsage;
+  readonly kind: Ipc.ProviderKind;
+  readonly label: string;
+  readonly plan: Ipc.PlanKind | null;
+  readonly pricingState: "loading" | "ready" | "failed";
+  readonly priceList: PriceList | null;
+}) {
+  const modelDays = usage.modelDailyUsage ?? [];
+  const dailyCosts = useMemo(
+    () =>
+      priceList === null
+        ? []
+        : providerDailyCostValues(
+            modelDays,
+            usage.dailyUsageBuckets.map((bucket) => ({
+              day: bucket.startDate,
+              tokens: bucket.tokens,
+            })),
+            priceList,
+            PRICING_PROVIDER_IDS[kind],
+          ),
+    [kind, modelDays, priceList, usage.dailyUsageBuckets],
+  );
+  const series = useMemo(() => cumulativeCostSeries(dailyCosts), [dailyCosts]);
+  const monthlyPlanPrice =
+    priceList === null
+      ? null
+      : planPriceUsd(priceList, PRICING_PROVIDER_IDS[kind], plan);
+  const breakEvenDay = costThresholdDay(series, monthlyPlanPrice);
+  const knownValues = series.flatMap((day) =>
+    day.cumulativeUsd === null ? [] : [day.cumulativeUsd],
+  );
+  const incompleteFrom =
+    series.find((day) => day.incompleteFrom !== null)?.incompleteFrom ?? null;
+  const yMaximum = Math.max(monthlyPlanPrice ?? 0, ...knownValues, 0) * 1.1 || 1;
+  const breakEvenNote =
+    breakEvenDay !== null
+      ? ` Crossed the monthly plan price on ${formatDateTick(breakEvenDay)}.`
+      : monthlyPlanPrice === 0
+        ? " The listed plan price is $0/month, so break-even is not applicable."
+        : incompleteFrom !== null
+          ? ` Break-even is unknown because pricing coverage is incomplete from ${formatDateTick(incompleteFrom)}.`
+          : " The estimate did not reach the monthly plan price in this reported window.";
+
+  if (modelDays.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="stats-cost-trajectory">
+      <div className="flex flex-col gap-1">
+        <h4 className="text-xs font-medium text-foreground">
+          Estimated cost trajectory
+        </h4>
+        <p className="text-xs text-muted-foreground">
+          {label}&apos;s daily model totals priced at API rates; compared with the
+          flat monthly plan price.
+        </p>
+      </div>
+      {priceList === null ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="stats-cost-trajectory-unavailable"
+        >
+          {pricingState === "loading"
+            ? "Waiting for the reference price list."
+            : "The reference price list is unavailable; no cost line is shown."}
+        </p>
+      ) : monthlyPlanPrice === null ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="stats-cost-trajectory-unavailable"
+        >
+          This plan has no monthly price reference in the bundled price list.
+        </p>
+      ) : knownValues.length === 0 ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="stats-cost-trajectory-unavailable"
+        >
+          Daily model totals do not fully match the reported token buckets, or
+          a model has no reference price. A cumulative estimate is not available.
+        </p>
+      ) : (
+        <>
+          <ChartContainer
+            config={costTrajectoryConfig}
+            className="aspect-auto h-56 w-full"
+            data-testid="stats-cost-trajectory-chart"
+            aria-label={`${label} cumulative API-equivalent cost and monthly plan price`}
+          >
+            <ComposedChart
+              accessibilityLayer
+              data={series}
+              margin={{ left: 8, right: 12, top: 8 }}
+            >
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="day"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                minTickGap={24}
+                tickFormatter={formatDateTick}
+              />
+              <YAxis
+                domain={[0, yMaximum]}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(value: number) => formatUsd(value)}
+              />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    labelFormatter={(value) => formatDate(value)}
+                    formatter={(value) => formatUsd(Number(value))}
+                  />
+                }
+              />
+              <ReferenceLine
+                y={monthlyPlanPrice}
+                stroke="var(--color-planPrice)"
+                strokeDasharray="4 4"
+                label={{
+                  value: "Monthly plan price",
+                  position: "insideTopRight",
+                  fill: "var(--muted-foreground)",
+                }}
+              />
+              {breakEvenDay !== null ? (
+                <ReferenceLine
+                  x={breakEvenDay}
+                  stroke="var(--color-breakEven)"
+                  strokeDasharray="3 3"
+                  label={{
+                    value: "Break-even",
+                    position: "insideTopLeft",
+                    fill: "var(--muted-foreground)",
+                  }}
+                />
+              ) : null}
+              <Line
+                type="monotone"
+                dataKey="cumulativeUsd"
+                stroke="var(--color-cumulativeUsd)"
+                strokeWidth={2}
+                dot={false}
+                connectNulls={false}
+              />
+            </ComposedChart>
+          </ChartContainer>
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="stats-cost-trajectory-summary"
+          >
+            {Math.round(DEFAULT_INPUT_SHARE * 100)}% input / {Math.round((1 - DEFAULT_INPUT_SHARE) * 100)}% output estimate · price list updated {priceList.meta.updated} ·
+            not a bill.
+            {breakEvenNote}
+          </p>
+          {incompleteFrom !== null ? (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="stats-cost-trajectory-gap"
+            >
+              Cumulative totals stop at {formatDateTick(incompleteFrom)} because
+              daily cost coverage is incomplete.
+            </p>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -2115,6 +2578,20 @@ export function tokenTooltipFormatter(value: unknown): ReactElement {
         <span className="ml-2 text-muted-foreground">
           ({formatCompactCount(tokens)})
         </span>
+      </span>
+    </div>
+  );
+}
+
+function rollingAverageTooltipFormatter(value: unknown): ReactElement {
+  const tokens = Math.round(Number(value));
+
+  return (
+    <div className="flex w-full flex-wrap items-center gap-2">
+      <div className="h-0.5 w-3 shrink-0 bg-(--color-rollingAverage)" />
+      <span className="text-sm text-muted-foreground">7-day average</span>
+      <span className="font-mono text-sm font-medium tabular text-foreground">
+        {formatCount(tokens)} ({formatCompactCount(tokens)})
       </span>
     </div>
   );
