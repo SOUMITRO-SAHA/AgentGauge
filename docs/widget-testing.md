@@ -77,12 +77,14 @@ bridge that will not load, a truncated reply, or a query chronod never answered.
 2. Small shows the brand mark and tight rows; medium shows provider plus
    side-by-side cards; large shows roomy stacked rows.
 3. Click both arrows; confirm the provider and its 5-hour and weekly quotas
-   change together.
-4. Confirm unavailable quotas show no fabricated values.
-5. Rebuild or refresh and confirm the widget updates when WidgetKit reloads it.
-6. Confirm the sidebar's setup action appears within ~10s of removing the widget
-   again, without pressing Refresh.
-7. With only the Dev widget placed, open the packaged Release app: it must report
-   the Dev widget as on this Mac and keep the setup action hidden.
+    change together.
+4. Click Refresh; confirm WidgetKit reloads the latest published snapshot. This
+   does not request new provider usage; that read happens in the host app.
+5. Confirm unavailable quotas show no fabricated values.
+6. Rebuild or refresh and confirm the widget updates when WidgetKit reloads it.
+7. Confirm the sidebar's setup action appears within ~10s of removing the widget
+    again, without pressing Refresh.
+8. With only the Dev widget placed, open the packaged Release app: it must report
+    the Dev widget as on this Mac and keep the setup action hidden.
 
 Gallery placement is manual. Timeline reloads are not immediate guarantees.

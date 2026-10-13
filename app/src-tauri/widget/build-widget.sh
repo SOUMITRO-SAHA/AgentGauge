@@ -69,6 +69,7 @@ build_appex() {
   bash "$WIDGET_DIR/Tests/WidgetBridgeTests.sh"
   bash "$WIDGET_DIR/Tests/PlacementReceiptTests.sh"
   bash "$WIDGET_DIR/Tests/WidgetSigningOptionsTests.sh"
+  bash "$WIDGET_DIR/Tests/WidgetHeaderTests.sh"
 
   local -a architecture_args
   if [ "$WIDGET_ARCH" = "universal" ]; then

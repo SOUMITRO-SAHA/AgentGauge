@@ -101,7 +101,8 @@ macOS therefore offers only `systemSmall`, `systemMedium`, `systemLarge`,
 `systemExtraLarge`, and `systemExtraLargePortrait`. The widget uses small, medium
 and large; every one shows the selected provider's 5-hour and weekly quota.
 The header's accessible left/right buttons cycle through providers with a
-current or cached quota reading.
+current or cached quota reading. Its refresh button asks WidgetKit to reload the
+timeline from the latest published snapshot; it does not make a provider request.
 
 A menu bar _Control_ (`ControlWidgetButton`, macOS 26+) is the way to sit in the
 menu bar, but a Control is an action surface rather than a passive readout, so it
@@ -273,6 +274,7 @@ If it is missing, check `codesign -dvvv --entitlements -` on the embedded
 | `Sources/SnapshotStore.swift`         | Reads the shared file.                                                               |
 | `Sources/UsageTimelineProvider.swift` | Reads the selected provider and refreshes at the soonest quota reset.                |
 | `Sources/UsageWidget.swift`           | Per-family layouts (small: brand-only compact, medium: side-by-side cards, large: roomy rows) and the Xcode preview matrix. |
+| `Sources/RefreshWidgetIntent.swift`   | Requests a timeline reload from the latest published snapshot.                         |
 | `Sources/ProviderSwitchIntent.swift`  | Cycles providers without opening the host app.                                       |
 | `Sources/WidgetBridge.swift`          | In-process WidgetKit status query and timeline reload, built as `libWidgetBridge.dylib`. |
 | `build-widget.sh`                     | Build, embed, sign, and run the widget build-time checks.                            |

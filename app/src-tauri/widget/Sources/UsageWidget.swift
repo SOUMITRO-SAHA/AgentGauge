@@ -62,8 +62,15 @@ struct UsageWidgetView: View {
 
     var body: some View {
         content
-            .containerBackground(for: .widget) {
-                Color(nsColor: .windowBackgroundColor)
+            .containerBackground(.regularMaterial, for: .widget)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(.white.opacity(0.12))
+                    .frame(height: 1)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 1)
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
             }
             .widgetURL(URL(string: "agentgauge://usage"))
     }
@@ -85,9 +92,9 @@ struct UsageWidgetView: View {
     private var smallLayout: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 4) {
-                WidgetBrandMark(size: 12)
+                WidgetBrandMark(size: 16)
                 Spacer(minLength: 4)
-                arrows(compact: true)
+                controls(compact: true)
             }
             compactRow("5-HOUR", quota: entry.provider?.fiveHour)
             compactRow("WEEKLY", quota: entry.provider?.weekly)
@@ -98,7 +105,7 @@ struct UsageWidgetView: View {
 
     private var mediumLayout: some View {
         VStack(alignment: .leading, spacing: 9) {
-            header(showsProvider: true, markSize: 13)
+            header(showsProvider: true, markSize: 17)
             HStack(alignment: .top, spacing: 8) {
                 cardRow("5-HOUR", quota: entry.provider?.fiveHour)
                 cardRow("WEEKLY", quota: entry.provider?.weekly)
@@ -110,20 +117,20 @@ struct UsageWidgetView: View {
 
     private var largeLayout: some View {
         VStack(alignment: .leading, spacing: 11) {
-            header(showsProvider: true, markSize: 14)
+            header(showsProvider: true, markSize: 18)
             detailedRow("5-hour", quota: entry.provider?.fiveHour)
             detailedRow("Weekly", quota: entry.provider?.weekly)
         }
     }
 
     private func header(showsProvider: Bool, markSize: CGFloat) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 10) {
             WidgetBrandMark(size: markSize)
             Spacer(minLength: 4)
             if showsProvider {
                 providerCaption
             }
-            arrows(compact: false)
+            controls(compact: false)
         }
     }
 
@@ -146,10 +153,11 @@ struct UsageWidgetView: View {
         }
     }
 
-    private func arrows(compact: Bool) -> some View {
-        HStack(spacing: 3) {
+    private func controls(compact: Bool) -> some View {
+        HStack(spacing: 6) {
             switchButton("chevron.left", offset: -1, label: "Previous provider", compact: compact)
             switchButton("chevron.right", offset: 1, label: "Next provider", compact: compact)
+            refreshButton(compact: compact)
         }
     }
 
@@ -164,12 +172,31 @@ struct UsageWidgetView: View {
                 .font(.system(size: compact ? 8 : 9, weight: .bold))
                 .foregroundStyle(.secondary)
                 .frame(width: compact ? 20 : 23, height: compact ? 20 : 23)
-                .background(Color.primary.opacity(0.06), in: Circle())
+                .background(.thinMaterial, in: Circle())
+                .overlay {
+                    Circle().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                }
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .disabled(!canSwitchProvider)
         .accessibilityLabel(label)
+    }
+
+    private func refreshButton(compact: Bool) -> some View {
+        Button(intent: RefreshWidgetIntent()) {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: compact ? 8 : 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: compact ? 20 : 23, height: compact ? 20 : 23)
+                .background(.thinMaterial, in: Circle())
+                .overlay {
+                    Circle().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Refresh widget")
     }
 
     private func compactRow(_ title: String, quota: Snapshot.Provider.Quota?) -> some View {
@@ -183,10 +210,7 @@ struct UsageWidgetView: View {
             resetText(quota, size: 8)
         }
         .padding(8)
-        .background(
-            Color.primary.opacity(0.035),
-            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-        )
+        .background(cardSurface(cornerRadius: 9))
         .accessibilityElement(children: .combine)
     }
 
@@ -201,10 +225,7 @@ struct UsageWidgetView: View {
             resetText(quota, size: 9)
         }
         .padding(9)
-        .background(
-            Color.primary.opacity(0.035),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-        )
+        .background(cardSurface(cornerRadius: 10))
         .accessibilityElement(children: .combine)
     }
 
@@ -234,11 +255,17 @@ struct UsageWidgetView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
-        .background(
-            Color.primary.opacity(0.035),
-            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
-        )
+        .background(cardSurface(cornerRadius: 11))
         .accessibilityElement(children: .combine)
+    }
+
+    private func cardSurface(cornerRadius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            }
     }
 
     private func rowTitle(_ title: String, size: CGFloat, tracking: CGFloat) -> some View {
