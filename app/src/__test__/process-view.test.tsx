@@ -156,7 +156,11 @@ it("mirrors the success shape while loading: one skeleton panel per group plus t
   );
 
   const panels = await screen.findAllByTestId("process-loading-panel");
-  expect(panels).toHaveLength(2);
+  expect(panels).toHaveLength(1);
+  const tabs = await screen.findByTestId("process-loading-tabs");
+  expect(
+    tabs.querySelectorAll('[data-testid="process-loading-tab"]'),
+  ).toHaveLength(2);
   expect(await screen.findByTestId("process-loading-note")).toBeTruthy();
   expect(screen.getByTestId("process-refreshing")).toBeTruthy();
 
@@ -203,15 +207,51 @@ it("keeps the refresh-status slot mounted when a re-read completes", async () =>
   expect(settled.className).toContain("invisible");
 });
 
-it("renders one panel per group, in the order the report carries", async () => {
+/**
+ * Activates a group's tab, the way a user reaches that group's panel. Radix
+ * triggers answer `mousedown`, not a bare `click` — the same pair the Stats
+ * tab tests use.
+ */
+async function switchTo(groupId: string): Promise<void> {
+  const tab = screen.getByTestId(`process-tab-${groupId}`);
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+  await screen.findByTestId(`process-panel-${groupId}`);
+}
+
+it("renders one tab per group and shows the active group's panel", async () => {
   installDispatch([group("codex"), group("opencode")]);
   await renderView();
 
-  const panels = await screen.findAllByTestId(/^process-panel-/);
-  expect(panels.map((panel) => panel.getAttribute("data-testid"))).toEqual([
-    "process-panel-codex",
-    "process-panel-opencode",
+  const tabs = screen
+    .getAllByTestId(/^process-tab-/)
+    .map((tab) => tab.getAttribute("data-testid"));
+  expect(tabs).toEqual(["process-tab-codex", "process-tab-opencode"]);
+
+  expect(screen.getByTestId("process-panel-codex")).toBeTruthy();
+  expect(screen.queryByTestId("process-panel-opencode")).toBeNull();
+
+  await switchTo("opencode");
+  expect(screen.getByTestId("process-panel-opencode")).toBeTruthy();
+  expect(screen.queryByTestId("process-panel-codex")).toBeNull();
+});
+
+it("carries a glance line on each tab: process count and memory", async () => {
+  installDispatch([
+    group("codex", {
+      processes: [summary()],
+      totalMemoryBytes: 432_000_000,
+    }),
+    group("opencode"),
   ]);
+  await renderView();
+
+  expect(screen.getByTestId("process-tab-codex")?.textContent).toContain(
+    "1 process · 432 MB",
+  );
+  expect(screen.getByTestId("process-tab-opencode")?.textContent).toContain(
+    "No processes",
+  );
 });
 
 it("shows each process with its memory and uptime beside the group totals", async () => {
@@ -373,6 +413,7 @@ it("renders listening endpoints with their interfaces, wildcard binds called out
     }),
   ]);
   await renderView();
+  await switchTo("opencode");
 
   expect(screen.getByTestId("process-ports-5309")?.textContent).toBe(
     "127.0.0.1:49374",
@@ -410,6 +451,7 @@ it("keeps every process fact in a compact shadcn table row", async () => {
     }),
   ]);
   await renderView();
+  await switchTo("opencode");
 
   const row = screen.getByTestId(`process-row-${pid}`);
   const table = row.closest("table");
@@ -470,6 +512,7 @@ it("renders the tool's recorded background service when its pid is live", async 
     }),
   ]);
   await renderView();
+  await switchTo("opencode");
 
   expect(
     screen.getByTestId("process-service-opencode")?.textContent,
@@ -588,6 +631,7 @@ it("renders an absent footprint as its reason, never as zero bytes", async () =>
     }),
   ]);
   await renderView();
+  await switchTo("opencode");
 
   const absent = screen.getByTestId("process-storage-absent-opencode");
   expect(absent.textContent).toContain("has not created");
@@ -604,6 +648,7 @@ it("says explicitly when a group has nothing running", async () => {
     }),
   ]);
   await renderView();
+  await switchTo("opencode");
 
   expect(screen.getByTestId("process-empty-opencode")?.textContent).toContain(
     "No OpenCode processes",
@@ -726,7 +771,7 @@ it("shows the read's own reason and a re-read when the read fails", async () => 
   expect(await screen.findByTestId("process-panel-codex")).toBeTruthy();
 });
 
-it("offers no control beyond refresh, because the capability has no write", async () => {
+it("offers no control beyond view tabs and refresh, because the capability has no write", async () => {
   installDispatch([group("codex"), group("opencode")]);
   await renderView();
 
@@ -736,6 +781,8 @@ it("offers no control beyond refresh, because the capability has no write", asyn
   );
   expect(testids.length).toBeGreaterThan(0);
   for (const testid of testids) {
-    expect(testid.startsWith("refresh-processes-")).toBe(true);
+    expect(
+      testid.startsWith("refresh-processes-") || testid.startsWith("process-tab-"),
+    ).toBe(true);
   }
 });

@@ -1,32 +1,44 @@
 /**
  * Processes: what the agent toolchain is doing to this machine, read-only.
  *
- * One panel per group — each tracked CLI the backend reports — straight from
- * the report, so adding a future CLI is a backend addition with no renderer
- * change. Every value is one snapshot: memory and CPU are point-in-time from
- * the read, uptime ticks against the shared clock, and storage is measured,
- * or its absence carries a reason.
+ * One tab per group — each tracked CLI the backend reports, in the
+ * Automation screen's tab shape — straight from the report, so adding a
+ * future CLI is a backend addition with no renderer change. Every value is
+ * one snapshot: memory and CPU are point-in-time from the read, uptime ticks
+ * against the shared clock, and storage is measured, or its absence carries
+ * a reason.
  *
  * Layout stability is part of the flow: the loading skeleton mirrors the
- * success shape (one skeleton panel per expected group plus the meta/note
- * ghost), and the refresh-status line is a permanently mounted slot that
- * toggles visibility — so neither the first read completing nor a refresh
- * settling can move the panels. The read's age and the cross-group summary
- * sit with the read-only note below the panels for the same reason: they
- * join a region that already flexes, instead of introducing a new slot
- * above the panels whose appearance would shift them.
+ * success shape (one tab ghost per expected group, one panel ghost, and the
+ * meta/note ghost), and the refresh-status line is a permanently mounted
+ * slot that toggles visibility — so neither the first read completing nor a
+ * refresh settling can move the tabs. The read's age and the cross-group
+ * summary sit with the read-only note below the tabs for the same reason:
+ * they join a region that already flexes, instead of introducing a new slot
+ * whose appearance would shift the layout.
  *
- * Owns the process testids (`process-panel-*`, `process-row-*`,
- * `process-storage-*`, `process-meta`, `process-refreshing`,
- * `process-loading-*`) and the loading/error states for the whole read.
+ * Tabs are view navigation, not actions: switching one changes which group
+ * is rendered, and the refresh inside each panel remains the only
+ * interaction that re-reads.
+ *
+ * Owns the process testids (`process-tab-*`, `process-panel-*`,
+ * `process-row-*`, `process-storage-*`, `process-meta`,
+ * `process-refreshing`, `process-loading-*`) and the loading/error states
+ * for the whole read.
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 
 import { processInsightsAtom } from "~/atoms";
 import { Skeleton } from "~/components/ui/skeleton";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -53,6 +65,7 @@ export function ProcessView({ visible }: { readonly visible: boolean }) {
   const insights = useAtomValue(processInsightsAtom);
   const refresh = useAtomRefresh(processInsightsAtom);
   const nowMs = useClock();
+  const [selectedTab, setSelectedTab] = useState<string | null>(null);
 
   useEffect(() => {
     if (visible) {
@@ -94,30 +107,82 @@ export function ProcessView({ visible }: { readonly visible: boolean }) {
             onRetry={() => refresh()}
           />
         ),
-        onSuccess: (result) => (
-          <>
-            {result.value.groups.map((group) => (
-              <ProcessGroupPanel key={group.id} group={group} nowMs={nowMs} />
-            ))}
-            <ReadingMeta
-              fetchedAt={result.value.fetchedAt}
-              groups={result.value.groups}
-              nowMs={nowMs}
-            />
-            <p
-              className="text-xs leading-relaxed text-muted-foreground"
-              data-testid="process-readonly-note"
-            >
-              This screen only reads. Nothing here can stop a process or delete
-              a file. Memory, CPU, and storage are a snapshot from the moment
-              of the read — CPU above 100% spans several cores — and uptime
-              counts from each process's start.
-            </p>
-          </>
-        ),
+        onSuccess: (result) => {
+          const groups = result.value.groups;
+          const activeTab =
+            groups.find((group) => group.id === selectedTab)?.id ??
+            groups[0]?.id;
+
+          return (
+            <>
+              <Tabs
+                value={activeTab}
+                onValueChange={setSelectedTab}
+                className="flex min-w-0 flex-col gap-4"
+                data-testid="process-groups"
+              >
+                <TabsList
+                  aria-label="Process groups"
+                  className="!grid !h-auto w-full grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-1 rounded-lg border border-border/70 bg-surface-raised/60 p-1"
+                >
+                  {groups.map((group) => (
+                    <TabsTrigger
+                      key={group.id}
+                      value={group.id}
+                      className="!h-auto min-w-0 flex-col items-start gap-1 px-3 py-2 text-left whitespace-normal"
+                      data-testid={`process-tab-${group.id}`}
+                    >
+                      <span className="max-w-full break-words">
+                        {group.displayName}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {groupGlance(group)}
+                      </span>
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+
+                {groups.map((group) => (
+                  <TabsContent
+                    key={group.id}
+                    value={group.id}
+                    className="mt-0"
+                  >
+                    <ProcessGroupPanel group={group} nowMs={nowMs} />
+                  </TabsContent>
+                ))}
+              </Tabs>
+              <ReadingMeta
+                fetchedAt={result.value.fetchedAt}
+                groups={groups}
+                nowMs={nowMs}
+              />
+              <p
+                className="text-xs leading-relaxed text-muted-foreground"
+                data-testid="process-readonly-note"
+              >
+                This screen only reads. Nothing here can stop a process or delete
+                a file. Memory, CPU, and storage are a snapshot from the moment
+                of the read — CPU above 100% spans several cores — and uptime
+                counts from each process's start.
+              </p>
+            </>
+          );
+        },
       })}
     </div>
   );
+}
+
+/**
+ * The one-line answer each tab carries before it is opened: what the group is
+ * doing right now, or that it is doing nothing.
+ */
+function groupGlance(group: Ipc.ProcessGroup): string {
+  if (group.processes.length === 0) {
+    return "No processes";
+  }
+  return `${counted(group.processes.length, "process", "processes")} · ${formatBytes(group.totalMemoryBytes)}`;
 }
 
 /** When the reading was taken, and what it covers across every group. */
@@ -186,13 +251,14 @@ function counted(count: number, singular: string, plural: string): string {
 }
 
 /**
- * How many group panels the skeleton reserves.
+ * How many tab ghosts the skeleton reserves.
  *
  * Mirrors the tracked tools the backend reports (Codex and OpenCode today);
  * when a tool is added there, this follows in the same change so the
- * skeleton keeps predicting the success shape.
+ * skeleton keeps predicting the success shape. One panel ghost is enough
+ * beside them: only the active tab's panel is on screen.
  */
-const SKELETON_PANELS = 2;
+const SKELETON_TABS = 2;
 
 function ProcessLoadingSkeleton() {
   return (
@@ -202,9 +268,23 @@ function ProcessLoadingSkeleton() {
       role="status"
       aria-label="Loading process details"
     >
-      {Array.from({ length: SKELETON_PANELS }, (_, index) => (
-        <SkeletonPanel key={index} />
-      ))}
+      <div
+        className="grid w-full grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-1 rounded-lg border border-border/70 bg-surface-raised/60 p-1"
+        data-testid="process-loading-tabs"
+        aria-hidden="true"
+      >
+        {Array.from({ length: SKELETON_TABS }, (_, index) => (
+          <div
+            key={index}
+            className="flex flex-col gap-1.5 px-3 py-2"
+            data-testid="process-loading-tab"
+          >
+            <Skeleton className="h-3.5 w-2/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        ))}
+      </div>
+      <SkeletonPanel />
       <div
         className="flex flex-col gap-2 pt-1"
         data-testid="process-loading-note"

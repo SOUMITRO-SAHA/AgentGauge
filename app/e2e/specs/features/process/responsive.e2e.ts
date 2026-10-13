@@ -6,6 +6,7 @@ import { expect, browser } from "@wdio/globals";
 
 import {
   clearSeededStores,
+  clickDisplayed,
   expectDisplayed,
   gotoView,
   processScreenWithPorts,
@@ -30,12 +31,13 @@ describe("responsive Processes table", () => {
 
     try {
       await gotoView("processes");
+      await clickDisplayed('[data-testid="process-tab-opencode"]');
       await expectDisplayed('[data-testid="process-row-5309"]');
       await browser.setWindowSize(360, 720);
       await browser.pause(300);
       await expectDisplayed('[data-testid="process-details-5309"]');
 
-      const layout = await browser.execute(() => {
+      const rowLayout = await browser.execute(() => {
         const documentElement = document.documentElement;
         const table = document
           .querySelector('[data-testid="process-row-5309"]')
@@ -62,43 +64,49 @@ describe("responsive Processes table", () => {
               details.getBoundingClientRect().width > 0
             : false,
           detailsText: details?.textContent ?? "",
-          storageRows: Array.from(
-            document.querySelectorAll(
-              '[data-testid="process-storage-row-codex"]',
-            ),
-          ).flatMap((row) => {
-            const left = row.firstElementChild;
-            const value = row.querySelector(
-              '[data-testid="process-storage-value-codex"]',
-            );
-            if (!left || !value) return [];
-            const rowRect = row.getBoundingClientRect();
-            const leftRect = left.getBoundingClientRect();
-            const valueRect = value.getBoundingClientRect();
-            return [
-              {
-                leftWidthRatio: leftRect.width / rowRect.width,
-                leftRight: leftRect.right,
-                valueLeft: valueRect.left,
-                valueRight: valueRect.right,
-                rowRight: rowRect.right,
-              },
-            ];
-          }),
         };
       });
 
-      expect(layout.documentOverflow).toBeLessThanOrEqual(1);
-      expect(layout.tableOverflow).not.toBeNull();
-      expect(layout.tableOverflow as number).toBeLessThanOrEqual(1);
-      expect(layout.panelOverflow).not.toBeNull();
-      expect(layout.panelOverflow as number).toBeLessThanOrEqual(1);
-      expect(layout.detailsVisible).toBe(true);
-      expect(layout.detailsText).toContain("PID 5309");
-      expect(layout.detailsText).toContain(":49374");
-      expect(layout.detailsText).toContain("Uptime");
-      expect(layout.storageRows).toHaveLength(3);
-      for (const row of layout.storageRows) {
+      expect(rowLayout.documentOverflow).toBeLessThanOrEqual(1);
+      expect(rowLayout.tableOverflow).not.toBeNull();
+      expect(rowLayout.tableOverflow as number).toBeLessThanOrEqual(1);
+      expect(rowLayout.panelOverflow).not.toBeNull();
+      expect(rowLayout.panelOverflow as number).toBeLessThanOrEqual(1);
+      expect(rowLayout.detailsVisible).toBe(true);
+      expect(rowLayout.detailsText).toContain("PID 5309");
+      expect(rowLayout.detailsText).toContain(":49374");
+      expect(rowLayout.detailsText).toContain("Uptime");
+
+      await clickDisplayed('[data-testid="process-tab-codex"]');
+      await expectDisplayed('[data-testid="process-panel-codex"]');
+      const storageRows = await browser.execute(() =>
+        Array.from(
+          document.querySelectorAll(
+            '[data-testid="process-storage-row-codex"]',
+          ),
+        ).flatMap((row) => {
+          const left = row.firstElementChild;
+          const value = row.querySelector(
+            '[data-testid="process-storage-value-codex"]',
+          );
+          if (!left || !value) return [];
+          const rowRect = row.getBoundingClientRect();
+          const leftRect = left.getBoundingClientRect();
+          const valueRect = value.getBoundingClientRect();
+          return [
+            {
+              leftWidthRatio: leftRect.width / rowRect.width,
+              leftRight: leftRect.right,
+              valueLeft: valueRect.left,
+              valueRight: valueRect.right,
+              rowRight: rowRect.right,
+            },
+          ];
+        }),
+      );
+
+      expect(storageRows).toHaveLength(3);
+      for (const row of storageRows) {
         expect(row.leftWidthRatio).toBeLessThanOrEqual(0.71);
         expect(row.leftRight).toBeLessThanOrEqual(row.valueLeft);
         expect(Math.abs(row.rowRight - row.valueRight)).toBeLessThanOrEqual(1);

@@ -2,6 +2,7 @@ import { expect, browser } from "@wdio/globals";
 
 import {
   clearSeededStores,
+  clickDisplayed,
   expectDisplayed,
   gotoView,
   processScreenEnriched,
@@ -44,9 +45,15 @@ describe("processes storage and service", () => {
   it("labels the real components the tools create", async () => {
     await awaitEnrichedStorage();
 
+    await expectDisplayed('[data-testid="process-tab-opencode"]');
+    await clickDisplayed('[data-testid="process-tab-opencode"]');
+    await expectDisplayed('[data-testid="process-storage-opencode"]');
     await expect($('[data-testid="process-storage-opencode"]')).toHaveText(
       expect.stringContaining("Project snapshots (git)"),
     );
+
+    await clickDisplayed('[data-testid="process-tab-codex"]');
+    await expectDisplayed('[data-testid="process-storage-codex"]');
     await expect($('[data-testid="process-storage-codex"]')).toHaveText(
       expect.stringContaining("Databases (SQLite)"),
     );
@@ -83,6 +90,8 @@ describe("processes storage and service", () => {
 
   it("renders the tool's recorded background service with its live pid", async () => {
     await awaitEnrichedStorage();
+    await clickDisplayed('[data-testid="process-tab-opencode"]');
+    await expectDisplayed('[data-testid="process-panel-opencode"]');
 
     await expectDisplayed('[data-testid="process-service-opencode"]');
     await expect($('[data-testid="process-service-opencode"]')).toHaveText(

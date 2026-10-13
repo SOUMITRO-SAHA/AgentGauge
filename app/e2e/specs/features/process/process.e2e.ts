@@ -1,6 +1,7 @@
 import { expect, browser, $, $$ } from "@wdio/globals";
 
 import {
+  clickDisplayed,
   expectDisplayed,
   gotoView,
   processScreenLive,
@@ -12,16 +13,23 @@ import {
 /**
  * Processes-view coverage: the read-only process and storage screen.
  *
- * The groups the mock returns are the groups the screen must render — the
- * panel set is backend-driven, so a future CLI lands with no renderer change
- * — and every explicit state is asserted: rows with memory and uptime,
+ * The groups the mock returns are the groups the screen renders — the tab
+ * set is backend-driven, so a future CLI lands with no renderer change —
+ * and every explicit state is asserted: rows with memory and uptime,
  * measured storage with its breakdown, absent storage as a reason, an empty
  * group as a sentence, and the screen's read-onlyness as "the only buttons
- * are refreshes".
+ * are view tabs and refreshes". The first tab is the first group; the
+ * others are reached by switching tabs, exactly as a user does.
  */
 after(() => {
   clearSeededStores();
 });
+
+/** Activates a group's tab and waits for its panel. */
+async function switchToGroup(groupId: string): Promise<void> {
+  await clickDisplayed(`[data-testid="process-tab-${groupId}"]`);
+  await expectDisplayed(`[data-testid="process-panel-${groupId}"]`);
+}
 
 describe("processes", () => {
   beforeEach(async () => {
@@ -51,10 +59,30 @@ describe("processes", () => {
     await expectDisplayed('[data-testid="view-processes"]');
   });
 
+  it("renders one tab per group, each carrying its glance line", async () => {
+    await gotoView("processes");
+
+    await expectDisplayed('[data-testid="process-tab-codex"]');
+    await expectDisplayed('[data-testid="process-tab-opencode"]');
+    await expectDisplayed('[data-testid="process-panel-codex"]');
+    expect(
+      await $$('[data-testid="process-panel-opencode"]'),
+    ).toHaveLength(0);
+
+    await expect($('[data-testid="process-tab-codex"]')).toHaveText(
+      expect.stringContaining("1 process"),
+    );
+    await expect($('[data-testid="process-tab-opencode"]')).toHaveText(
+      expect.stringContaining("No processes"),
+    );
+
+    await switchToGroup("opencode");
+    await expectDisplayed('[data-testid="process-panel-opencode"]');
+    expect(await $$('[data-testid="process-panel-codex"]')).toHaveLength(0);
+  });
+
   it("renders every group's processes with memory and uptime", async () => {
     await gotoView("processes");
-    await expectDisplayed('[data-testid="process-panel-codex"]');
-    await expectDisplayed('[data-testid="process-panel-opencode"]');
 
     const pid = 4242;
     await expectDisplayed(`[data-testid="process-row-${pid}"]`);
@@ -105,6 +133,7 @@ describe("processes", () => {
 
   it("renders an absent footprint as its reason, never as zero bytes", async () => {
     await gotoView("processes");
+    await switchToGroup("opencode");
     await expectDisplayed('[data-testid="process-storage-absent-opencode"]');
     await expect(
       $('[data-testid="process-storage-absent-opencode"]'),
@@ -116,21 +145,25 @@ describe("processes", () => {
 
   it("says explicitly when a group has nothing running", async () => {
     await gotoView("processes");
+    await switchToGroup("opencode");
     await expectDisplayed('[data-testid="process-empty-opencode"]');
     await expect($('[data-testid="process-empty-opencode"]')).toHaveText(
       expect.stringContaining("No OpenCode processes"),
     );
-    expect(await $$('[data-testid^="process-row-"]')).toHaveLength(1);
+    expect(await $$('[data-testid^="process-row-"]')).toHaveLength(0);
   });
 
-  it("offers no control beyond refresh, because the capability has no write", async () => {
+  it("offers no control beyond view tabs and refresh, because the capability has no write", async () => {
     await gotoView("processes");
 
     const buttons = await $$('[data-testid="view-processes"] button');
     expect(buttons.length).toBeGreaterThan(0);
     for (const button of buttons) {
       const testid = await button.getAttribute("data-testid");
-      expect(testid?.startsWith("refresh-processes-")).toBe(true);
+      expect(
+        testid?.startsWith("refresh-processes-") ||
+          testid?.startsWith("process-tab-"),
+      ).toBe(true);
     }
 
     await expect($('[data-testid="process-readonly-note"]')).toHaveText(
@@ -188,6 +221,8 @@ describe("processes with a listening server", () => {
 
   it("renders the listening port per process and in the group totals", async () => {
     await gotoView("processes");
+    await clickDisplayed('[data-testid="process-tab-opencode"]');
+    await expectDisplayed('[data-testid="process-panel-opencode"]');
 
     await expectDisplayed('[data-testid="process-row-5309"]');
     const rowText = await browser.execute(

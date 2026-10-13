@@ -2,6 +2,7 @@ import { expect, browser } from "@wdio/globals";
 
 import {
   clearSeededStores,
+  clickDisplayed,
   expectDisplayed,
   gotoView,
   processScreenEnriched,
@@ -55,6 +56,8 @@ describe("processes cpu and endpoints", () => {
 
   it("names each endpoint's interface and calls out wildcard binds", async () => {
     await gotoView("processes");
+    await clickDisplayed('[data-testid="process-tab-opencode"]');
+    await expectDisplayed('[data-testid="process-panel-opencode"]');
 
     const endpoints = await browser.execute(
       () =>
