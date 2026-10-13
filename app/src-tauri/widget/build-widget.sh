@@ -20,7 +20,7 @@
 # Signing:
 #
 #   Ad-hoc by default, which is enough for a locally built app to be offered in
-#   the widget gallery. A real "Apple Development" identity is used when
+#   the widget gallery. A real Apple signing identity is used when
 #   AGENTGAUGE_SIGN_IDENTITY is set.
 #
 #   Note on team IDs: the parenthetical in an Apple Development certificate's CN
@@ -40,8 +40,10 @@ WIDGET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$WIDGET_DIR/AIStatsWidget.xcodeproj"
 SCHEME="AIStatsWidget"
 CONFIGURATION="${AGENTGAUGE_WIDGET_CONFIGURATION:-Release}"
+WIDGET_ARCH="${AGENTGAUGE_WIDGET_ARCH:-$(uname -m)}"
 DERIVED="$WIDGET_DIR/build/$CONFIGURATION"
 BRIDGE_NAME="libWidgetBridge.dylib"
+source "$WIDGET_DIR/signing-options.sh"
 
 # Empty means ad-hoc.
 SIGN_IDENTITY="${AGENTGAUGE_SIGN_IDENTITY:--}"
@@ -65,6 +67,15 @@ build_appex() {
   "$DERIVED/ProviderCyclerTests"
   bash "$WIDGET_DIR/Tests/WidgetStoragePathTests.sh"
   bash "$WIDGET_DIR/Tests/WidgetBridgeTests.sh"
+  bash "$WIDGET_DIR/Tests/PlacementReceiptTests.sh"
+  bash "$WIDGET_DIR/Tests/WidgetSigningOptionsTests.sh"
+
+  local -a architecture_args
+  if [ "$WIDGET_ARCH" = "universal" ]; then
+    architecture_args=(ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO)
+  else
+    architecture_args=(ARCHS="$WIDGET_ARCH" ONLY_ACTIVE_ARCH=NO)
+  fi
 
   xcodebuild \
     -project "$PROJECT" \
@@ -72,6 +83,7 @@ build_appex() {
     -configuration "$CONFIGURATION" \
     -sdk macosx \
     -derivedDataPath "$DERIVED" \
+    "${architecture_args[@]}" \
     build \
     -quiet
 
@@ -81,13 +93,34 @@ build_appex() {
   bash "$WIDGET_DIR/Tests/WidgetEntitlementTests.sh" "$appex"
 
   log "Building $BRIDGE_NAME"
-  xcrun swiftc \
-    -emit-library \
-    -O \
-    -target "$(uname -m)-apple-macosx14.0" \
-    "$WIDGET_DIR/Sources/WidgetBridge.swift" \
-    -framework WidgetKit \
-    -o "$DERIVED/$BRIDGE_NAME"
+  if [ "$WIDGET_ARCH" = "universal" ]; then
+    xcrun swiftc \
+      -emit-library \
+      -O \
+      -target "arm64-apple-macosx14.0" \
+      "$WIDGET_DIR/Sources/WidgetBridge.swift" \
+      -framework WidgetKit \
+      -o "$DERIVED/$BRIDGE_NAME.arm64"
+    xcrun swiftc \
+      -emit-library \
+      -O \
+      -target "x86_64-apple-macosx14.0" \
+      "$WIDGET_DIR/Sources/WidgetBridge.swift" \
+      -framework WidgetKit \
+      -o "$DERIVED/$BRIDGE_NAME.x86_64"
+    lipo -create \
+      "$DERIVED/$BRIDGE_NAME.arm64" \
+      "$DERIVED/$BRIDGE_NAME.x86_64" \
+      -output "$DERIVED/$BRIDGE_NAME"
+  else
+    xcrun swiftc \
+      -emit-library \
+      -O \
+      -target "$WIDGET_ARCH-apple-macosx14.0" \
+      "$WIDGET_DIR/Sources/WidgetBridge.swift" \
+      -framework WidgetKit \
+      -o "$DERIVED/$BRIDGE_NAME"
+  fi
 
   # The two properties CodexBar#1095 identified as the difference between a
   # working extension and one that silently exits. Checked here so a future edit
@@ -108,6 +141,7 @@ embed_into() {
   local app="$1"
   [ -d "$app" ] || die "no such app bundle: $app"
   [ -d "$app/Contents" ] || die "$app does not look like a macOS bundle"
+  widget_signing_options "$SIGN_IDENTITY"
 
   local appex="${1:-}"
   appex="$(find "$DERIVED/Build/Products" -maxdepth 2 -name "$SCHEME.appex" | head -1)"
@@ -129,18 +163,19 @@ embed_into() {
   # breaks verification. The bridge runs inside the host process, so the host's
   # entitlements govern it and it needs none of its own.
   log "Signing $BRIDGE_NAME (${SIGN_IDENTITY})"
-  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
+  codesign --force --sign "$SIGN_IDENTITY" "${WIDGET_SIGNING_OPTIONS[@]}" \
     "$app/Contents/Frameworks/$BRIDGE_NAME" 2>/dev/null \
     || die "failed to sign the widget bridge"
   log "Signing extension (${SIGN_IDENTITY})"
-  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
+  codesign --force --sign "$SIGN_IDENTITY" "${WIDGET_SIGNING_OPTIONS[@]}" \
     --entitlements "$WIDGET_DIR/Resources/AIStatsWidget.entitlements" \
     "$app/Contents/PlugIns/$SCHEME.appex" 2>/dev/null \
     || die "failed to sign the widget extension"
   bash "$WIDGET_DIR/Tests/WidgetEntitlementTests.sh" "$app/Contents/PlugIns/$SCHEME.appex"
 
   log "Signing host bundle"
-  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$app" 2>/dev/null \
+  codesign --force --sign "$SIGN_IDENTITY" "${WIDGET_SIGNING_OPTIONS[@]}" \
+    "$app" 2>/dev/null \
     || die "failed to sign $app"
 
   if ! codesign --verify --deep --strict "$app" 2>/dev/null; then

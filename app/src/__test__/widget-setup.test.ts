@@ -17,6 +17,7 @@ function status(
     snapshotWritten: true,
     configured,
     configuredKinds: [],
+    placedKinds: configured === true ? ["AIStatsUsageWidget"] : [],
     menuBarAvailable: true,
     setup: [],
     reason: null,
@@ -25,14 +26,34 @@ function status(
 }
 
 describe("shouldOfferWidgetSetup", () => {
-  it("offers setup when a successful system query confirms no widget is configured", () => {
+  it("offers setup when no AgentGauge widget is placed", () => {
     expect(shouldOfferWidgetSetup(status(false))).toBe(true);
   });
 
   it("stands down once a widget is confirmed configured", () => {
+    expect(shouldOfferWidgetSetup(status(true))).toBe(false);
+  });
+
+  it("stands down when the sibling build's widget is the one on this Mac", () => {
+    // The query cannot see another build's widget, so this is the receipt path:
+    // a Debug widget the user can see must not make Release ask for another one.
     expect(
       shouldOfferWidgetSetup(
-        status(true, { configuredKinds: ["AIStatsUsageWidget"] }),
+        status(false, {
+          configuredKinds: [],
+          placedKinds: ["AIStatsUsageWidgetDev"],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("stands down when both builds' widgets are placed", () => {
+    expect(
+      shouldOfferWidgetSetup(
+        status(false, {
+          configuredKinds: ["AIStatsUsageWidget"],
+          placedKinds: ["AIStatsUsageWidget", "AIStatsUsageWidgetDev"],
+        }),
       ),
     ).toBe(false);
   });
@@ -51,21 +72,12 @@ describe("shouldOfferWidgetSetup", () => {
     ).toBe(true);
   });
 
-  it("stands down when the other build's widget is the one configured", () => {
-    // Placement is a macOS action the app cannot undo, and the guide would
-    // only ask the user to place a second widget they already have.
+  it("stands down on a receipt even when this build cannot ask WidgetKit", () => {
     expect(
       shouldOfferWidgetSetup(
-        status(false, { configuredKinds: ["AIStatsUsageWidgetDev"] }),
-      ),
-    ).toBe(false);
-  });
-
-  it("stands down when both builds' widgets are configured", () => {
-    expect(
-      shouldOfferWidgetSetup(
-        status(false, {
-          configuredKinds: ["AIStatsUsageWidget", "AIStatsUsageWidgetDev"],
+        status(null, {
+          extensionPresent: false,
+          placedKinds: ["AIStatsUsageWidgetDev"],
         }),
       ),
     ).toBe(false);

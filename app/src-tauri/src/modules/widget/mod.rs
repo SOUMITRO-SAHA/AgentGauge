@@ -30,6 +30,18 @@
 //! answers in-process. `extension_present` remains a separate bundle fact; the
 //! optional `configured` field is populated only when that query succeeds. The
 //! same bridge carries `reloadAllTimelines` after each snapshot publication.
+//!
+//! That query answers about this app alone — chronod keys configurations per
+//! containing app — so a sibling build's widget is invisible to it. The widget
+//! extension therefore records a placement receipt every time WidgetKit renders
+//! it outside the gallery, and [`placement`] reads every receipt so this app can
+//! tell that an AgentGauge widget is on the Mac even when it belongs to another
+//! build. `placed_kinds` is the union of the two: kinds WidgetCenter reported
+//! for this app, plus kinds with a fresh receipt.
+
+mod placement;
+
+pub use placement::PlacementReceiptStore;
 
 use std::fs;
 use std::fs::OpenOptions;
@@ -513,6 +525,13 @@ pub struct SystemWidgetStatus {
     /// kind other than this build's own. Empty when the query was unavailable
     /// or found nothing — `configured` distinguishes those cases.
     pub configured_kinds: Vec<String>,
+    /// Every AgentGauge widget kind placed on this Mac, from either source.
+    ///
+    /// WidgetCenter's list plus every kind with a fresh placement receipt, so a
+    /// sibling build's widget counts even though that app's query cannot see
+    /// it. This is what the setup action keys off: a widget the user can see on
+    /// screen must not be reported as needing setup.
+    pub placed_kinds: Vec<String>,
     /// Whether the widget can also live in the menu bar (macOS 26+).
     pub menu_bar_available: bool,
     /// The procedure, empty when there is nothing to do.
@@ -575,6 +594,7 @@ impl SystemWidgetStatus {
             snapshot_written,
             configured: None,
             configured_kinds: Vec::new(),
+            placed_kinds: Vec::new(),
             menu_bar_available,
             setup,
             reason,
@@ -603,8 +623,44 @@ impl SystemWidgetStatus {
                 extension_present
             );
         }
+        status.placed_kinds = placed_kinds(&status.configured_kinds);
         status
     }
+}
+
+/// Every AgentGauge widget kind placed on this Mac.
+///
+/// Receipts are read whatever the query did: an unbundled build cannot ask
+/// WidgetKit, and a sibling build's placed widget is exactly the case receipts
+/// exist for.
+fn placed_kinds(configured_kinds: &[String]) -> Vec<String> {
+    let receipts = PlacementReceiptStore::from_env()
+        .map(|store| store.placed_kinds(unix_seconds()))
+        .unwrap_or_default();
+    merge_placed_kinds(configured_kinds, &receipts)
+}
+
+/// Unions the two sources of a placement, keeping WidgetCenter's order first.
+///
+/// Deduplicated because both sources can name this build's own kind: a widget
+/// that is configured has both a configuration and, once WidgetKit renders it, a
+/// receipt.
+fn merge_placed_kinds(configured_kinds: &[String], receipt_kinds: &[String]) -> Vec<String> {
+    let mut kinds: Vec<String> = configured_kinds.to_vec();
+    for kind in receipt_kinds {
+        if !kinds.contains(kind) {
+            kinds.push(kind.clone());
+        }
+    }
+    kinds
+}
+
+/// Seconds since the Unix epoch, or `0` when the clock is before it.
+fn unix_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|since| since.as_secs() as i64)
+        .unwrap_or_default()
 }
 
 /// The setup procedure, worded to match what macOS actually shows.
@@ -1286,6 +1342,36 @@ mod tests {
         let status = SystemWidgetStatus::detect("macos", Some("15.3"), true, true);
         assert!(status.snapshot_written);
         assert!(!status.setup.iter().any(|s| s.title.contains("Refresh")));
+    }
+
+    #[test]
+    fn a_placement_is_either_the_configured_kinds_or_a_fresh_receipt() {
+        // This build's widget: WidgetCenter names it, and the union keeps it once.
+        assert_eq!(
+            merge_placed_kinds(
+                &["AIStatsUsageWidget".to_string()],
+                &["AIStatsUsageWidget".to_string()]
+            ),
+            vec!["AIStatsUsageWidget".to_string()]
+        );
+
+        // The sibling build's widget, which this app's own query cannot see.
+        assert_eq!(
+            merge_placed_kinds(
+                &[],
+                &[
+                    "AIStatsUsageWidgetDev".to_string(),
+                    "AIStatsUsageWidget".to_string()
+                ]
+            ),
+            vec![
+                "AIStatsUsageWidgetDev".to_string(),
+                "AIStatsUsageWidget".to_string()
+            ]
+        );
+
+        // Nothing placed anywhere.
+        assert!(merge_placed_kinds(&[], &[]).is_empty());
     }
 
     #[test]

@@ -45,6 +45,7 @@ const SYSTEM_WIDGET_RESPONSE = {
     snapshotWritten: false,
     configured: null,
     configuredKinds: [],
+    placedKinds: [],
     menuBarAvailable: false,
     setup: [],
     reason: null,

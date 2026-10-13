@@ -33,11 +33,13 @@ import type { SystemWidgetStatus } from "~/lib/ipc";
  *
  * Placement happens in the system's gallery, where the app cannot follow it.
  * `useSystemWidgetStatusPolling` re-reads the status on an interval while the
- * window is visible, on focus, and when the window returns from hidden, so
- * both adding and removing a widget is reflected without a manual refresh. An
- * unknown state never hides the guide: the steps below it are the only route
- * to a placement, and an app that could not check must not also remove the
- * way to fix it.
+ * app is open, on focus, and when the window returns from hidden, so both adding
+ * and removing a widget is reflected without a manual refresh. An unknown state
+ * never hides the guide: the steps below it are the only route to a placement,
+ * and an app that could not check must not also remove the way to fix it.
+ *
+ * A widget placed by the *other* build counts too, from the receipts the
+ * extensions write — WidgetCenter's own query cannot see a sibling app.
  */
 export function SystemWidgetGuide() {
   const widget = useAtomValue(systemWidgetAtom);
@@ -170,6 +172,14 @@ function configuredKindLabel(kind: string): string {
   return kind;
 }
 
+/** Names the widgets the app can see on this Mac, whichever build placed them. */
+function placedWidgetLabel(kinds: readonly string[]): string {
+  if (kinds.length === 1) {
+    return `The ${configuredKindLabel(kinds[0])} widget`;
+  }
+  return "AgentGauge widgets";
+}
+
 function StatusLine({ status }: { status: SystemWidgetStatus }) {
   if (!status.supported) {
     return (
@@ -219,6 +229,27 @@ function StatusLine({ status }: { status: SystemWidgetStatus }) {
     );
   }
 
+  if (status.placedKinds.length > 0) {
+    return (
+      <p
+        data-testid="widget-status"
+        data-state="configured-other-build"
+        className="flex items-start gap-2 text-sm text-muted-foreground"
+      >
+        <CheckCircle
+          aria-hidden="true"
+          className="mt-0.5 size-4 shrink-0 text-[var(--ok)]"
+        />
+        <span>
+          {placedWidgetLabel(status.placedKinds)} is on this Mac
+          {status.configured === null
+            ? ". Whether this app's own widget is placed could not be checked, and the steps below add it."
+            : ", but this app's own widget is not. The steps below add it."}
+        </span>
+      </p>
+    );
+  }
+
   if (status.configured === null) {
     return (
       <p
@@ -231,28 +262,6 @@ function StatusLine({ status }: { status: SystemWidgetStatus }) {
           The app could not check whether AgentGauge is configured, so it will
           not claim either way. It re-checks automatically while this window is
           open and whenever it comes back to the front; Refresh checks now.
-        </span>
-      </p>
-    );
-  }
-
-  if (status.configuredKinds.length > 0) {
-    return (
-      <p
-        data-testid="widget-status"
-        data-state="configured-other-build"
-        className="flex items-start gap-2 text-sm text-muted-foreground"
-      >
-        <CheckCircle
-          aria-hidden="true"
-          className="mt-0.5 size-4 shrink-0 text-[var(--ok)]"
-        />
-        <span>
-          An AgentGauge widget is configured
-          {status.configuredKinds.length === 1 &&
-            ` (${configuredKindLabel(status.configuredKinds[0])})`}{" "}
-          — but from the other build. This app's widget is not placed; the steps
-          below add it.
         </span>
       </p>
     );

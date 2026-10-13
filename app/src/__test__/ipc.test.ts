@@ -62,6 +62,7 @@ describe("SystemWidgetStatus", () => {
     snapshotWritten: true,
     configured: true,
     configuredKinds: ["AIStatsUsageWidget"],
+    placedKinds: ["AIStatsUsageWidget"],
     menuBarAvailable: true,
     setup: [{ title: "Open the widget gallery", detail: "Right-click the desktop." }],
     reason: null,

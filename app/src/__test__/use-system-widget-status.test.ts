@@ -23,13 +23,36 @@ afterEach(() => {
 });
 
 describe("startSystemWidgetPolling", () => {
-  it("re-reads on the interval while the window is visible", () => {
+  it("re-reads on the interval while the app is open", () => {
     const refresh = vi.fn();
     startSystemWidgetPolling(refresh, INTERVAL_MS);
 
     vi.advanceTimersByTime(INTERVAL_MS * 3);
 
     expect(refresh).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps re-reading while the window is open but not frontmost", () => {
+    // The macOS webview reports `hidden` for windows that are merely occluded,
+    // and a gate on that would stop detection exactly when it is needed.
+    const refresh = vi.fn();
+    startSystemWidgetPolling(refresh, INTERVAL_MS);
+
+    setVisibility("hidden");
+    vi.advanceTimersByTime(INTERVAL_MS * 3);
+
+    expect(refresh).toHaveBeenCalledTimes(3);
+  });
+
+  it("re-reads as soon as the window comes back to the front", () => {
+    const refresh = vi.fn();
+    startSystemWidgetPolling(refresh, INTERVAL_MS);
+    refresh.mockClear();
+
+    setVisibility("hidden");
+    setVisibility("visible");
+
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("re-reads as soon as the window regains focus", () => {
@@ -41,21 +64,6 @@ describe("startSystemWidgetPolling", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("stops asking while hidden and reads once when shown again", () => {
-    const refresh = vi.fn();
-    startSystemWidgetPolling(refresh, INTERVAL_MS);
-
-    setVisibility("hidden");
-    vi.advanceTimersByTime(INTERVAL_MS * 3);
-    expect(refresh).not.toHaveBeenCalled();
-
-    setVisibility("visible");
-    expect(refresh).toHaveBeenCalledTimes(1);
-
-    vi.advanceTimersByTime(INTERVAL_MS);
-    expect(refresh).toHaveBeenCalledTimes(2);
-  });
-
   it("stops entirely once torn down", () => {
     const refresh = vi.fn();
     const stop = startSystemWidgetPolling(refresh, INTERVAL_MS);
@@ -63,7 +71,7 @@ describe("startSystemWidgetPolling", () => {
     stop();
     vi.advanceTimersByTime(INTERVAL_MS * 3);
     window.dispatchEvent(new Event("focus"));
-    document.dispatchEvent(new Event("visibilitychange"));
+    setVisibility("visible");
 
     expect(refresh).not.toHaveBeenCalled();
   });

@@ -10,16 +10,24 @@ struct UsageTimelineProvider: TimelineProvider {
     static let maxAge: TimeInterval = 10 * 60
     static let retryAge: TimeInterval = 60
 
+    private let kind: String
+
+    init(kind: String) {
+        self.kind = kind
+    }
+
     func placeholder(in context: Context) -> UsageEntry {
         let snapshot = Snapshot.placeholder()
         return UsageEntry(date: Date(), snapshot: snapshot, provider: snapshot.providers.first)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (UsageEntry) -> Void) {
+        PlacementReceipt.recordIfRealRender(kind: kind, isPreview: context.isPreview)
         completion(makeEntry(date: Date(), snapshot: SnapshotStore.read()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<UsageEntry>) -> Void) {
+        PlacementReceipt.recordIfRealRender(kind: kind, isPreview: context.isPreview)
         let now = Date()
         let entry = makeEntry(date: now, snapshot: SnapshotStore.read())
         let resets = [entry.provider?.fiveHour?.resetsAt, entry.provider?.weekly?.resetsAt]

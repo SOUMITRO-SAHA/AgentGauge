@@ -11,7 +11,7 @@ private let widgetDisplayName = "AgentGauge"
 
 struct UsageWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: widgetKind, provider: UsageTimelineProvider()) { entry in
+        StaticConfiguration(kind: widgetKind, provider: UsageTimelineProvider(kind: widgetKind)) { entry in
             UsageWidgetView(entry: entry)
         }
         .configurationDisplayName(widgetDisplayName)

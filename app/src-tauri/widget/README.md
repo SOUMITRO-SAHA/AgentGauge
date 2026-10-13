@@ -173,26 +173,56 @@ Two facts about the system shape everything above:
 
 - **The query is per app bundle.** WidgetKit answers with the kinds configured
   for the calling app, so a Debug placement is invisible to Release and vice
-  versa. `configuredKinds` therefore normally holds only this build's own kinds;
-  it still carries whatever the system reports, so the UI stays correct if the
-  scoping ever widens.
+  versa — chronod's own logs name its entries
+  `<containing bundle id>::<extension bundle id>:<kind>`. No public API crosses
+  that boundary.
 - **Only a bundled app can ask.** `tauri dev` and the e2e harness run the bare
   binary, with no `.app` to hold the extension or the bridge: there
   `extension_present` is false, no query happens, and the status is unknown.
   Detection therefore needs `bun run build:mac`, and the Settings panel says so
   rather than reporting the widget as absent.
 
+## Placement receipts: seeing another build's widget
+
+Because the query is per app bundle, a Release app cannot see a Debug widget that
+the user has placed, and would ask them to place a second one. The widget
+extension is the only process that runs for a placed widget, so
+`PlacementReceipt` (`Sources/SnapshotStore.swift`) writes `widget-placement.json`
+(Debug: `widget-placement-dev.json`) beside the snapshot on every render WidgetKit
+asks for — `recordIfRealRender(kind:isPreview:)` skips gallery renders, which
+Apple documents as `context.isPreview`, because browsing the gallery is not a
+placement. The type lives in `SnapshotStore.swift` rather than a file of its own:
+`AIStatsWidget.xcodeproj` lists its sources explicitly, so a new Swift file would
+silently not reach the extension.
+
+The host app reads both files through `modules/widget/placement.rs` and unions
+them with its own query into `placedKinds`, which is what the setup action keys
+off. A receipt counts while it is younger than `RECEIPT_MAX_AGE_SECS` (12 hours):
+WidgetKit re-renders a placed widget on its own budget — chronod's own scheduling
+logs read `timelineExhausted-…-budgeted-1`, and idle reloads on this Mac cluster
+around the hour — so that window spans a night's sleep and a busy day, while a
+removed widget stops rendering and goes stale instead of suppressing the action
+indefinitely. Receipts are never trusted over this build's own WidgetCenter
+answer; they only add the kinds that answer cannot see.
+
+`Tests/PlacementReceiptTests.sh` compiles and runs the writer's shape checks in
+every widget build: the per-build file name, the shared directory, and the fact
+that a gallery preview writes nothing.
+
 ## Keeping detection live
 
 Placement happens in the system's gallery, where the app cannot follow it, and
 WidgetKit offers no subscription. `useSystemWidgetStatusPolling`
-(`app/src/hooks/use-system-widget-status.ts`) re-reads the status every 10s
-while the window is visible, on window focus, and when the window returns from
-hidden, so a widget added or removed shows up without a manual refresh. A hidden
-window stops asking. `shouldOfferWidgetSetup` stands down only on positive
-confirmation — the affordance stays reachable when the query is unknown or the
-build cannot ask, because hiding the only route to the setup steps is how a user
-ends up unable to add the widget at all.
+(`app/src/hooks/use-system-widget-status.ts`) re-reads the status every 10s while
+the app is open, on window focus, and when the window returns from hidden, so a
+widget added or removed shows up without a manual refresh. The interval does not
+stop when the window is occluded: `document.visibilityState` is not a reliable
+proxy for "the user is looking" — the macOS webview reports `hidden` for a window
+that is open and perfectly capable of showing the answer, and gating on it
+silently disabled detection in exactly those sessions. `shouldOfferWidgetSetup`
+stands down only when `placedKinds` is non-empty, so the affordance stays
+reachable whenever the app cannot confirm a widget; hiding the only route to the
+setup steps is how a user ends up unable to add the widget at all.
 
 ## What is verified, and what is not
 
@@ -237,5 +267,6 @@ If it is missing, check `codesign -dvvv --entitlements -` on the embedded
 | `Sources/UsageWidget.swift`           | Per-family layouts (small: brand-only compact, medium: side-by-side cards, large: roomy rows) and the Xcode preview matrix. |
 | `Sources/ProviderSwitchIntent.swift`  | Cycles providers without opening the host app.                                       |
 | `Sources/WidgetBridge.swift`          | In-process WidgetKit status query and timeline reload, built as `libWidgetBridge.dylib`. |
-| `build-widget.sh`                     | Build, embed, re-sign, and the two build-time guards.                                |
+| `build-widget.sh`                     | Build, embed, sign, and run the widget build-time checks.                            |
+| `signing-options.sh`                  | Selects ad-hoc local signing or Developer ID runtime/timestamp options.              |
 | `app/scripts/widget-dev.ts`            | Isolated debug app and native widget rebuild watcher.                                |

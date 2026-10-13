@@ -32,6 +32,7 @@ it("reserves the widget guidance shape while system support is checked", async (
               snapshotWritten: true,
               configured: null,
               configuredKinds: [],
+              placedKinds: [],
               menuBarAvailable: true,
               setup: [
                 { title: "Open the gallery", detail: "Choose AgentGauge." },
@@ -66,7 +67,8 @@ it("names the other build's widget instead of claiming none is configured", asyn
           extensionPresent: true,
           snapshotWritten: true,
           configured: false,
-          configuredKinds: ["AIStatsUsageWidgetDev"],
+          configuredKinds: [],
+          placedKinds: ["AIStatsUsageWidgetDev"],
           menuBarAvailable: true,
           setup: [
             { title: "Open the gallery", detail: "Choose AgentGauge." },

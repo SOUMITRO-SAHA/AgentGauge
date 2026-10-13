@@ -4,25 +4,31 @@ import { useEffect } from "react";
 import { systemWidgetAtom } from "~/atoms";
 
 /**
- * How often a visible app re-reads its system widget configuration.
+ * How often an open app re-reads its system widget configuration.
  *
  * WidgetKit owns the truth about placements and offers no subscription, so a
- * widget added or removed in the gallery is only visible on the next read.
- * Ten seconds keeps the sidebar honest while the user is looking at it, and
- * each read is one short IPC that answers from WidgetKit or returns at once
- * when this build cannot ask.
+ * widget added or removed in the gallery is only visible on the next read. Ten
+ * seconds keeps the sidebar honest while the user is looking at it, and each
+ * read is one short IPC that answers from WidgetKit or returns at once when this
+ * build cannot ask.
  */
 export const SYSTEM_WIDGET_POLL_INTERVAL_MS = 10_000;
 
 /**
- * Keeps the widget configuration current while the app is in use.
+ * Keeps the widget configuration current while the app is open.
  *
- * Reads are driven by three things, because placement is a macOS action the
- * app never sees: a steady interval while the window is visible, an immediate
- * read when the window regains focus (returning from the gallery, the
- * Notification Centre, or another app), and one when the window comes back
- * from hidden. A hidden window stops the timer entirely — a background app
- * gains nothing from asking, and macOS may throttle its timers.
+ * Driven by three things, because placement is a macOS action the app never
+ * sees: a steady interval, an immediate read when the window regains focus
+ * (returning from the gallery, the Notification Centre, or another app), and one
+ * when the window comes back from hidden.
+ *
+ * The interval does not stop when the window is occluded or the app is in the
+ * background. `document.visibilityState` is not a reliable proxy for "the user
+ * is looking" — the macOS webview reports `hidden` for a window that is open and
+ * perfectly capable of showing the answer — so gating on it silently disabled
+ * detection in exactly the sessions that needed it. The cost of not gating is
+ * one small IPC every ten seconds; macOS throttles timers for occluded windows
+ * anyway.
  *
  * Returns a teardown that removes every listener and the timer.
  */
@@ -30,44 +36,22 @@ export function startSystemWidgetPolling(
   refresh: () => void,
   intervalMs: number = SYSTEM_WIDGET_POLL_INTERVAL_MS,
 ): () => void {
-  let timer: number | undefined;
-
-  const stop = () => {
-    if (timer !== undefined) {
-      window.clearInterval(timer);
-      timer = undefined;
-    }
-  };
-
-  const start = () => {
-    if (timer === undefined && intervalMs > 0) {
-      timer = window.setInterval(refresh, intervalMs);
-    }
-  };
-
-  const syncWithVisibility = () => {
-    if (document.visibilityState === "hidden") {
-      stop();
-      return;
-    }
-    start();
-  };
+  const timer =
+    intervalMs > 0 ? window.setInterval(refresh, intervalMs) : undefined;
 
   const onVisibilityChange = () => {
-    if (document.visibilityState === "hidden") {
-      stop();
-      return;
+    if (document.visibilityState !== "hidden") {
+      refresh();
     }
-    refresh();
-    start();
   };
 
-  syncWithVisibility();
   window.addEventListener("focus", refresh);
   document.addEventListener("visibilitychange", onVisibilityChange);
 
   return () => {
-    stop();
+    if (timer !== undefined) {
+      window.clearInterval(timer);
+    }
     window.removeEventListener("focus", refresh);
     document.removeEventListener("visibilitychange", onVisibilityChange);
   };

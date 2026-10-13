@@ -566,6 +566,7 @@ export const SystemWidgetStatus = Schema.Struct({
   snapshotWritten: Schema.Boolean,
   configured: Schema.NullOr(Schema.Boolean),
   configuredKinds: Schema.Array(Schema.String),
+  placedKinds: Schema.Array(Schema.String),
   menuBarAvailable: Schema.Boolean,
   setup: Schema.Array(
     Schema.Struct({ title: Schema.String, detail: Schema.String }),

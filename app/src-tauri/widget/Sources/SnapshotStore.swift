@@ -154,3 +154,76 @@ enum ProviderSelectionError: Error, LocalizedError {
         "No provider reading is available to switch to."
     }
 }
+
+import Foundation
+import os
+
+/// The widget's own record that WidgetKit rendered it on this Mac.
+///
+/// `WidgetCenter.getCurrentConfigurations` answers only about the app that calls
+/// it: chronod keys its configurations per containing app, so the Release build
+/// cannot see a Debug widget and the Debug build cannot see a Release one. The
+/// extension is the only process that runs for a placed widget, so what it
+/// records here is the only cross-build evidence of a placement that macOS
+/// offers. Every AgentGauge app reads these receipts to decide whether a widget
+/// from any build is on this Mac.
+enum PlacementReceipt {
+#if DEBUG
+    static let fileName = "widget-placement-dev.json"
+#else
+    static let fileName = "widget-placement.json"
+#endif
+
+    /// What the widget extension records, read back by the host apps.
+    struct Receipt: Codable, Equatable {
+        let kind: String
+        let renderedAt: Int
+    }
+
+    private static let logger = Logger(
+        subsystem: "com.soumitrasaha.agentgauge.widget",
+        category: "placement"
+    )
+
+    static var fileURL: URL {
+        SnapshotStore.directoryURL.appendingPathComponent(fileName)
+    }
+
+    /// Records the render, unless it was the widget gallery asking for a look.
+    ///
+    /// WidgetKit reports `isPreview` for gallery renders, and browsing the
+    /// gallery is not a placement — recording one would tell every other build
+    /// that a widget is on the Mac when none is.
+    static func recordIfRealRender(
+        kind: String,
+        isPreview: Bool,
+        now: Date = Date(),
+        to url: URL = fileURL
+    ) {
+        guard !isPreview else { return }
+        record(kind: kind, now: now, to: url)
+    }
+
+    /// Writes the receipt. Best effort: a receipt that cannot be written costs
+    /// the other builds a cross-build answer, never the render, so a failure is
+    /// logged and swallowed rather than thrown into the timeline callback.
+    ///
+    /// `url` defaults to the shared support directory. The parameter exists so
+    /// the shape test can write to a scratch path instead of the user's own
+    /// widget data.
+    static func record(kind: String, now: Date = Date(), to url: URL = fileURL) {
+        let receipt = Receipt(kind: kind, renderedAt: Int(now.timeIntervalSince1970))
+        do {
+            let data = try JSONEncoder().encode(receipt)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            logger.error("Could not record the widget placement receipt.")
+        }
+    }
+
+    /// The receipt as it stands at `url`, for the tests and for readers.
+    static func read(from url: URL = fileURL) -> Receipt? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(Receipt.self, from: data)
+    }
+}

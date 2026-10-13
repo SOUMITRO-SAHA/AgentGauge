@@ -52,9 +52,20 @@ Detection is per build and only possible from a bundled app. `bun run tauri dev`
 and the e2e harness run a bare binary with no `.app` to hold the extension or the
 bridge, so the status is unknown there by construction — use `bun run build:mac`
 (or the Dev app) when checking whether the sidebar's "Set up widget" action
-reflects reality. The app re-reads the status every 10s while its window is
-visible and again on focus, so a placement made in the gallery shows up without
-refreshing.
+reflects reality. The app re-reads the status every 10s while it is open and again
+on focus, so a placement made in the gallery shows up without refreshing.
+
+WidgetCenter answers per containing app, so a Release app cannot see a widget the
+Debug build placed. The extension therefore records a placement receipt beside the
+snapshot on every non-gallery render, and every build reads them:
+
+```sh
+cat ~/Library/Application\ Support/AgentGauge/widget-placement*.json
+```
+
+A receipt written within the last 12 hours means that widget is on the Mac, and
+the setup action stays hidden whichever build placed it. Remove the widget and the
+receipt goes stale within the window, because macOS stops rendering it.
 
 To see what the query answered, run either app with `AGENTGAUGE_LOG_LEVEL=debug`
 and read `~/Library/Application Support/<identifier>/logs/agentgauge-<date>.log`:
@@ -71,5 +82,7 @@ bridge that will not load, a truncated reply, or a query chronod never answered.
 5. Rebuild or refresh and confirm the widget updates when WidgetKit reloads it.
 6. Confirm the sidebar's setup action appears within ~10s of removing the widget
    again, without pressing Refresh.
+7. With only the Dev widget placed, open the packaged Release app: it must report
+   the Dev widget as on this Mac and keep the setup action hidden.
 
 Gallery placement is manual. Timeline reloads are not immediate guarantees.
