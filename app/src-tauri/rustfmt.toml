@@ -1,0 +1,6 @@
+# Mirrors .editorconfig ([*.rs]: 4-space indent, lf, 100-col lines); everything
+# else follows the official Rust style defaults. Unstable rustfmt options
+# (imports_granularity, group_imports, wrap_comments, …) are deliberately not
+# used: they would pin the repo to a moving nightly toolchain.
+max_width = 100
+newline_style = "Unix"

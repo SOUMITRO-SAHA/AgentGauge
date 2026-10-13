@@ -1,0 +1,19 @@
+# Pinned Rust toolchain: the single source of truth for which compiler,
+# rustfmt, and Clippy every developer and CI runner uses for apps/server —
+# the monorepo's only Rust service.
+#
+# Every cargo invocation must run with this directory as the CWD (rustup
+# resolves the toolchain file by walking up from the working directory —
+# `--manifest-path` from the repo root would NOT pick this pin up; that is
+# why scripts/format.sh cds in here).
+#
+# The channel MUST satisfy the workspace `rust-version` in the Cargo.toml
+# next to this file (1.88) and MUST agree with the `FROM rust:1.88-bookworm`
+# pin in infra/docker/server/Dockerfile — the CodeBuild gate
+# (infra/buildspec-server.yml) runs fmt/check/clippy/test inside that same
+# image, so drift fails loudly instead of producing an image built on a
+# toolchain the code no longer claims to support.
+
+[toolchain]
+channel = "1.88"
+components = ["rustfmt", "clippy"]
