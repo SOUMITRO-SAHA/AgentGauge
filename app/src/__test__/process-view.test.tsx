@@ -638,12 +638,9 @@ it("marks the reading's age and the toolchain summary below the panels", async (
   expect(pill.getAttribute("data-freshness")).toBe("live");
   expect(pill.textContent).toContain("Read just now");
 
-  const summaryText = screen.getByTestId("process-summary")?.textContent;
-  expect(summaryText).toContain("2 groups");
-  expect(summaryText).toContain("1 process");
-  expect(summaryText).toContain("432 MB memory");
-  expect(summaryText).toContain("500 MB on disk");
-  expect(summaryText).toContain("measured roots only");
+  expect(screen.getByTestId("process-summary")?.textContent).toBe(
+    "2 groups · 1 process · 432 MB memory · 500 MB on disk · measured roots only",
+  );
 });
 
 it("turns the freshness pill stale past fifteen minutes", async () => {
@@ -666,6 +663,10 @@ it("turns the freshness pill stale past fifteen minutes", async () => {
   const pill = screen.getByTestId("freshness-pill");
   expect(pill.getAttribute("data-freshness")).toBe("stale");
   expect(pill.textContent).toContain("Stale · read");
+
+  expect(screen.getByTestId("process-summary")?.textContent).toBe(
+    "2 groups · 0 processes · 0 B memory · 0 B on disk · measured roots only",
+  );
 });
 
 it("explains cpu above one hundred percent in the read-only note", async () => {

@@ -90,6 +90,7 @@ import {
   millisUntilReset,
   ALL_PLANS_TAB,
   statsTabsFrom,
+  STALE_AFTER_MS,
   windowTitle,
   type UsageTab,
 } from "~/lib/usage";
@@ -226,7 +227,7 @@ export function AllPlansOverview({
       ? (formatFreshness(lastRefreshed, nowMs) ?? "just now")
       : null;
   const freshnessTone =
-    lastRefreshed !== null && nowMs - lastRefreshed > CACHE_STALE_MS
+    lastRefreshed !== null && nowMs - lastRefreshed > STALE_AFTER_MS
       ? "stale"
       : "live";
 
@@ -612,8 +613,6 @@ const TOKEN_HISTORY_PROVIDERS: readonly Ipc.ProviderKind[] = [
   "minimax",
   "kimi",
 ];
-
-const CACHE_STALE_MS = 15 * 60_000;
 
 /**
  * Whether an account reading carries anything the provider itself reported.

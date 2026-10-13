@@ -45,12 +45,9 @@ import { PANEL } from "~/components/dashboard/panel";
 import { useClock } from "~/hooks/use-clock";
 import { formatBytes } from "~/lib/format";
 import { failureReason } from "~/lib/ipc";
-import { formatFreshness } from "~/lib/usage";
+import { formatFreshness, STALE_AFTER_MS } from "~/lib/usage";
 import type * as Ipc from "~/lib/ipc";
 import { cn } from "~/lib/utils";
-
-/** The age past which a reading stops presenting as current. */
-const STALE_AFTER_MS = 15 * 60_000;
 
 export function ProcessView({ visible }: { readonly visible: boolean }) {
   const insights = useAtomValue(processInsightsAtom);
@@ -172,8 +169,8 @@ function summaryLine(groups: ReadonlyArray<Ipc.ProcessGroup>): string {
     0,
   );
   const parts = [
-    `${groups.length} groups`,
-    `${processes} processes`,
+    counted(groups.length, "group", "groups"),
+    counted(processes, "process", "processes"),
     `${formatBytes(memory)} memory`,
     `${formatBytes(disk)} on disk`,
   ];
@@ -181,6 +178,11 @@ function summaryLine(groups: ReadonlyArray<Ipc.ProcessGroup>): string {
     parts.push("measured roots only");
   }
   return parts.join(" · ");
+}
+
+/** A count with its noun, in the form the count calls for. */
+function counted(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 /**

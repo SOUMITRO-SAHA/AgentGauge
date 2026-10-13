@@ -63,9 +63,10 @@ pub struct ProcessPort {
 /// The running OpenCode background service, as recorded by the tool itself in
 /// its state directory (`service.json`; `server.json` on dev builds).
 ///
-/// Only `version`, `url`, and `pid` are read. The sibling `password` field is
-/// a secret: it is deliberately never parsed, stored, or logged, so it cannot
-/// reach the renderer by construction.
+/// The record is parsed from the file wholesale, but only `version`, `url`,
+/// and `pid` are extracted. The sibling `password` field is a secret: it is
+/// never extracted, retained, or logged, so it cannot reach the renderer by
+/// construction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceInfo {
@@ -489,8 +490,11 @@ fn directory_row(dir: &Path, label: &str) -> Option<StorageRow> {
 
 /// One database file plus its `-wal`/`-shm` siblings, as one labelled row.
 ///
-/// This is the shape of a relocation that names a file (`OPENCODE_DB`):
-/// the journal files live beside the database wherever it was moved.
+/// This is the shape of a relocation that names a file (`OPENCODE_DB`): the
+/// environment points at the database, so the file counts whatever its name
+/// is — a name-based database test here would silently drop a relocation to
+/// an unsuffixed path. Only the siblings are constructed by convention, and
+/// SQLite's journal naming is fixed.
 fn database_file_row(file: &Path, label: &str) -> Option<StorageRow> {
     if !file.is_file() {
         return None;
@@ -502,14 +506,13 @@ fn database_file_row(file: &Path, label: &str) -> Option<StorageRow> {
         PathBuf::from(format!("{}-wal", file.display())),
         PathBuf::from(format!("{}-shm", file.display())),
     ] {
-        let name = candidate.file_name()?.to_string_lossy().into_owned();
-        if !is_database_file(&name) {
+        let Some(file_name) = candidate.file_name() else {
             continue;
-        }
+        };
         if let Ok(metadata) = std::fs::symlink_metadata(&candidate) {
             if metadata.is_file() {
                 bytes += metadata.len();
-                names.push(name);
+                names.push(file_name.to_string_lossy().into_owned());
             }
         }
     }
@@ -1039,7 +1042,7 @@ pub fn read_opencode_service(home: Option<&Path>) -> Option<ServiceInfo> {
 
 /// Picks exactly the public facts out of a service record.
 ///
-/// The record also carries the server's password; this parser never touches
+/// The record also carries the server's password; this parser never extracts
 /// that field, so the secret cannot reach the wire even by accident.
 fn parse_service(text: &str) -> Option<ServiceInfo> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
@@ -1557,6 +1560,36 @@ mod tests {
         assert_eq!(external_rows[0].bytes, 730);
         assert!(external_rows[0].path.contains("moved.db"));
         assert!(external_rows[0].path.contains("moved.db-wal"));
+    }
+
+    #[test]
+    fn a_relocated_database_counts_regardless_of_its_filename() {
+        let root = temp_root("opencode-unsuffixed");
+        fs::write(root.join("history.jsonl"), vec![0u8; 10]).expect("writes history");
+        let database = temp_root("opencode-unsuffixed-db").join("scratch-db");
+        fs::write(&database, vec![0u8; 700]).expect("writes db");
+        fs::write(format!("{}-wal", database.display()), vec![0u8; 30]).expect("writes wal");
+        fs::write(format!("{}-shm", database.display()), vec![0u8; 5]).expect("writes shm");
+
+        let report = tool_storage(
+            "opencode",
+            &PathEnv {
+                opencode_data: Some(root),
+                opencode_db: Some(database),
+                ..PathEnv::default()
+            },
+        );
+        let StorageReport::Measured { external_rows, .. } = report else {
+            panic!("expected a measured report");
+        };
+        assert_eq!(
+            external_rows.len(),
+            1,
+            "the env names the file; its name must not gate the report"
+        );
+        assert_eq!(external_rows[0].bytes, 735);
+        assert_eq!(external_rows[0].file_count, 3);
+        assert!(external_rows[0].path.contains("scratch-db-wal"));
     }
 
     #[test]

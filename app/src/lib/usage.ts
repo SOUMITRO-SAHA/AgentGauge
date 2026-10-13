@@ -74,6 +74,14 @@ export function formatCountdown(millis: number | null): string | null {
 }
 
 /**
+ * The age past which a reading stops presenting as current.
+ *
+ * Shared by every freshness surface (Stats' cached readings, the Processes
+ * reading) so one screen cannot drift from the other on when "stale" begins.
+ */
+export const STALE_AFTER_MS = 15 * 60_000;
+
+/**
  * A relative freshness label derived from the snapshot's own timestamp.
  *
  * `nowMs` is injected rather than read from `Date.now()` so the label is
