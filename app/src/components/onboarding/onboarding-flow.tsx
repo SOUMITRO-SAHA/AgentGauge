@@ -84,9 +84,9 @@ const STEPS: ReadonlyArray<{
   },
   {
     id: "automation",
-    title: "Watch without spending quota",
+    title: "Automatic window kickoff",
     blurb:
-      "Automation settings live on the Automation screen. The rollover monitor checks Codex without sending prompts or using quota. The optional schedule uses the latest reported reset without verifying a rollover. A scheduled 'Hi' spends quota, cannot create, reset, or extend a usage window, and runs only when enabled there. Model availability and quota impact are unknown.",
+      "Configure automation on the Automation screen. Pick a model and effort, then start — AgentGauge sends one 'Hi' about a minute after every reported reset. A 'Hi' spends quota and cannot create, reset, or extend a usage window. The app runs in the background and starts with your system.",
     Art: AutomationArt,
     demo: "demo-automation",
   },

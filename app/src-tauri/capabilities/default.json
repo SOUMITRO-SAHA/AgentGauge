@@ -8,6 +8,7 @@
     "opener:default",
     "updater:default",
     "process:allow-restart",
+    "autostart:default",
     "wdio:default",
     "wdio-webdriver:default"
   ]

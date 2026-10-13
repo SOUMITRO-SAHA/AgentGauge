@@ -11,6 +11,9 @@ mod shared;
 
 use std::sync::Arc;
 
+use tauri::image::Image;
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 
 use modules::automation::AutomationRunner;
@@ -43,6 +46,24 @@ pub mod testkit {
 /// freely, and the user's real profile is never touched by a test run.
 /// Release builds ignore the variable — production storage is never
 /// redirectable by the environment.
+/// The icon for the system tray.
+///
+/// A bundled build carries the icon in the window-icon slot that Tauri fills
+/// from `tauri.conf.json → bundle.icon`. An unbundled debug run (plain
+/// `cargo build`, the e2e binary, or `tauri dev` before the bundle exists)
+/// has no bundle, so the icon is embedded at compile time — the same
+/// `icon.png` the bundle ships, so both paths show one identical image.
+///
+/// Without an explicit icon the tray process appears as the generic `exec`
+/// tile in macOS Background App Activity.
+fn resolve_tray_icon(app: &tauri::App) -> Image<'static> {
+    if let Some(icon) = app.default_window_icon() {
+        return Image::new_owned(icon.rgba().to_vec(), icon.width(), icon.height());
+    }
+    const EMBEDDED_PNG: &[u8] = include_bytes!("../icons/icon.png");
+    Image::from_bytes(EMBEDDED_PNG).expect("the embedded icon.png is valid")
+}
+
 fn resolve_data_dir(app: &tauri::App) -> Option<std::path::PathBuf> {
     #[cfg(debug_assertions)]
     if let Some(dir) = std::env::var_os("AGENTGAUGE_DATA_DIR") {
@@ -87,6 +108,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(move |app| {
             // Where every durable store lives: the app-data directory,
             // resolved once here and handed to the modules that own
@@ -186,7 +208,30 @@ pub fn run() {
                                     prompt: &str,
                                     model: Option<&str>,
                                     effort: Option<&str>| {
-                            registry.kickoff(kind, prompt, model, effort)
+                            log::info!(
+                                "kickoff: sending to {kind:?} model={} effort={}",
+                                model.unwrap_or("default"),
+                                effort.unwrap_or("none"),
+                            );
+                            let result = registry.kickoff(kind, prompt, model, effort);
+                            match &result {
+                                Ok(outcome) if outcome.accepted => {
+                                    log::info!(
+                                        "kickoff: {kind:?} accepted, reply={:?}",
+                                        outcome.reply.chars().take(80).collect::<String>(),
+                                    );
+                                }
+                                Ok(outcome) => {
+                                    log::warn!(
+                                        "kickoff: {kind:?} refused: {}",
+                                        outcome.reason.as_deref().unwrap_or("unknown"),
+                                    );
+                                }
+                                Err(error) => {
+                                    log::error!("kickoff: {kind:?} error: {}", error.message);
+                                }
+                            }
+                            result
                         };
                         loop {
                             std::thread::sleep(std::time::Duration::from_secs(30));
@@ -203,6 +248,50 @@ pub fn run() {
                     })
                     .ok();
             }
+            // System tray icon: keeps the app running in the background when the
+            // window is closed, so the kickoff thread and automation monitors
+            // continue working. Left-click shows the window; the menu offers
+            // Show and Quit.
+            let show_item = MenuItemBuilder::with_id("show", "Show AgentGauge").build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+            let tray_menu = MenuBuilder::new(app)
+                .items(&[&show_item, &quit_item])
+                .build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(resolve_tray_icon(app))
+                .menu(&tray_menu)
+                .tooltip("AgentGauge")
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
             Ok(())
         })
         // One command implements the whole request/response protocol defined in
@@ -222,11 +311,22 @@ pub fn run() {
     // The Dock tile is only ours to set once the run loop is up. Setting it
     // during `setup` is too early — macOS builds the tile when the app becomes
     // ready and overwrites anything set before that.
-    app.run(|_handle, event| {
-        if let tauri::RunEvent::Ready = event {
+    app.run(|handle, event| match event {
+        tauri::RunEvent::Ready => {
             #[cfg(all(target_os = "macos", debug_assertions))]
             modules::app_icon::install();
         }
+        tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::CloseRequested { api, .. },
+            ..
+        } if label == "main" => {
+            api.prevent_close();
+            if let Some(window) = handle.get_webview_window("main") {
+                let _ = window.hide();
+            }
+        }
+        _ => {}
     });
 }
 
@@ -245,16 +345,40 @@ fn run_kickoff_worker() -> i32 {
 
     let registry = ProviderRegistry::new();
     let now = crate::shared::clock::Clock::now_ms(&crate::shared::clock::SystemClock);
-    let kick =
-        |kind: crate::shared::domain::ProviderKind,
-         prompt: &str,
-         model: Option<&str>,
-         effort: Option<&str>| { registry.kickoff(kind, prompt, model, effort) };
+    let kick = |kind: crate::shared::domain::ProviderKind,
+                prompt: &str,
+                model: Option<&str>,
+                effort: Option<&str>| {
+        log::info!(
+            "kickoff: sending to {kind:?} model={} effort={}",
+            model.unwrap_or("default"),
+            effort.unwrap_or("none"),
+        );
+        let result = registry.kickoff(kind, prompt, model, effort);
+        match &result {
+            Ok(outcome) if outcome.accepted => {
+                log::info!(
+                    "kickoff: {kind:?} accepted, reply={:?}",
+                    outcome.reply.chars().take(80).collect::<String>(),
+                );
+            }
+            Ok(outcome) => {
+                log::warn!(
+                    "kickoff: {kind:?} refused: {}",
+                    outcome.reason.as_deref().unwrap_or("unknown"),
+                );
+            }
+            Err(error) => {
+                log::error!("kickoff: {kind:?} error: {}", error.message);
+            }
+        }
+        result
+    };
 
     match modules::kickoff::worker::tick(&store, now, &kick) {
         Ok(fired) => {
             if fired > 0 {
-                log::info!("kickoff worker fired {fired} attempt(s).");
+                log::info!("kickoff worker completed, fired {fired} attempt(s).");
             }
             0
         }

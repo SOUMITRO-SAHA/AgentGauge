@@ -117,11 +117,13 @@ pub enum AppRequest {
     /// Selects the model the scheduled kickoff uses for one subscription.
     SetKickoffModel {
         kind: ProviderKind,
+        #[serde(rename = "modelId")]
         model_id: String,
     },
     /// Selects the effort the scheduled kickoff uses for one subscription.
     SetKickoffEffort {
         kind: ProviderKind,
+        #[serde(rename = "effortId")]
         effort_id: String,
     },
     /// Onboarding progress, shaped for a progress indicator.
@@ -367,6 +369,34 @@ mod tests {
         let request: AppRequest = serde_json::from_str(r#"{"type":"setUiState","lastRoute":null}"#)
             .expect("deserializes");
         assert_eq!(request, AppRequest::SetUiState { last_route: None });
+    }
+
+    #[test]
+    fn kickoff_model_uses_camel_case_field() {
+        let json = r#"{"type":"setKickoffModel","kind":"codex","modelId":"gpt-6-luna"}"#;
+        let request: AppRequest = serde_json::from_str(json).expect("deserializes");
+        assert_eq!(
+            request,
+            AppRequest::SetKickoffModel {
+                kind: ProviderKind::Codex,
+                model_id: "gpt-6-luna".into(),
+            }
+        );
+        assert_eq!(serde_json::to_string(&request).expect("serializes"), json);
+    }
+
+    #[test]
+    fn kickoff_effort_uses_camel_case_field() {
+        let json = r#"{"type":"setKickoffEffort","kind":"codex","effortId":"low"}"#;
+        let request: AppRequest = serde_json::from_str(json).expect("deserializes");
+        assert_eq!(
+            request,
+            AppRequest::SetKickoffEffort {
+                kind: ProviderKind::Codex,
+                effort_id: "low".into(),
+            }
+        );
+        assert_eq!(serde_json::to_string(&request).expect("serializes"), json);
     }
 
     #[test]

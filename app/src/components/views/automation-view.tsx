@@ -1,48 +1,57 @@
 /**
- * Automation: one rollover monitor per connected sub.
+ * Automation: send "Hi" at every reset + 1 minute.
  *
- * Every sub the app can read — Codex always, plus every OpenCode-connected
- * plan — gets its own card with its own start/stop, its own rollover rows, and
- * its own check schedule. Starting a monitor is a *choice*: the backend
- * persists it and resumes it on the next launch, so a sub that is running was
- * running before this screen ever opened, and the button says Stop.
- *
- * Each monitor's one job is to *detect* the moment its sub's window rolls
- * over — never to cause one. That boundary is stated in the copy here, not
- * just implemented in Rust, because it is the single most misunderstood thing
- * about the feature: a 5-hour window cannot be restarted by a prompt, and
- * sending a prompt spends the account's quota rather than opening a new
- * window.
+ * One card per connection. The user picks a model and effort (defaulting to
+ * the cheapest), clicks Start, and the app monitors resets AND sends "Hi"
+ * after each one. A single Start/Stop button controls both the monitor and
+ * the kickoff schedule. The equivalent CLI command is displayed for
+ * transparency.
  */
 
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import * as Effect from "effect/Effect";
-import { useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
-import { Play, Stop } from "@phosphor-icons/react";
+import { Check, Copy, Play, Stop } from "@phosphor-icons/react";
+import { enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 
-import { automationAtom, kickoffAtom, subscriptionsAtom } from "~/atoms";
+import {
+  automationAtom,
+  kickoffAtom,
+  kickoffViewOf,
+  subscriptionsAtom,
+} from "~/atoms";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { KickoffSection } from "~/components/automation/kickoff-section";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from "~/components/ui/tooltip";
 import { ViewHeader } from "~/components/views/view-header";
-import { PANEL, PanelHeader } from "~/components/dashboard/panel";
+import { PANEL } from "~/components/dashboard/panel";
 import { useClock } from "~/hooks/use-clock";
 import * as Ipc from "~/lib/ipc";
-import { tabsFrom, type UsageTab } from "~/lib/usage";
+import { tabsFrom, formatCountdown, type UsageTab } from "~/lib/usage";
 
 export function AutomationView({ visible }: { readonly visible: boolean }) {
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
   const automation = useAtomValue(automationAtom);
+  const kickoff = useAtomValue(kickoffAtom);
   const refreshAutomation = useAtomRefresh(automationAtom);
   const refreshKickoff = useAtomRefresh(kickoffAtom);
   const subscriptions = useAtomValue(subscriptionsAtom);
   const nowMs = useClock();
 
-  // Opening the screen re-reads: the retained answer paints instantly, and
-  // the current monitor states land underneath — monitor state is exactly the
-  // thing that changes while the app was looking elsewhere.
   useEffect(() => {
     if (visible) {
       refreshAutomation();
@@ -50,17 +59,15 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
     }
   }, [visible, refreshAutomation, refreshKickoff]);
 
-  // The same tab set the Usage panel renders: Codex always, every connected
-  // plan beside it. A connected plan this build cannot read has no reader to
-  // watch, so it has no monitor card either.
   const tabs = tabsFrom(
     AsyncResult.match(subscriptions, {
       onInitial: () => [],
       onSuccess: (result) => result.value,
       onFailure: () => [],
     }),
-  ).filter((tab): tab is UsageTab & { kind: NonNullable<UsageTab["kind"]> } =>
-    tab.kind !== null,
+  ).filter(
+    (tab): tab is UsageTab & { kind: NonNullable<UsageTab["kind"]> } =>
+      tab.kind !== null,
   );
 
   return (
@@ -70,7 +77,7 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
     >
       <ViewHeader
         title="Automation"
-        subtitle="Monitor reported resets and configure optional kickoff actions per connection."
+        subtitle="Send a minimal &ldquo;Hi&rdquo; after every reported reset to start your usage window."
       />
 
       {AsyncResult.match(automation, {
@@ -92,18 +99,22 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
           const connections = tabs.map((tab) => {
             const monitor =
               result.value.find((item) => item.kind === tab.kind) ?? null;
+            const view = AsyncResult.match(kickoff, {
+              onInitial: () => null,
+              onSuccess: (ko) => kickoffViewOf(ko.value, tab.kind),
+              onFailure: () => null,
+            });
+            const running = monitor?.running ?? false;
+            const enabled = view?.enabled ?? false;
 
             return {
               tab,
               monitor,
-              status:
-                monitor === null
-                  ? "Unavailable"
-                  : monitor.running
-                    ? "Running"
-                    : "Stopped",
+              view,
+              isActive: running && enabled,
             };
           });
+
           const activeTab =
             tabs.find((tab) => tab.value === selectedTab)?.value ??
             tabs[0].value;
@@ -119,7 +130,7 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
                 aria-label="Automation connections"
                 className="!grid !h-auto w-full grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-1 rounded-lg border border-border/70 bg-surface-raised/60 p-1"
               >
-                {connections.map(({ tab, status }) => (
+                {connections.map(({ tab, isActive }) => (
                   <TabsTrigger
                     key={tab.value}
                     value={tab.value}
@@ -128,22 +139,26 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
                   >
                     <span className="max-w-full break-words">{tab.label}</span>
                     <span className="text-xs text-muted-foreground">
-                      {status}
+                      {isActive ? "Active" : "Inactive"}
                     </span>
                   </TabsTrigger>
                 ))}
               </TabsList>
 
-              {connections.map(({ tab, monitor }) => (
+              {connections.map(({ tab, monitor, view }) => (
                 <TabsContent
                   key={tab.value}
                   value={tab.value}
                   className="mt-0"
                 >
-                  <MonitorCard
+                  <ConnectionCard
                     tab={tab}
                     monitor={monitor}
-                    onChanged={refreshAutomation}
+                    view={view}
+                    onChanged={() => {
+                      refreshAutomation();
+                      refreshKickoff();
+                    }}
                     nowMs={nowMs}
                   />
                 </TabsContent>
@@ -154,9 +169,8 @@ export function AutomationView({ visible }: { readonly visible: boolean }) {
       })}
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Rollover monitors only read. Scheduled kickoff is a separate, opt-in
-        action that uses quota; a prompt cannot create, reset, or extend a usage
-        window. Monitor choices are remembered and resume when AgentGauge opens.
+        A "Hi" uses quota and does not create, reset, or extend a usage
+        window. Your automation choices are remembered across restarts.
       </p>
     </div>
   );
@@ -175,201 +189,493 @@ function AutomationLoadingSkeleton() {
           <Skeleton className="h-4 w-36" aria-hidden="true" />
           <Skeleton className="size-8" aria-hidden="true" />
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Skeleton className="h-4 w-20" aria-hidden="true" />
-          <Skeleton className="h-8 w-20 rounded-md" aria-hidden="true" />
-        </div>
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-3 w-20" aria-hidden="true" />
-          <div className="flex justify-between gap-3">
-            <Skeleton className="h-4 w-32" aria-hidden="true" />
-            <Skeleton className="h-4 w-24" aria-hidden="true" />
-          </div>
-          <div className="flex justify-between gap-3">
-            <Skeleton className="h-4 w-36" aria-hidden="true" />
-            <Skeleton className="h-4 w-24" aria-hidden="true" />
-          </div>
-        </div>
-        <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
-          <Skeleton className="h-3 w-12" aria-hidden="true" />
-          <div className="flex justify-between gap-3">
-            <Skeleton className="h-4 w-20" aria-hidden="true" />
-            <Skeleton className="h-4 w-24" aria-hidden="true" />
-          </div>
-          <div className="flex justify-between gap-3">
-            <Skeleton className="h-4 w-16" aria-hidden="true" />
-            <Skeleton className="h-4 w-24" aria-hidden="true" />
-          </div>
-        </div>
-        <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
-          <Skeleton className="h-3 w-32" aria-hidden="true" />
-          <Skeleton className="h-4 w-full" aria-hidden="true" />
-          <div className="flex flex-wrap gap-3">
+        <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Skeleton className="h-4 w-28" aria-hidden="true" />
             <Skeleton
               className="h-9 w-full max-w-56 rounded-md"
               aria-hidden="true"
             />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Skeleton className="h-4 w-24" aria-hidden="true" />
             <Skeleton
               className="h-9 w-full max-w-56 rounded-md"
               aria-hidden="true"
             />
           </div>
         </div>
+        <Skeleton className="h-12 w-full rounded-md" aria-hidden="true" />
+        <Skeleton className="h-8 w-32 rounded-md" aria-hidden="true" />
       </div>
     </section>
   );
 }
 
-function MonitorCard({
+function ConnectionCard({
   tab,
   monitor,
+  view,
   onChanged,
   nowMs,
 }: {
   readonly tab: UsageTab & { kind: NonNullable<UsageTab["kind"]> };
   readonly monitor: Ipc.AutomationState | null;
+  readonly view: Ipc.KickoffView | null;
   readonly onChanged: () => void;
   readonly nowMs: number;
 }): ReactElement {
   const kind = tab.kind;
   const running = monitor?.running ?? false;
+  const enabled = view?.enabled ?? false;
+  const isActive = running && enabled;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const start = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await Effect.runPromise(Ipc.startAutomation(kind));
+      await Effect.runPromise(Ipc.setKickoffEnabled(kind, true));
+      try {
+        const alreadyEnabled = await isAutostartEnabled();
+        if (!alreadyEnabled) await enableAutostart();
+      } catch {
+        // Autostart is best-effort; the automation itself matters more.
+      }
+      onChanged();
+    } catch (cause: unknown) {
+      setError(describeError(cause));
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }, [kind, onChanged]);
+
+  const stop = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await Effect.runPromise(Ipc.setKickoffEnabled(kind, false));
+      await Effect.runPromise(Ipc.stopAutomation(kind));
+      onChanged();
+    } catch (cause: unknown) {
+      setError(describeError(cause));
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }, [kind, onChanged]);
+
+  const applyModel = useCallback(
+    (modelId: string) => {
+      void Effect.runPromise(Ipc.setKickoffModel(kind, modelId))
+        .then(() => {
+          setError(null);
+          onChanged();
+        })
+        .catch((cause: unknown) => {
+          setError(describeError(cause));
+          onChanged();
+        });
+    },
+    [kind, onChanged],
+  );
+
+  const applyEffort = useCallback(
+    (effortId: string) => {
+      void Effect.runPromise(Ipc.setKickoffEffort(kind, effortId))
+        .then(() => {
+          setError(null);
+          onChanged();
+        })
+        .catch((cause: unknown) => {
+          setError(describeError(cause));
+          onChanged();
+        });
+    },
+    [kind, onChanged],
+  );
 
   return (
-    <section className={PANEL} data-testid={`automation-panel-${kind}`}>
-      <PanelHeader
-        title={tab.label}
-        testId={`refresh-automation-${kind}`}
-        onRefresh={onChanged}
-      />
+    <TooltipProvider>
+      <section className={PANEL} data-testid={`automation-panel-${kind}`}>
+        <h2 className="mb-4 truncate font-display text-sm font-semibold text-foreground">
+          {tab.label}
+        </h2>
 
-      {monitor === null ? (
-        <p className="text-sm text-muted-foreground">
-          Monitor status is unavailable for this connection.
-        </p>
-      ) : (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface/60 p-3">
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium">Rollover monitor</span>
-              <span
-                className="text-xs text-muted-foreground"
-                data-testid={`automation-status-${kind}`}
-              >
-                {running ? "Running" : "Stopped"}
-              </span>
-            </div>
-            <AutomationToggle
-              kind={kind}
-              running={running}
-              onStart={() => {
-                void Effect.runPromise(Ipc.startAutomation(kind)).then(
-                  onChanged,
-                );
-              }}
-              onStop={() => {
-                void Effect.runPromise(Ipc.stopAutomation(kind)).then(
-                  onChanged,
-                );
-              }}
+        {view === null ? (
+          <p className="text-sm text-muted-foreground">
+            Automation is unavailable for this connection.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <ModelEffortPicker
+              view={view}
+              isActive={isActive}
+              onModel={applyModel}
+              onEffort={applyEffort}
             />
-          </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <RolloverDetails kind={kind} monitor={monitor} onChanged={onChanged} />
-            <WatchSchedule kind={kind} monitor={monitor} />
-          </div>
-        </div>
-      )}
+            <CommandPreview kind={kind} view={view} />
 
-      <div className="mt-4 border-t border-border/60 pt-4">
-        <KickoffSection kind={kind} nowMs={nowMs} />
-      </div>
-    </section>
+            <Button
+              className="w-full"
+              variant={isActive ? "destructive" : "default"}
+              size="lg"
+              disabled={busy || (!isActive && view.models.length === 0)}
+              onClick={isActive ? stop : start}
+              data-testid={`automation-toggle-${kind}`}
+              aria-pressed={isActive}
+              aria-label={`${isActive ? "Stop" : "Start"} automation for ${kind}`}
+            >
+              {isActive ? (
+                <>
+                  <Stop aria-hidden="true" weight="fill" />
+                  Stop Automation
+                </>
+              ) : (
+                <>
+                  <Play aria-hidden="true" weight="fill" />
+                  Start Automation
+                </>
+              )}
+            </Button>
+
+            {isActive && (
+              <StatusSection
+                kind={kind}
+                view={view}
+                monitor={monitor}
+                nowMs={nowMs}
+              />
+            )}
+
+            <SchedulerWarning kind={kind} enabled={view.enabled} />
+
+            {error !== null && (
+              <p
+                className="text-xs text-destructive"
+                data-testid={`automation-error-${kind}`}
+              >
+                {error}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+    </TooltipProvider>
   );
 }
 
-/**
- * Rollover facts: the reset the source last reported, and the transition the
- * monitor detected. The PRD separates a *reported* reset from an *observed*
- * rollover, so the labels must too.
- */
-function RolloverDetails({
+function ModelEffortPicker({
+  view,
+  isActive,
+  onModel,
+  onEffort,
+}: {
+  readonly view: Ipc.KickoffView;
+  readonly isActive: boolean;
+  readonly onModel: (modelId: string) => void;
+  readonly onEffort: (effortId: string) => void;
+}) {
+  const selectedModel = view.models.find(
+    (model) => model.id === view.effectiveModel,
+  );
+  const efforts = selectedModel?.efforts ?? [];
+  const lockedMessage =
+    "Stop automation before changing model or effort.";
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-sm text-muted-foreground">Model</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              tabIndex={isActive ? 0 : undefined}
+              title={isActive ? lockedMessage : undefined}
+            >
+              <Select
+                value={view.effectiveModel}
+                onValueChange={onModel}
+                disabled={isActive || view.models.length === 0}
+              >
+                <SelectTrigger
+                  className="w-56"
+                  data-testid={`kickoff-model-${view.kind}`}
+                  aria-label={`Kickoff model for ${view.kind}`}
+                >
+                  <SelectValue placeholder="Unavailable" />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  {view.models.map((model) => (
+                    <SelectItem
+                      key={model.id}
+                      value={model.id}
+                      data-testid={`kickoff-model-option-${view.kind}-${model.id}`}
+                    >
+                      {model.label}
+                      {model.cheapest && (
+                        <span className="ml-1 text-xs text-muted-foreground">
+                          (cheapest)
+                        </span>
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </span>
+          </TooltipTrigger>
+          {isActive && (
+            <TooltipContent data-testid={`kickoff-model-locked-tooltip-${view.kind}`}>
+              {lockedMessage}
+            </TooltipContent>
+          )}
+        </Tooltip>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-sm text-muted-foreground">Effort</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              tabIndex={isActive ? 0 : undefined}
+              title={isActive ? lockedMessage : undefined}
+            >
+              <Select
+                value={view.effortId ?? efforts[0]?.id ?? ""}
+                onValueChange={onEffort}
+                disabled={isActive || efforts.length === 0}
+              >
+                <SelectTrigger
+                  className="w-56"
+                  data-testid={`kickoff-effort-${view.kind}`}
+                  aria-label={`Kickoff effort for ${view.kind}`}
+                >
+                  <SelectValue placeholder="Unavailable" />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  {efforts.map((effort) => (
+                    <SelectItem
+                      key={effort.id}
+                      value={effort.id}
+                      data-testid={`kickoff-effort-option-${view.kind}-${effort.id}`}
+                    >
+                      {effort.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </span>
+          </TooltipTrigger>
+          {isActive && (
+            <TooltipContent data-testid={`kickoff-effort-locked-tooltip-${view.kind}`}>
+              {lockedMessage}
+            </TooltipContent>
+          )}
+        </Tooltip>
+      </div>
+
+      {view.modelError != null && (
+        <p
+          className="text-xs text-warn"
+          data-testid={`kickoff-model-error-${view.kind}`}
+        >
+          {view.modelError}
+        </p>
+      )}
+    </div>
+  );
+}
+
+const OPENCODE_PROVIDER_MAP: Record<string, string> = {
+  zai: "zai-coding-plan",
+  minimax: "minimax-coding-plan",
+  kimi: "kimi-code-plan-global",
+};
+
+function buildCommand(
+  kind: Ipc.ProviderKind,
+  model: string,
+  effort: string | undefined,
+): string {
+  if (kind === "codex") {
+    const parts = [
+      "codex",
+      "exec",
+      '"Hi"',
+      "--model",
+      model,
+      "-s",
+      "read-only",
+    ];
+    if (effort) {
+      parts.push("-c", `'model_reasoning_effort="${effort}"'`);
+    }
+    parts.push("--ephemeral");
+    return parts.join(" ");
+  }
+
+  const provider = OPENCODE_PROVIDER_MAP[kind] ?? kind;
+  const parts = [
+    "opencode",
+    "run",
+    '"Hi"',
+    "-m",
+    `${provider}/${model}`,
+  ];
+  if (effort) {
+    parts.push("--variant", effort);
+  }
+  parts.push("--dir", "/tmp");
+  return parts.join(" ");
+}
+
+function CommandPreview({
   kind,
-  monitor,
-  onChanged,
+  view,
 }: {
   readonly kind: Ipc.ProviderKind;
-  readonly monitor: Ipc.AutomationState;
-  readonly onChanged: () => void;
+  readonly view: Ipc.KickoffView;
+}) {
+  const [copied, setCopied] = useState(false);
+  const command = buildCommand(
+    kind,
+    view.effectiveModel,
+    view.effortId,
+  );
+
+  const copy = useCallback(() => {
+    void navigator.clipboard.writeText(command).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [command]);
+
+  return (
+    <div
+      className="group relative rounded-md border border-border/60 bg-surface/60 p-3"
+      data-testid={`automation-command-${kind}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <span className="mb-1 block text-xs text-muted-foreground">
+            Command at each reset cycle
+          </span>
+          <code className="block break-all text-xs leading-relaxed text-foreground">
+            {command}
+          </code>
+        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
+              onClick={copy}
+              data-testid={`automation-copy-${kind}`}
+              aria-label="Copy command"
+            >
+              {copied ? (
+                <Check className="text-ok" aria-hidden="true" />
+              ) : (
+                <Copy aria-hidden="true" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{copied ? "Copied" : "Copy"}</TooltipContent>
+        </Tooltip>
+      </div>
+    </div>
+  );
+}
+
+function SchedulerWarning({
+  kind,
+  enabled,
+}: {
+  readonly kind: Ipc.ProviderKind;
+  readonly enabled: boolean;
+}) {
+  const overview = useAtomValue(kickoffAtom);
+  if (!enabled) return null;
+
+  const scheduler = AsyncResult.match(overview, {
+    onInitial: () => null,
+    onSuccess: (ko) => ko.value.scheduler,
+    onFailure: () => null,
+  });
+
+  if (scheduler === null) return null;
+
+  if (!scheduler.supported) {
+    return (
+      <p
+        className="text-xs text-warn"
+        data-testid={`automation-unsupported-${kind}`}
+      >
+        Background scheduling is not supported on this platform yet.
+      </p>
+    );
+  }
+
+  if (!scheduler.installed) {
+    return (
+      <p
+        className="text-xs text-warn"
+        data-testid={`automation-scheduler-warn-${kind}`}
+      >
+        The background scheduler is not installed, so the automation only runs
+        while AgentGauge is open.
+      </p>
+    );
+  }
+
+  return null;
+}
+
+function StatusSection({
+  kind,
+  view,
+  monitor,
+  nowMs,
+}: {
+  readonly kind: Ipc.ProviderKind;
+  readonly view: Ipc.KickoffView;
+  readonly monitor: Ipc.AutomationState | null;
+  readonly nowMs: number;
 }) {
   return (
-    <div className="flex flex-col gap-2" data-testid={`automation-rollover-${kind}`}>
-      <DetailGroupLabel>Rollover</DetailGroupLabel>
+    <div className="flex flex-col gap-2 rounded-md bg-surface/60 p-3">
+      <DetailRow
+        testId={`automation-next-${kind}`}
+        label='Next "Hi"'
+        value={formatNextKick(view.nextKickAt, nowMs)}
+      />
       <DetailRow
         testId={`automation-observed-reset-${kind}`}
         label="Last reported reset"
-        value={formatTime(monitor.observedResetsAt, "Not reported")}
+        value={formatTime(monitor?.observedResetsAt ?? null, "Not reported")}
       />
-      <DetailRow
-        testId={`automation-rolled-over-at-${kind}`}
-        label="Rollover detected at"
-        value={formatTime(monitor.rolledOverAt, "Not detected")}
-      />
-
-      {monitor.rolledOver && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      {view.lastAccepted !== null && (
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <span className="text-sm text-muted-foreground">Last attempt</span>
           <span
-            className="text-sm text-warn"
-            data-testid={`automation-rolled-over-${kind}`}
+            className={
+              view.lastAccepted
+                ? "text-sm text-ok"
+                : "text-sm text-critical"
+            }
+            data-testid={`automation-last-${kind}`}
           >
-            A fresh window was detected.
+            {view.lastAccepted ? "Succeeded" : "Failed"}
+            {view.lastDetail ? ` — ${view.lastDetail}` : ""}
           </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void Effect.runPromise(Ipc.acknowledgeRollover(kind)).then(
-                onChanged,
-              );
-            }}
-            data-testid={`automation-acknowledge-${kind}`}
-          >
-            Acknowledge
-          </Button>
         </div>
       )}
     </div>
-  );
-}
-
-function WatchSchedule({
-  kind,
-  monitor,
-}: {
-  readonly kind: Ipc.ProviderKind;
-  readonly monitor: Ipc.AutomationState;
-}) {
-  return (
-    <div className="flex flex-col gap-2" data-testid={`automation-schedule-${kind}`}>
-      <DetailGroupLabel>Checks</DetailGroupLabel>
-      <DetailRow
-        testId={`automation-last-polled-${kind}`}
-        label="Last checked"
-        value={formatTime(monitor.lastPolledAt, "Not checked")}
-      />
-      <DetailRow
-        testId={`automation-next-poll-${kind}`}
-        label="Next check"
-        value={formatTime(monitor.nextPollAt, "Not scheduled")}
-      />
-    </div>
-  );
-}
-
-/** The quiet heading that frames a group of detail rows. */
-function DetailGroupLabel({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <span className="text-xs font-medium text-muted-foreground">{children}</span>
   );
 }
 
@@ -392,46 +698,32 @@ function DetailRow({
   );
 }
 
-function AutomationToggle({
-  kind,
-  running,
-  onStart,
-  onStop,
-}: {
-  readonly kind: Ipc.ProviderKind;
-  readonly running: boolean;
-  readonly onStart: () => void;
-  readonly onStop: () => void;
-}) {
-  return (
-    <Button
-      variant={running ? "outline" : "default"}
-      size="sm"
-      className="shrink-0"
-      onClick={running ? onStop : onStart}
-      data-testid={`automation-toggle-${kind}`}
-    >
-      {running ? (
-        <>
-          <Stop aria-hidden="true" weight="fill" />
-          Stop
-        </>
-      ) : (
-        <>
-          <Play aria-hidden="true" weight="fill" />
-          Start
-        </>
-      )}
-    </Button>
-  );
+function formatNextKick(nextKickAt: number | null, nowMs: number): string {
+  if (nextKickAt === null || !Number.isFinite(nextKickAt)) return "—";
+  const millis = nextKickAt - nowMs;
+  if (millis <= 0) return "due now";
+  return `in ${formatCountdown(millis) ?? "—"} · ${formatTimeShort(nextKickAt)}`;
 }
 
 function formatTime(ms: number | null, missing: string): string {
-  if (ms === null) {
-    return missing;
-  }
+  if (ms === null) return missing;
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(ms));
 }
+
+function formatTimeShort(epochMs: number): string {
+  return new Date(epochMs).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function describeError(cause: unknown): string {
+  if (cause instanceof Error && cause.message.length > 0) return cause.message;
+  if (typeof cause === "string" && cause.length > 0) return cause;
+  return "The operation could not be completed.";
+}
+
+export { formatNextKick, buildCommand };

@@ -89,7 +89,7 @@ export const ROUTES: ReadonlyArray<RouteDefinition> = [
   {
     id: "automation",
     label: "Automation",
-    description: "Watching for the moment a window resets.",
+    description: "Send Hi after every reported reset.",
     icon: Pulse,
   },
   {
