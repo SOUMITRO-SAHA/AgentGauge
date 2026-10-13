@@ -423,10 +423,13 @@ fn publish_snapshot(state: &AppState, snapshots: &[UsageSnapshot]) {
     };
     let now = now_secs();
 
-    if let Err(error) = store.publish(snapshots, now) {
-        // A widget that cannot be written must not break the reading the user
-        // actually asked for, so this is reported and not propagated.
-        log::warn!("could not publish widget snapshot: {}", error.message);
+    // The bridge reload is best-effort: a rejection only means the widget
+    // refreshes on WidgetKit's own cadence instead of immediately.
+    match store.publish(snapshots, now) {
+        Ok(()) => crate::modules::widget::request_timeline_reload(),
+        Err(error) => {
+            log::warn!("could not publish widget snapshot: {}", error.message);
+        }
     }
 }
 

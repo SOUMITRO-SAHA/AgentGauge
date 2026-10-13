@@ -23,10 +23,13 @@
 //!
 //! ## Configuration status
 //!
-//! `WidgetCenter.getCurrentConfigurations` reports configured widget kinds.
-//! `extension_present` remains a separate bundle fact; the optional
-//! `configured` field is populated only when the bundled WidgetKit reader
-//! successfully queries the system.
+//! `WidgetCenter.getCurrentConfigurations` reports configured widget kinds. It
+//! must be called from the app's own process — a spawned helper executable is
+//! rejected by `chronod` — so the bundled Swift bridge dylib
+//! (`Contents/Frameworks/libWidgetBridge.dylib`) is loaded with `dlopen` and
+//! answers in-process. `extension_present` remains a separate bundle fact; the
+//! optional `configured` field is populated only when that query succeeds. The
+//! same bridge carries `reloadAllTimelines` after each snapshot publication.
 
 use std::fs;
 use std::fs::OpenOptions;
@@ -47,7 +50,6 @@ use crate::shared::platform::macos_version;
 
 /// Bundle name of the extension. Must match `SCHEME` in `widget/build-widget.sh`.
 pub const WIDGET_EXTENSION_NAME: &str = "AIStatsWidget.appex";
-pub const WIDGET_STATUS_READER_NAME: &str = "AgentGaugeWidgetStatus";
 #[cfg(debug_assertions)]
 pub const WIDGET_KIND: &str = "AIStatsUsageWidgetDev";
 #[cfg(not(debug_assertions))]
@@ -499,11 +501,18 @@ pub struct SystemWidgetStatus {
     pub extension_present: bool,
     /// Whether a snapshot has been published for the widget to read.
     pub snapshot_written: bool,
-    /// Whether WidgetKit reports a user-configured instance of this widget.
+    /// Whether WidgetKit reports a user-configured instance of this build's
+    /// widget.
     ///
     /// `None` means the system query was unavailable; it is never treated as
     /// an answer that the widget is not configured.
     pub configured: Option<bool>,
+    /// Every AgentGauge widget kind the successful query found configured.
+    ///
+    /// The Dev and Release builds place separate widgets, so this can name a
+    /// kind other than this build's own. Empty when the query was unavailable
+    /// or found nothing — `configured` distinguishes those cases.
+    pub configured_kinds: Vec<String>,
     /// Whether the widget can also live in the menu bar (macOS 26+).
     pub menu_bar_available: bool,
     /// The procedure, empty when there is nothing to do.
@@ -565,6 +574,7 @@ impl SystemWidgetStatus {
             extension_present,
             snapshot_written,
             configured: None,
+            configured_kinds: Vec::new(),
             menu_bar_available,
             setup,
             reason,
@@ -582,7 +592,16 @@ impl SystemWidgetStatus {
             store.is_some_and(|s| s.has_snapshot()),
         );
         if status.supported && extension_present {
-            status.configured = widget_configuration_status();
+            if let Some(answer) = widget_configuration_status() {
+                status.configured = answer.configured;
+                status.configured_kinds = answer.kinds;
+            }
+        } else {
+            log::debug!(
+                "widget configuration not queried: supported={} extension_present={}",
+                status.supported,
+                extension_present
+            );
         }
         status
     }
@@ -594,10 +613,11 @@ fn setup_steps(extension_present: bool, snapshot_written: bool, menu_bar: bool) 
 
     if !extension_present {
         steps.push(SetupStep {
-            title: "Run the packaged app, not the dev server".to_string(),
+            title: "Open the packaged app, not the dev server".to_string(),
             detail: format!(
-                "This build does not contain the widget extension. Run `bun run tauri build` and \
-                 open {} — the extension is embedded automatically.",
+                "This executable has no app bundle around it, so it carries no widget \
+                 extension and cannot detect one. Run `bun run build:mac` in `app/` and open \
+                 {} — the build embeds the widget extension into the app.",
                 "AgentGauge.app"
             ),
         });
@@ -671,31 +691,244 @@ pub fn extension_is_embedded() -> bool {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct WidgetConfigurationResponse {
     configured: Option<bool>,
+    #[serde(default)]
+    configured_kinds: Vec<String>,
 }
 
-fn decode_widget_configuration(stdout: &[u8], success: bool) -> Option<bool> {
+#[derive(Debug, PartialEq)]
+struct WidgetConfiguration {
+    configured: Option<bool>,
+    kinds: Vec<String>,
+}
+
+fn decode_widget_configuration(stdout: &[u8], success: bool) -> Option<WidgetConfiguration> {
     if !success {
         return None;
     }
     serde_json::from_slice::<WidgetConfigurationResponse>(stdout)
         .ok()
-        .and_then(|response| response.configured)
+        .map(|response| WidgetConfiguration {
+            configured: response.configured,
+            kinds: response.configured_kinds,
+        })
 }
 
-fn widget_configuration_status() -> Option<bool> {
-    let executable = std::env::current_exe().ok()?;
-    let root = bundle_root(&executable)?;
-    let reader = root
-        .join("Contents")
-        .join("MacOS")
-        .join(WIDGET_STATUS_READER_NAME);
-    let output = std::process::Command::new(reader)
-        .arg(WIDGET_KIND)
-        .output()
-        .ok()?;
-    decode_widget_configuration(&output.stdout, output.status.success())
+/// Name of the Swift bridge dylib embedded at `Contents/Frameworks/`.
+///
+/// Must stay in step with `BRIDGE_NAME` in `widget/build-widget.sh` and the
+/// `@_cdecl` symbols in `widget/Sources/WidgetBridge.swift`.
+const WIDGET_BRIDGE_NAME: &str = "libWidgetBridge.dylib";
+
+/// `WidgetCenter` must be called from the app's own process: `chronod` accepts
+/// the calls only from the executable the bundle's `CFBundleExecutable` names,
+/// so a spawned helper is rejected and configuration would stay unknown
+/// forever. The bridge is a dylib precisely so it runs in-process.
+#[cfg(target_os = "macos")]
+mod bridge {
+    use std::ffi::{c_char, c_int, c_void, CString};
+    use std::path::PathBuf;
+
+    use crate::shared::bundle::bundle_root;
+
+    use super::WIDGET_BRIDGE_NAME;
+
+    const RTLD_NOW: c_int = 0x2;
+    const RTLD_LOCAL: c_int = 0x4;
+
+    extern "C" {
+        fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    }
+
+    struct Handle(*mut c_void);
+
+    // SAFETY: the handle is an opaque `dlopen` pointer. `dlopen`, `dlsym` and
+    // the bridge's own `@_cdecl` entry points are safe to call from any thread
+    // — each call carries everything it needs and the bridge serialises its own
+    // reply — so the raw pointer is only ever read, never shared mutably.
+    unsafe impl Send for Handle {}
+    unsafe impl Sync for Handle {}
+
+    /// Opened once, then kept for the lifetime of the process — and never closed.
+    ///
+    /// The status is re-read on a timer while the app is visible, so opening per
+    /// read would `dlopen`/`dlclose` the same image every few seconds. Unloading
+    /// is the riskier half of that pair: WidgetKit code the bridge links can
+    /// still be reachable while a reply is in flight, and unmapping an image
+    /// underneath it is a crash rather than a failed query. Keeping the handle
+    /// is what makes the poll cheap as well.
+    static BRIDGE: std::sync::OnceLock<LoadedBridge> = std::sync::OnceLock::new();
+
+    /// The bridge and, when it did not load, why — the reason a user needs when
+    /// detection silently cannot run.
+    struct LoadedBridge {
+        handle: Option<Handle>,
+        reason: String,
+    }
+
+    impl LoadedBridge {
+        fn load() -> Self {
+            let Some(path) = path() else {
+                return Self {
+                    handle: None,
+                    reason: format!(
+                        "this executable is not inside an app bundle, so {} is unreachable",
+                        WIDGET_BRIDGE_NAME
+                    ),
+                };
+            };
+            let path_text = path.to_string_lossy().into_owned();
+            let Ok(raw) = CString::new(path.into_os_string().as_encoded_bytes()) else {
+                return Self {
+                    handle: None,
+                    reason: format!("the bundle path {path_text} is not valid C text"),
+                };
+            };
+            let handle = unsafe { dlopen(raw.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
+            if handle.is_null() {
+                return Self {
+                    handle: None,
+                    reason: format!("{path_text} could not be loaded into this process"),
+                };
+            }
+            Self {
+                handle: Some(Handle(handle)),
+                reason: String::new(),
+            }
+        }
+    }
+
+    /// The bridge's answer, or the reason it could not be loaded.
+    fn open() -> Result<&'static Handle, &'static str> {
+        let bridge = BRIDGE.get_or_init(LoadedBridge::load);
+        bridge.handle.as_ref().ok_or(bridge.reason.as_str())
+    }
+
+    /// Where the bridge lives inside this bundle.
+    ///
+    /// `None` for an unbundled executable — `tauri dev` and the e2e harness both
+    /// run the bare binary — which is a fact about the build, not a failure to
+    /// load.
+    pub fn path() -> Option<PathBuf> {
+        let root = std::env::current_exe()
+            .ok()
+            .as_deref()
+            .and_then(bundle_root)?;
+        Some(
+            root.join("Contents")
+                .join("Frameworks")
+                .join(WIDGET_BRIDGE_NAME),
+        )
+    }
+
+    fn symbol<'a>(handle: &'a Handle, name: &str) -> Option<*mut c_void> {
+        let name = CString::new(name).ok()?;
+        let symbol = unsafe { dlsym(handle.0, name.as_ptr()) };
+        if symbol.is_null() {
+            return None;
+        }
+        Some(symbol)
+    }
+
+    /// The bridge's answer for `kind`, read fresh every time.
+    ///
+    /// Every failure is unknown, never "not configured": a missing bundle, an
+    /// unloadable bridge, a truncated reply, or a query WidgetKit never answers
+    /// all mean the same thing to the user — the app cannot tell — and saying
+    /// otherwise would send them into a gallery they already used.
+    pub fn configured_status(kind: &str) -> Option<super::WidgetConfiguration> {
+        type StatusFn =
+            unsafe extern "C" fn(kind: *const c_char, out: *mut c_char, capacity: c_int) -> c_int;
+
+        let handle = match open() {
+            Ok(handle) => handle,
+            Err(reason) => {
+                log::warn!("widget status unknown: {reason}");
+                return None;
+            }
+        };
+        let status = match symbol(handle, "agentgauge_widget_status") {
+            Some(status) => status,
+            None => {
+                log::warn!(
+                    "widget status unknown: {} exports no agentgauge_widget_status",
+                    WIDGET_BRIDGE_NAME
+                );
+                return None;
+            }
+        };
+        let status: StatusFn = unsafe { std::mem::transmute(status) };
+        let kind = CString::new(kind).ok()?;
+        let mut buffer = [0u8; 256];
+        let written = unsafe {
+            status(
+                kind.as_ptr(),
+                buffer.as_mut_ptr().cast::<c_char>(),
+                buffer.len() as c_int,
+            )
+        };
+        if written <= 0 || written as usize >= buffer.len() {
+            log::warn!(
+                "widget status unknown: the bridge wrote {written} byte(s) of {}",
+                buffer.len()
+            );
+            return None;
+        }
+        let json = String::from_utf8(buffer[..written as usize].to_vec()).ok()?;
+        let answer = super::decode_widget_configuration(json.as_bytes(), true);
+        if answer.is_none() {
+            log::warn!("widget status unknown: unreadable reply from the bridge");
+        }
+        answer
+    }
+
+    /// Whether the reload request was accepted for delivery to WidgetKit.
+    pub fn request_reload() -> bool {
+        type ReloadFn = unsafe extern "C" fn() -> bool;
+
+        let Ok(handle) = open() else {
+            return false;
+        };
+        let Some(reload) = symbol(handle, "agentgauge_widget_reload") else {
+            return false;
+        };
+        let reload: ReloadFn = unsafe { std::mem::transmute(reload) };
+        unsafe { reload() }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn widget_configuration_status() -> Option<WidgetConfiguration> {
+    let answer = bridge::configured_status(WIDGET_KIND);
+    log::debug!(
+        "widget configuration read: configured={:?} kinds={:?}",
+        answer.as_ref().and_then(|answer| answer.configured),
+        answer.as_ref().map(|answer| &answer.kinds),
+    );
+    answer
+}
+
+#[cfg(not(target_os = "macos"))]
+fn widget_configuration_status() -> Option<WidgetConfiguration> {
+    None
+}
+
+/// Asks WidgetKit to re-read the snapshot after the app republished it.
+///
+/// A rejection is logged, never propagated: the widget also refreshes on its
+/// own schedule, so a failed nudge degrades to the system cadence.
+pub fn request_timeline_reload() {
+    #[cfg(target_os = "macos")]
+    if !bridge::request_reload() {
+        log::warn!(
+            "WidgetKit did not accept the timeline refresh request; it may update on its schedule"
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    let () = ();
 }
 
 #[cfg(test)]
@@ -1057,19 +1290,37 @@ mod tests {
 
     #[test]
     fn widget_center_replies_distinguish_false_from_unknown() {
+        let reply = |json: &[u8]| decode_widget_configuration(json, true);
         assert_eq!(
-            decode_widget_configuration(br#"{"configured":false}"#, true),
-            Some(false)
+            reply(br#"{"configured":false,"kinds":[]}"#),
+            Some(WidgetConfiguration {
+                configured: Some(false),
+                kinds: vec![]
+            })
         );
         assert_eq!(
-            decode_widget_configuration(br#"{"configured":true}"#, true),
-            Some(true)
+            reply(br#"{"configured":false,"configuredKinds":["AIStatsUsageWidgetDev"]}"#),
+            Some(WidgetConfiguration {
+                configured: Some(false),
+                kinds: vec!["AIStatsUsageWidgetDev".to_string()]
+            })
         );
         assert_eq!(
-            decode_widget_configuration(br#"{"configured":null}"#, true),
-            None
+            reply(br#"{"configured":true,"configuredKinds":["AIStatsUsageWidget"]}"#),
+            Some(WidgetConfiguration {
+                configured: Some(true),
+                kinds: vec!["AIStatsUsageWidget".to_string()]
+            })
         );
-        assert_eq!(decode_widget_configuration(b"not json", true), None);
+        assert_eq!(
+            reply(br#"{"configured":null,"configuredKinds":[]}"#),
+            Some(WidgetConfiguration {
+                configured: None,
+                kinds: vec![]
+            }),
+            "a null answer means the query ran but reported unknown"
+        );
+        assert_eq!(reply(b"not json"), None);
         assert_eq!(
             decode_widget_configuration(br#"{"configured":false}"#, false),
             None

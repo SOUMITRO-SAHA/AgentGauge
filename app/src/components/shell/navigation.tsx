@@ -19,9 +19,8 @@
  * presentation identically.
  */
 
-import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
-import { useEffect } from "react";
 import { CaretRight, PlusCircle } from "@phosphor-icons/react";
 
 import { routeAtom, systemWidgetAtom, widgetSetupRequestedAtom } from "~/atoms";
@@ -40,6 +39,7 @@ import {
   useSidebar,
 } from "~/components/ui/sidebar";
 import { useIsMobile } from "~/hooks/use-mobile";
+import { useSystemWidgetStatusPolling } from "~/hooks/use-system-widget-status";
 import { DEV_TEST_SCREEN_ENABLED } from "~/lib/dev-test-screen";
 import { routesNeedingNavigation, type Route } from "~/lib/navigation";
 import { cn } from "~/lib/utils";
@@ -56,12 +56,7 @@ export function Navigation({
   // settles before asserting, so the one-frame flip is accepted in exchange
   // for reusing the library's own breakpoint instead of a second one.
   const isMobile = useIsMobile();
-  const refreshWidget = useAtomRefresh(systemWidgetAtom);
-
-  useEffect(() => {
-    window.addEventListener("focus", refreshWidget);
-    return () => window.removeEventListener("focus", refreshWidget);
-  }, [refreshWidget]);
+  useSystemWidgetStatusPolling();
 
   return isMobile ? (
     <FloatingTabs onNavigate={onNavigate} />

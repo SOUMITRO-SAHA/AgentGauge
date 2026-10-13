@@ -15,8 +15,9 @@ function status(
     extensionBundled: true,
     extensionPresent: true,
     snapshotWritten: true,
-    menuBarAvailable: true,
     configured,
+    configuredKinds: [],
+    menuBarAvailable: true,
     setup: [],
     reason: null,
     ...overrides,
@@ -28,18 +29,56 @@ describe("shouldOfferWidgetSetup", () => {
     expect(shouldOfferWidgetSetup(status(false))).toBe(true);
   });
 
-  it("does not offer setup when a widget is already configured", () => {
-    expect(shouldOfferWidgetSetup(status(true))).toBe(false);
-  });
-
-  it("does not mistake an unknown system query for a disabled widget", () => {
-    expect(shouldOfferWidgetSetup(status(null))).toBe(false);
-  });
-
-  it("does not offer setup when the build cannot provide the widget", () => {
+  it("stands down once a widget is confirmed configured", () => {
     expect(
       shouldOfferWidgetSetup(
-        status(false, { supported: false, extensionPresent: false }),
+        status(true, { configuredKinds: ["AIStatsUsageWidget"] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps the guide reachable when the system query is unavailable", () => {
+    // Detection failing is exactly when a user needs the setup steps; hiding
+    // the only route to them leaves no way forward.
+    expect(shouldOfferWidgetSetup(status(null))).toBe(true);
+  });
+
+  it("keeps the guide reachable in a build with no embedded extension", () => {
+    expect(
+      shouldOfferWidgetSetup(
+        status(null, { extensionPresent: false, snapshotWritten: false }),
+      ),
+    ).toBe(true);
+  });
+
+  it("stands down when the other build's widget is the one configured", () => {
+    // Placement is a macOS action the app cannot undo, and the guide would
+    // only ask the user to place a second widget they already have.
+    expect(
+      shouldOfferWidgetSetup(
+        status(false, { configuredKinds: ["AIStatsUsageWidgetDev"] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("stands down when both builds' widgets are configured", () => {
+    expect(
+      shouldOfferWidgetSetup(
+        status(false, {
+          configuredKinds: ["AIStatsUsageWidget", "AIStatsUsageWidgetDev"],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("never offers setup where the platform has no system widget", () => {
+    expect(
+      shouldOfferWidgetSetup(
+        status(null, {
+          supported: false,
+          system: "none",
+          reason: "macOS only",
+        }),
       ),
     ).toBe(false);
   });

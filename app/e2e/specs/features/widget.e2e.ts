@@ -117,6 +117,12 @@ describe("real dev-build widget state", () => {
     const status = $('[data-testid="widget-status"]');
     await expectDisplayed('[data-testid="widget-status"]');
     await expect(status).toHaveAttribute("data-state", "not-embedded");
-    await expect(status).toHaveText(expect.stringContaining("packaged app"));
+    // The affordance stays: this binary is what the user is running, and a
+    // build that cannot detect the widget is exactly when they need the steps
+    // that lead to one that can.
+    await expectDisplayed('[data-testid="nav-widget-setup"]');
+    // The copy has to name the command that produces a build which *can*
+    // detect: naming anything else sends the user back to the same dead end.
+    await expect(status).toHaveText(expect.stringContaining("build:mac"));
   });
 });

@@ -645,7 +645,12 @@ export interface DispatchFixtures {
    */
   readonly widgetEmbedded: boolean;
   readonly widgetSupported: boolean;
-  readonly widgetConfigured?: boolean;
+  /**
+   * `null` answers the way an unavailable system query does, so a spec can
+   * drive the "the app cannot tell" state rather than inferring it.
+   */
+  readonly widgetConfigured?: boolean | null;
+  readonly widgetConfiguredKinds?: readonly string[];
   readonly automationRunning: boolean;
   /**
    * Per-sub running overrides for the automation monitors, layered over
@@ -1041,7 +1046,12 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               extensionBundled: true,
               extensionPresent: data.widgetEmbedded,
               snapshotWritten: data.widgetEmbedded,
-              configured: data.widgetConfigured ?? true,
+              configured: data.widgetConfigured === undefined ? true : data.widgetConfigured,
+              configuredKinds:
+                data.widgetConfiguredKinds ??
+                (data.widgetConfigured === false || data.widgetConfigured === null
+                  ? []
+                  : ["AIStatsUsageWidget"]),
               menuBarAvailable: data.widgetSupported,
               reason: data.widgetSupported
                 ? null
@@ -1466,7 +1476,8 @@ export async function onboardingVisible(): Promise<void> {
 
 /** Onboarding dismissed, dashboard showing live data. */
 export async function dashboardLive(options: {
-  readonly widgetConfigured?: boolean;
+  readonly widgetConfigured?: boolean | null;
+  readonly widgetConfiguredKinds?: readonly string[];
 } = {}): Promise<void> {
   await boot({
     visible: false,
@@ -1475,7 +1486,9 @@ export async function dashboardLive(options: {
     version: "codex-cli 0.159.0",
     widgetEmbedded: true,
     widgetSupported: true,
-    widgetConfigured: options.widgetConfigured ?? true,
+    widgetConfigured:
+      options.widgetConfigured === undefined ? true : options.widgetConfigured,
+    widgetConfiguredKinds: options.widgetConfiguredKinds,
     automationRunning: true,
     codexLocalUsage: codexLocalUsage(),
   });

@@ -28,6 +28,16 @@ import type { SystemWidgetStatus } from "~/lib/ipc";
  * WidgetCenter reports configured widget kinds, but not their exact location.
  * `extensionPresent` remains a separate fact about this build, and a failed
  * system query remains unknown rather than meaning the widget is absent.
+ *
+ * ## Keeping the answer current
+ *
+ * Placement happens in the system's gallery, where the app cannot follow it.
+ * `useSystemWidgetStatusPolling` re-reads the status on an interval while the
+ * window is visible, on focus, and when the window returns from hidden, so
+ * both adding and removing a widget is reflected without a manual refresh. An
+ * unknown state never hides the guide: the steps below it are the only route
+ * to a placement, and an app that could not check must not also remove the
+ * way to fix it.
  */
 export function SystemWidgetGuide() {
   const widget = useAtomValue(systemWidgetAtom);
@@ -154,6 +164,12 @@ function Steps({ status }: { status: SystemWidgetStatus }) {
   );
 }
 
+function configuredKindLabel(kind: string): string {
+  if (kind === "AIStatsUsageWidgetDev") return "AgentGauge Dev";
+  if (kind === "AIStatsUsageWidget") return "AgentGauge";
+  return kind;
+}
+
 function StatusLine({ status }: { status: SystemWidgetStatus }) {
   if (!status.supported) {
     return (
@@ -177,8 +193,11 @@ function StatusLine({ status }: { status: SystemWidgetStatus }) {
       >
         <WarningCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
         <span>
-          Not in this build. Run <code>bun run tauri build</code> and open the
-          packaged app — the dev server has no bundle to put the widget in.
+          This running app has no widget extension, so it cannot check whether
+          one is configured. That is what <code>bun run tauri dev</code> does —
+          it runs a bare binary with no bundle. Run{" "}
+          <code>bun run build:mac</code> and open the packaged{" "}
+          <code>AgentGauge.app</code>; it embeds the widget and can detect it.
         </span>
       </p>
     );
@@ -209,8 +228,31 @@ function StatusLine({ status }: { status: SystemWidgetStatus }) {
       >
         <WarningCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
         <span>
-          The app could not check whether AgentGauge is configured. Refresh to
-          check again.
+          The app could not check whether AgentGauge is configured, so it will
+          not claim either way. It re-checks automatically while this window is
+          open and whenever it comes back to the front; Refresh checks now.
+        </span>
+      </p>
+    );
+  }
+
+  if (status.configuredKinds.length > 0) {
+    return (
+      <p
+        data-testid="widget-status"
+        data-state="configured-other-build"
+        className="flex items-start gap-2 text-sm text-muted-foreground"
+      >
+        <CheckCircle
+          aria-hidden="true"
+          className="mt-0.5 size-4 shrink-0 text-[var(--ok)]"
+        />
+        <span>
+          An AgentGauge widget is configured
+          {status.configuredKinds.length === 1 &&
+            ` (${configuredKindLabel(status.configuredKinds[0])})`}{" "}
+          — but from the other build. This app's widget is not placed; the steps
+          below add it.
         </span>
       </p>
     );

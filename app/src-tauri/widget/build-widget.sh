@@ -41,7 +41,7 @@ PROJECT="$WIDGET_DIR/AIStatsWidget.xcodeproj"
 SCHEME="AIStatsWidget"
 CONFIGURATION="${AGENTGAUGE_WIDGET_CONFIGURATION:-Release}"
 DERIVED="$WIDGET_DIR/build/$CONFIGURATION"
-STATUS_READER_NAME="AgentGaugeWidgetStatus"
+BRIDGE_NAME="libWidgetBridge.dylib"
 
 # Empty means ad-hoc.
 SIGN_IDENTITY="${AGENTGAUGE_SIGN_IDENTITY:--}"
@@ -64,6 +64,7 @@ build_appex() {
     -o "$DERIVED/ProviderCyclerTests"
   "$DERIVED/ProviderCyclerTests"
   bash "$WIDGET_DIR/Tests/WidgetStoragePathTests.sh"
+  bash "$WIDGET_DIR/Tests/WidgetBridgeTests.sh"
 
   xcodebuild \
     -project "$PROJECT" \
@@ -79,14 +80,14 @@ build_appex() {
   [ -n "$appex" ] || die "build reported success but no .appex was produced"
   bash "$WIDGET_DIR/Tests/WidgetEntitlementTests.sh" "$appex"
 
-  log "Building $STATUS_READER_NAME"
+  log "Building $BRIDGE_NAME"
   xcrun swiftc \
-    -parse-as-library \
+    -emit-library \
     -O \
     -target "$(uname -m)-apple-macosx14.0" \
-    "$WIDGET_DIR/WidgetStatusReader.swift" \
+    "$WIDGET_DIR/Sources/WidgetBridge.swift" \
     -framework WidgetKit \
-    -o "$DERIVED/$STATUS_READER_NAME"
+    -o "$DERIVED/$BRIDGE_NAME"
 
   # The two properties CodexBar#1095 identified as the difference between a
   # working extension and one that silently exits. Checked here so a future edit
@@ -111,28 +112,32 @@ embed_into() {
   local appex="${1:-}"
   appex="$(find "$DERIVED/Build/Products" -maxdepth 2 -name "$SCHEME.appex" | head -1)"
   [ -n "$appex" ] || die "no built .appex found; run 'build' first"
-  local status_reader="$DERIVED/$STATUS_READER_NAME"
-  [ -x "$status_reader" ] || die "no built $STATUS_READER_NAME found; run 'build' first"
+  local bridge="$DERIVED/$BRIDGE_NAME"
+  [ -f "$bridge" ] || die "no built $BRIDGE_NAME found; run 'build' first"
 
   log "Embedding into $(basename "$app")"
   mkdir -p "$app/Contents/PlugIns"
-  mkdir -p "$app/Contents/MacOS"
+  mkdir -p "$app/Contents/Frameworks"
   rm -rf "$app/Contents/PlugIns/$SCHEME.appex"
+  rm -f "$app/Contents/MacOS/AgentGaugeWidgetStatus"
   cp -R "$appex" "$app/Contents/PlugIns/$SCHEME.appex"
-  cp "$status_reader" "$app/Contents/MacOS/$STATUS_READER_NAME"
+  cp "$bridge" "$app/Contents/Frameworks/$BRIDGE_NAME"
 
-  # Order matters: the extension first, then the host. Signing the host last
-  # seals the nested signature, and `--deep` is avoided on the inner bundle so
-  # its own signature is not rewritten in a way that breaks verification.
+  # Order matters: nested code first, then the extension, then the host.
+  # Signing the host last seals the nested signatures, and `--deep` is avoided
+  # on the inner bundle so its own signature is not rewritten in a way that
+  # breaks verification. The bridge runs inside the host process, so the host's
+  # entitlements govern it and it needs none of its own.
+  log "Signing $BRIDGE_NAME (${SIGN_IDENTITY})"
+  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
+    "$app/Contents/Frameworks/$BRIDGE_NAME" 2>/dev/null \
+    || die "failed to sign the widget bridge"
   log "Signing extension (${SIGN_IDENTITY})"
   codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
     --entitlements "$WIDGET_DIR/Resources/AIStatsWidget.entitlements" \
     "$app/Contents/PlugIns/$SCHEME.appex" 2>/dev/null \
     || die "failed to sign the widget extension"
   bash "$WIDGET_DIR/Tests/WidgetEntitlementTests.sh" "$app/Contents/PlugIns/$SCHEME.appex"
-  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
-    "$app/Contents/MacOS/$STATUS_READER_NAME" 2>/dev/null \
-    || die "failed to sign the widget status reader"
 
   log "Signing host bundle"
   codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$app" 2>/dev/null \
@@ -146,10 +151,9 @@ embed_into() {
   local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
   [ -x "$lsregister" ] && "$lsregister" -f "$app" 2>/dev/null || true
 
-  if [ -x "$app/Contents/MacOS/$STATUS_READER_NAME" ]; then
-    "$app/Contents/MacOS/$STATUS_READER_NAME" --reload \
-      || log "WidgetKit did not accept the timeline refresh request; it may update on its schedule"
-  fi
+  # Timeline refreshes are requested by the running app itself, in-process,
+  # after each usage read. A request made from this script's context would be
+  # rejected by chronod for the same reason the old helper executable was.
 
   log "Done: $app/Contents/PlugIns/$SCHEME.appex"
 }

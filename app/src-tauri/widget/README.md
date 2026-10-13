@@ -154,16 +154,45 @@ host and widget copy old snapshot and selection files forward from the previous
 
 ## Detecting user configuration
 
-The app uses `WidgetCenter.getCurrentConfigurations` through the bundled
-`Contents/MacOS/AgentGaugeWidgetStatus` helper so WidgetKit sees the host app's
-bundle identity. It compares `WidgetInfo.kind` with
-`AIStatsUsageWidget` in Release or `AIStatsUsageWidgetDev` in Debug, the kind
-declared by `UsageWidget`. A successful response
-with no matching kind means no AgentGauge widget is configured; a failed query
-or a dev build without the helper is `unknown`, never “not configured.” This
-reports configuration, not whether the widget is on the desktop or in
-Notification Center. The host app cannot add the widget or open the gallery for
-the user, so setup actions navigate to the in-app instructions instead.
+The app calls `WidgetCenter.getCurrentConfigurations` **in its own process** by
+loading the bundled `Contents/Frameworks/libWidgetBridge.dylib` with `dlopen`
+(once, then kept — polling must not `dlclose` an image a WidgetKit reply may
+still be running in). `chronod` accepts WidgetCenter calls only from the process
+whose executable is the bundle's `CFBundleExecutable`, so a spawned helper
+executable is rejected — that was the bug that kept configuration "unknown"
+forever. The bridge answers `configured` for the requested kind plus
+`configuredKinds`, the list of configured AgentGauge widget kinds; a missing or
+failed query is `null` and means unknown, never "not configured". The same
+bridge carries `reloadAllTimelines`, which the app requests after every snapshot
+publication; a rejected or absent bridge degrades to WidgetKit's own refresh
+cadence. This reports configuration, not whether the widget is on the desktop or
+in Notification Center. The host app cannot add the widget or open the gallery
+for the user, so setup actions navigate to the in-app instructions instead.
+
+Two facts about the system shape everything above:
+
+- **The query is per app bundle.** WidgetKit answers with the kinds configured
+  for the calling app, so a Debug placement is invisible to Release and vice
+  versa. `configuredKinds` therefore normally holds only this build's own kinds;
+  it still carries whatever the system reports, so the UI stays correct if the
+  scoping ever widens.
+- **Only a bundled app can ask.** `tauri dev` and the e2e harness run the bare
+  binary, with no `.app` to hold the extension or the bridge: there
+  `extension_present` is false, no query happens, and the status is unknown.
+  Detection therefore needs `bun run build:mac`, and the Settings panel says so
+  rather than reporting the widget as absent.
+
+## Keeping detection live
+
+Placement happens in the system's gallery, where the app cannot follow it, and
+WidgetKit offers no subscription. `useSystemWidgetStatusPolling`
+(`app/src/hooks/use-system-widget-status.ts`) re-reads the status every 10s
+while the window is visible, on window focus, and when the window returns from
+hidden, so a widget added or removed shows up without a manual refresh. A hidden
+window stops asking. `shouldOfferWidgetSetup` stands down only on positive
+confirmation — the affordance stays reachable when the query is unknown or the
+build cannot ask, because hiding the only route to the setup steps is how a user
+ends up unable to add the widget at all.
 
 ## What is verified, and what is not
 
@@ -205,8 +234,8 @@ If it is missing, check `codesign -dvvv --entitlements -` on the embedded
 | `Sources/Snapshot.swift`              | The wire contract. Mirrors `WidgetSnapshot` in `modules/widget/mod.rs`.              |
 | `Sources/SnapshotStore.swift`         | Reads the shared file.                                                               |
 | `Sources/UsageTimelineProvider.swift` | Reads the selected provider and refreshes at the soonest quota reset.                |
-| `Sources/UsageWidget.swift`           | The three families, quota rows, and Xcode preview matrix.                            |
+| `Sources/UsageWidget.swift`           | Per-family layouts (small: brand-only compact, medium: side-by-side cards, large: roomy rows) and the Xcode preview matrix. |
 | `Sources/ProviderSwitchIntent.swift`  | Cycles providers without opening the host app.                                       |
-| `WidgetStatusReader.swift`             | Queries WidgetCenter for the app's configured widget kind.                           |
+| `Sources/WidgetBridge.swift`          | In-process WidgetKit status query and timeline reload, built as `libWidgetBridge.dylib`. |
 | `build-widget.sh`                     | Build, embed, re-sign, and the two build-time guards.                                |
 | `app/scripts/widget-dev.ts`            | Isolated debug app and native widget rebuild watcher.                                |

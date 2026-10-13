@@ -44,6 +44,7 @@ const SYSTEM_WIDGET_RESPONSE = {
     extensionPresent: false,
     snapshotWritten: false,
     configured: null,
+    configuredKinds: [],
     menuBarAvailable: false,
     setup: [],
     reason: null,
