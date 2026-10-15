@@ -9,6 +9,7 @@
     "restart": "bun run scripts/restart.ts",
     "build": "tsc && vite build",
     "build:e2e": "tsc && vite build --mode e2e",
+    "preflight:release:macos-arm64": "bash scripts/preflight-release-macos-arm64.sh",
     "clean": "bun run clean:rust && bun run clean:frontend && bun run clean:widget",
     "clean:rust": "cargo clean --manifest-path src-tauri/Cargo.toml",
     "clean:frontend": "bun -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\"",

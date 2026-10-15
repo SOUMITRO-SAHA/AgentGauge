@@ -243,6 +243,26 @@ it.
 
 ## Release setup and remaining gates
 
+### Local Apple Silicon preflight
+
+Before dispatching a production release, run the local arm64 preflight on an
+Apple Silicon Mac:
+
+```sh
+cd app
+bun run preflight:release:macos-arm64
+```
+
+It runs the frontend and Rust unit tests, builds the native arm64 production
+app, builds and embeds the matching WidgetKit extension, checks the app/widget/
+bridge architectures and code seal, then creates and verifies an arm64 DMG and
+SHA-256 file under
+`app/src-tauri/target/local-preflight-arm64/artifacts/`. It neither contacts
+GitHub nor creates tags, releases, or uploads. Open and smoke-test that DMG
+before using the separate GitHub release workflow. This local check covers only
+the arm64 build; GitHub remains responsible for the universal and Intel release
+artifacts and the signed Tauri updater archive.
+
 The release workflow is manually dispatched from `main` with an existing
 version tag. It requires the tag to point at the exact protected-main commit
 running the workflow, then builds and signs that code, publishes the versioned
