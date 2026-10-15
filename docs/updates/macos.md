@@ -276,13 +276,15 @@ change the in-app updater feed. Before the first release can be published:
    Gatekeeper approval on a clean Mac, direct in-app update, and actual Brew
    install/upgrade/restart before advertising availability.
 
-The public tap and the Tauri updater private-key secret are configured; the
-Homebrew tap token has not been added, and the release workflow
-has not been run. Apple signing credentials are not a blocker for the current
-ad-hoc distribution route. The app-side update flow is verified with an e2e
-fixture; actual GitHub release publication, Gatekeeper approval on a clean Mac,
-Homebrew installation, curl installation, and restart into a newer release
-remain release-owner checks. The workflow also rejects v0.1.0 under the
+All release credentials are configured (tap, Homebrew tap token, Tauri updater
+private key), and the workflow shipped v0.2.0 on 2026-10-15: published as the
+latest release with the full asset set, a verified updater manifest (signature
+round-trips against the shipped pubkey and embeds the app version), and the
+Homebrew cask committed to the tap. Apple signing credentials are not a blocker
+for the current ad-hoc distribution route. The app-side update flow is verified
+with an e2e fixture; the remaining release-owner checks are Gatekeeper approval
+on a clean Mac for each shipped build, a real in-app update once a later
+version exists, and Homebrew upgrade/restart once users have installed. The workflow also rejects v0.1.0 under the
 existing feature lock; the release owner must choose and set the next release
 version.
 
