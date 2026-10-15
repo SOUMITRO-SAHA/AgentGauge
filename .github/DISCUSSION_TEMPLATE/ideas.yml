@@ -1,0 +1,59 @@
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to propose something. A reminder of the house rule:
+        AgentGauge only shows what a supported source actually reports. Ideas that
+        respect that boundary move fastest.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to see or do today that AgentGauge doesn't handle?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should it do?
+      description: The behavior you'd expect, in one or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: data-source
+    attributes:
+      label: Which documented, authorized interface provides this data?
+      description: |
+        The fastest-moving proposals name the exact source: a harness's local
+        app-server/CLI/ACP/RPC interface, or a provider's documented coding-plan
+        endpoint. An adapter or model catalog alone is not proof of subscription
+        monitoring — if no interface reports it, AgentGauge can't show it.
+      placeholder: e.g. "codex app-server's account status response" or "the vendor's documented /api/monitor/* coding-plan endpoint"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area does this touch?
+      options:
+        - Usage windows / readings
+        - Stats & analytics
+        - Kickoff automation
+        - macOS widget
+        - Onboarding / Settings
+        - Processes screen
+        - New harness integration
+        - Something else
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Boundaries check
+      options:
+        - label: I understand a prompt cannot start, restart, or extend a provider's usage window, and kickoff consumes quota.
+          required: true
+        - label: I understand macOS is the only exercised platform and unsupported states must stay explicit.
+          required: true

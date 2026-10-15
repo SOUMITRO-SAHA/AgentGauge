@@ -1,0 +1,49 @@
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what you're seeing. Remember: a provider that reports nothing is
+        displayed as **not reported**, never as zero — a blank reading can be the
+        correct answer.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What are you seeing, and what did you expect?
+      description: Screenshots help if the UI is involved.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: AgentGauge version
+      description: Found in Settings → About (or the release you built from).
+      placeholder: e.g. 0.2.0
+  - type: dropdown
+    id: platform
+    attributes:
+      label: OS and version
+      options:
+        - macOS 26
+        - macOS 15
+        - macOS 14
+        - macOS (other)
+        - Windows
+        - Linux
+      default: 0
+  - type: checkboxes
+    id: harnesses
+    attributes:
+      label: Which harnesses are connected?
+      options:
+        - label: Codex (local `codex app-server`)
+        - label: OpenCode with a Z.AI coding plan
+        - label: OpenCode with a MiniMax coding plan
+        - label: OpenCode with a Kimi coding plan
+        - label: Something else
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried already?
+      description: Widget questions: the widget is placed from the macOS system gallery — the app cannot install it for you.

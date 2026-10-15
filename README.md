@@ -4,6 +4,8 @@
 
 # AgentGauge
 
+[![GitHub Discussions](https://img.shields.io/github/discussions/SOUMITRO-SAHA/AgentGauge?logo=github)](https://github.com/SOUMITRO-SAHA/AgentGauge/discussions)
+
 **AgentGauge is a local-first desktop companion for AI coding harnesses.** It brings together usage and reset information exposed by local harness interfaces, with opt-in kickoff automation scheduled from the latest reported reset—not a verified rollover.
 
 The desktop app is displayed as **AgentGauge**. Its Rust process is named
@@ -163,7 +165,7 @@ The site publishes at `agentgauge.soumitrasaha.com`. Its copy follows the same h
 
 ## Contributing
 
-Bug reports, documentation improvements, tests, and focused implementation proposals are welcome. Before starting substantial work, read the PRD and [contribution guidelines](CONTRIBUTING.md). They explain the harness-first integration boundary, test requirements, privacy expectations, and the project's license.
+Bug reports, documentation improvements, tests, and focused implementation proposals are welcome. Questions, feature ideas, and setup help live in [Discussions](https://github.com/SOUMITRO-SAHA/AgentGauge/discussions) — start with the pinned welcome post for the community guidelines. Before starting substantial work, read the PRD and [contribution guidelines](CONTRIBUTING.md). They explain the harness-first integration boundary, test requirements, privacy expectations, and the project's license.
 
 See [CONTRIBUTORS.md](CONTRIBUTORS.md) for contributor recognition.
 
