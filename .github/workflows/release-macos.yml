@@ -49,6 +49,10 @@ jobs:
           workflow_commit="$(git rev-parse HEAD)"
           bun scripts/verify-updater-release.ts "$RELEASE_TAG" "$tag_commit" "$workflow_commit"
 
+      - name: Verify release artifact contract
+        working-directory: app
+        run: bash scripts/tests/release-macos-artifacts.sh
+
       - name: Verify release credentials
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -106,6 +110,53 @@ jobs:
           export TAURI_SIGNING_PRIVATE_KEY_PATH="$RUNNER_TEMP/agentgauge-updater.key"
           bun run app/scripts/create-updater-release.ts "$app_bundle" "$RELEASE_TAG"
 
+      - name: Build architecture-specific DMGs
+        working-directory: app
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+        run: |
+          version="${RELEASE_TAG#v}"
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            case "$target" in
+              aarch64-apple-darwin)
+                widget_arch=arm64
+                dmg_label=Apple-Silicon-arm64
+                ;;
+              x86_64-apple-darwin)
+                widget_arch=x86_64
+                dmg_label=Intel-x86_64
+                ;;
+            esac
+
+            bun run tauri build --target "$target" --bundles app
+            app_bundle="src-tauri/target/$target/release/bundle/macos/AgentGauge.app"
+            AGENTGAUGE_WIDGET_ARCH="$widget_arch" AGENTGAUGE_SIGN_IDENTITY="$APPLE_SIGNING_IDENTITY" ./src-tauri/widget/build-widget.sh all "$app_bundle"
+
+            for binary in \
+              "$app_bundle/Contents/MacOS/agentgauge" \
+              "$app_bundle/Contents/PlugIns/AIStatsWidget.appex/Contents/MacOS/AIStatsWidget" \
+              "$app_bundle/Contents/Frameworks/libWidgetBridge.dylib"; do
+              actual_archs="$(lipo -archs "$binary")"
+              if [ "$actual_archs" != "$widget_arch" ]; then
+                printf 'Expected %s in %s, found %s\n' "$widget_arch" "$binary" "$actual_archs" >&2
+                exit 1
+              fi
+            done
+
+            artifact_dir="$(dirname "$app_bundle")"
+            dmg_root="$RUNNER_TEMP/AgentGauge-dmg-$dmg_label"
+            dmg_path="$artifact_dir/AgentGauge-${version}-${dmg_label}.dmg"
+            mkdir -p "$dmg_root"
+            ditto "$app_bundle" "$dmg_root/AgentGauge.app"
+            ln -s /Applications "$dmg_root/Applications"
+            hdiutil create -volname AgentGauge -srcfolder "$dmg_root" -ov -format UDZO "$dmg_path"
+            hdiutil verify "$dmg_path"
+            (
+              cd "$artifact_dir"
+              shasum -a 256 "$(basename "$dmg_path")" > "$(basename "$dmg_path").sha256"
+            )
+          done
+
       - name: Publish GitHub release with artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -126,7 +177,11 @@ jobs:
             "$artifact_dir/AgentGauge-$version-universal.dmg.sha256" \
             "$artifact_dir/AgentGauge-universal.dmg" \
             "$artifact_dir/latest.json" \
-            "$artifact_dir/latest-macos.json"
+            "$artifact_dir/latest-macos.json" \
+            "$artifact_dir/AgentGauge-${version}-Apple-Silicon-arm64.dmg" \
+            "$artifact_dir/AgentGauge-${version}-Apple-Silicon-arm64.dmg.sha256" \
+            "$artifact_dir/AgentGauge-${version}-Intel-x86_64.dmg" \
+            "$artifact_dir/AgentGauge-${version}-Intel-x86_64.dmg.sha256"
           gh release edit "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --draft=false --latest
 
       - name: Publish Homebrew Cask

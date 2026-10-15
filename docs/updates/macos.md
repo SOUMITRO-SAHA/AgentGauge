@@ -57,7 +57,7 @@ must be able to find them.
 
 ### Install routes
 
-- **Homebrew:** the separate public `homebrew-agentgauge` tap will publish a
+- **Homebrew:** the separate public `homebrew-agentgauge` tap publishes a
   version-pinned Cask for the GitHub release DMG and checksum.
 - **Website download:** the site links directly to
   `https://github.com/SOUMITRO-SAHA/AgentGauge/releases/latest/download/AgentGauge-universal.dmg`
@@ -68,11 +68,20 @@ must be able to find them.
   installs to the user's `~/Applications` directory without `sudo`. It explains
   how to approve the first launch if Gatekeeper blocks it.
 
-The website hides these routes until the first published release is available.
+The website hides these routes unless the `AGENTGAUGE_DOWNLOADS_ENABLED` Actions
+variable is enabled.
 The installer currently accepts Apple Silicon (`arm64`) and Intel (`x86_64`)
 Macs only; it exits with an explicit message on Windows, Linux, and unsupported
 architectures. Do not advertise those platforms until their package and
 installer paths are implemented and verified.
+
+Starting with the next release, the release workflow will also attach
+`AgentGauge-<version>-Apple-Silicon-arm64.dmg` and
+`AgentGauge-<version>-Intel-x86_64.dmg`, each with a matching `.sha256` file.
+These are optional architecture-specific downloads; the website, Homebrew Cask,
+and updater continue to use the universal build. The architecture-specific
+DMGs use the same ad-hoc signing policy and do not remove the first-launch
+Gatekeeper approval.
 
 The installer checks the DMG against a SHA-256 value fetched from the same
 GitHub release that hosts the DMG. This detects corruption and mismatched
@@ -226,8 +235,11 @@ Terminal fallback when the app cannot complete an upgrade.
 The generated Cask warns that the initial build is ad-hoc signed and not
 notarized. Homebrew's default quarantine is intentionally retained; do not
 install with `--no-quarantine` to hide the Gatekeeper warning. Users may need to
-Control-click AgentGauge.app and choose Open, or approve it in System Settings →
-Privacy & Security.
+verify the downloaded DMG against its release `.sha256` asset, then Control-click
+AgentGauge.app and choose Open, or approve it in System Settings → Privacy &
+Security. This Gatekeeper prompt is independent of whether the DMG is universal,
+arm64, or x86_64; Developer ID signing and notarization are required to remove
+it.
 
 ## Release setup and remaining gates
 
