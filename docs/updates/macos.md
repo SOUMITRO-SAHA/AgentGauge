@@ -259,9 +259,11 @@ bridge architectures and code seal, then creates and verifies an arm64 DMG and
 SHA-256 file under
 `app/src-tauri/target/local-preflight-arm64/artifacts/`. It neither contacts
 GitHub nor creates tags, releases, or uploads. Open and smoke-test that DMG
-before using the separate GitHub release workflow. This local check covers only
-the arm64 build; GitHub remains responsible for the universal and Intel release
-artifacts and the signed Tauri updater archive.
+before using the separate GitHub release workflow. It requires app and release
+workflow source to be committed, prints the source commit, and should be run on
+the exact commit that will be tagged; rerun it if release source changes. This
+local check covers only the arm64 build; GitHub remains responsible for the
+universal and Intel release artifacts and the signed Tauri updater archive.
 
 The release workflow is manually dispatched from `main` with an existing
 version tag. It requires the tag to point at the exact protected-main commit

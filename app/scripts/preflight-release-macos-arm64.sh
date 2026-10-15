@@ -26,6 +26,20 @@ cargo_target_directory="$target_root/cargo"
 widget_build_root="$target_root/widget"
 target="aarch64-apple-darwin"
 
+if ! git -C "$repository_root" diff --quiet HEAD -- app .github/workflows/release-macos.yml; then
+  printf '%s\n' 'Commit app and release-workflow changes before running the release preflight.' >&2
+  exit 1
+fi
+
+untracked_release_files="$(git -C "$repository_root" ls-files --others --exclude-standard -- app .github/workflows/release-macos.yml)"
+if [[ -n "$untracked_release_files" ]]; then
+  printf 'Untracked release source files must be committed first:\n%s\n' "$untracked_release_files" >&2
+  exit 1
+fi
+
+release_commit="$(git -C "$repository_root" rev-parse HEAD)"
+printf 'Preflighting committed source %s\n' "$release_commit"
+
 cd "$app_directory"
 
 package_version="$(bun -e 'console.log(require("./package.json").version)')"
