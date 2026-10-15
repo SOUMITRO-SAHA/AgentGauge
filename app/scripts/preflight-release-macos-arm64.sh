@@ -2,6 +2,12 @@
 
 set -euo pipefail
 
+mode="${1:-}"
+if [[ "$mode" != "" && "$mode" != "--build-only" ]] || [[ $# -gt 1 ]]; then
+  printf 'Usage: %s [--build-only]\n' "${BASH_SOURCE[0]}" >&2
+  exit 2
+fi
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
   printf '%s\n' 'This preflight requires macOS.' >&2
   exit 1
@@ -21,9 +27,6 @@ done
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 app_directory="$repository_root/app"
-target_root="$app_directory/src-tauri/target/local-preflight-arm64"
-cargo_target_directory="$target_root/cargo"
-widget_build_root="$target_root/widget"
 target="aarch64-apple-darwin"
 
 if ! git -C "$repository_root" diff --quiet HEAD -- app .github/workflows/release-macos.yml; then
@@ -52,21 +55,31 @@ if [[ "$package_version" != "$tauri_version" || "$tauri_version" != "$cargo_vers
   exit 1
 fi
 
-timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-artifact_directory="$target_root/artifacts/$package_version/$timestamp"
-staging_directory="$target_root/staging/$timestamp"
-if [[ -e "$artifact_directory" || -e "$staging_directory" ]]; then
-  printf 'Preflight output already exists for this timestamp: %s\n' "$timestamp" >&2
-  exit 1
+mkdir -p "$repository_root/.temp"
+output_directory="$(mktemp -d "$repository_root/.temp/local-release-preflight-arm64.XXXXXX")"
+cargo_target_directory="$output_directory/cargo"
+widget_build_root="$output_directory/widget"
+frontend_directory="$output_directory/frontend"
+artifact_directory="$output_directory/artifacts"
+staging_directory="$output_directory/staging"
+tauri_config="$output_directory/tauri.local.json"
+temporary_directory="$output_directory/tmp"
+
+mkdir -p "$artifact_directory" "$staging_directory" "$cargo_target_directory" "$temporary_directory"
+export CARGO_TARGET_DIR="$cargo_target_directory"
+export TMPDIR="$temporary_directory"
+
+if [[ "$mode" == "--build-only" ]]; then
+  printf '%s\n' 'Build-only mode: unit tests are skipped; this is not production release approval.'
+else
+  bun run test
+  cargo test --locked --features testkit --lib --manifest-path "$app_directory/src-tauri/Cargo.toml"
 fi
 
-mkdir -p "$artifact_directory" "$staging_directory" "$cargo_target_directory"
-export CARGO_TARGET_DIR="$cargo_target_directory"
-
-bun install --frozen-lockfile
-bun run test
-cargo test --locked --features testkit --lib --manifest-path "$app_directory/src-tauri/Cargo.toml"
-APPLE_SIGNING_IDENTITY="-" bun run tauri build --target "$target" --bundles app
+TAURI_CONFIG_PATH="$tauri_config" AGENTGAUGE_FRONTEND_DIST="$frontend_directory" bun -e \
+  'await Bun.write(process.env.TAURI_CONFIG_PATH, JSON.stringify({ build: { frontendDist: process.env.AGENTGAUGE_FRONTEND_DIST } }))'
+AGENTGAUGE_FRONTEND_DIST="$frontend_directory" APPLE_SIGNING_IDENTITY="-" \
+  bun run tauri build --target "$target" --bundles app --config "$tauri_config"
 
 app_bundle="$CARGO_TARGET_DIR/$target/release/bundle/macos/AgentGauge.app"
 if [[ ! -d "$app_bundle" ]]; then
@@ -113,5 +126,10 @@ hdiutil verify "$dmg_path"
   shasum -a 256 -c "$dmg_name.sha256"
 )
 
-printf '\nLocal Apple Silicon release preflight passed.\nDMG: %s\nChecksum: %s\n' \
-  "$dmg_path" "$dmg_path.sha256"
+if [[ "$mode" == "--build-only" ]]; then
+  printf '\nLocal arm64 build verification passed; unit tests were skipped.\nDMG: %s\nChecksum: %s\n' \
+    "$dmg_path" "$dmg_path.sha256"
+else
+  printf '\nLocal Apple Silicon release preflight passed.\nDMG: %s\nChecksum: %s\n' \
+    "$dmg_path" "$dmg_path.sha256"
+fi

@@ -253,12 +253,21 @@ cd app
 bun run preflight:release:macos-arm64
 ```
 
+For a diagnostic build when unit tests are already failing, the build-only mode
+skips those test commands but must not be treated as release approval:
+
+```sh
+bun run preflight:release:macos-arm64 -- --build-only
+```
+
 It runs the frontend and Rust unit tests, builds the native arm64 production
 app, builds and embeds the matching WidgetKit extension, checks the app/widget/
 bridge architectures and code seal, then creates and verifies an arm64 DMG and
-SHA-256 file under
-`app/src-tauri/target/local-preflight-arm64/artifacts/`. It neither contacts
-GitHub nor creates tags, releases, or uploads. Open and smoke-test that DMG
+SHA-256 file under a unique
+`.temp/local-release-preflight-arm64.*/artifacts/` directory. Cargo, Vite,
+WidgetKit, temporary Tauri config, DMG staging, and packaged output all stay in
+that directory. It neither contacts GitHub nor creates tags, releases, or
+uploads. Open and smoke-test that DMG
 before using the separate GitHub release workflow. It requires app and release
 workflow source to be committed, prints the source commit, and should be run on
 the exact commit that will be tagged; rerun it if release source changes. This

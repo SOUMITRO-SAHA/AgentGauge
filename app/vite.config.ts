@@ -15,6 +15,9 @@ export default defineConfig(() => ({
       "~": path.resolve(srcDir),
     },
   },
+  build: {
+    outDir: process.env.AGENTGAUGE_FRONTEND_DIST ?? "dist",
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
