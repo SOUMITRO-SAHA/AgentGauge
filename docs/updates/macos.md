@@ -240,14 +240,17 @@ change the in-app updater feed. Before the first release can be published:
 
 1. Add the private Tauri updater key as the `TAURI_SIGNING_PRIVATE_KEY` GitHub
    Actions secret. The local key is at `~/.tauri/agentgauge-updater.key`; the
-   key file is not in the repository. The secret must contain the key file's
-   plain content (its `untrusted comment:` line plus the base64 payload), not
-   a base64-of-file wrapper — the workflow writes the secret verbatim to the
-   key file `tauri signer` reads. If the key was generated with a password,
-   also set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Before the first release,
-   confirm the key pair with a local sign → verify round-trip against the
-   `pubkey` in `app/src-tauri/tauri.conf.json`. Never publish or commit the
-   private key.
+   key file is not in the repository. The secret must be the key file's exact
+   generated content: a single base64 line with no trailing newline. Tauri's
+   signer rejects comment lines and trailing newlines (verified against the
+   pinned CLI), and the workflow writes the secret verbatim into the file
+   `tauri signer` reads. This key decrypts with an empty password and signing
+   was verified non-interactive with an empty
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, so no password secret is required.
+   The key pair was confirmed on 2026-10-15 by a local sign → verify
+   round-trip: `tauri signer sign`, then `minisign -V` against the decoded
+   `pubkey` from `app/src-tauri/tauri.conf.json` (its `.pub` matches
+   byte-for-byte). Never publish or commit the private key.
 2. No Apple Developer account or Apple signing secrets are needed for the
    initial release. The workflow uses ad-hoc signing (`APPLE_SIGNING_IDENTITY=-`
    and `AGENTGAUGE_SIGN_IDENTITY=-`) and does not notarize. Keep that limitation
@@ -273,8 +276,8 @@ change the in-app updater feed. Before the first release can be published:
    Gatekeeper approval on a clean Mac, direct in-app update, and actual Brew
    install/upgrade/restart before advertising availability.
 
-The public tap, Homebrew tap token, and Tauri updater private key are not
-configured here, and the release workflow
+The public tap and the Tauri updater private-key secret are configured; the
+Homebrew tap token has not been added, and the release workflow
 has not been run. Apple signing credentials are not a blocker for the current
 ad-hoc distribution route. The app-side update flow is verified with an e2e
 fixture; actual GitHub release publication, Gatekeeper approval on a clean Mac,
