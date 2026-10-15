@@ -9,7 +9,13 @@
 # The channel must stay >= the highest dependency MSRV in Cargo.lock
 # (currently 1.95 via sysinfo); `tauri dev` resolves dependencies with this
 # pin and fails outright below that floor.
+#
+# The targets list makes rustup materialize both macOS architectures with
+# the pinned toolchain wherever this file resolves — required for the
+# `--target universal-apple-darwin` release build, which fails at the Intel
+# half if only the host target is installed.
 
 [toolchain]
 channel = "1.97.1"
 components = ["rustfmt", "clippy"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
