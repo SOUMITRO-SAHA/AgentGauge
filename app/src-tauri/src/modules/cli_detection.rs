@@ -3,9 +3,14 @@
 //! Detection is intentionally separate from provider usage integrations: an
 //! installed CLI is not evidence that AgentGauge can read its usage data.
 
-use std::process::Command;
+use std::process::Stdio;
 
 use serde::{Deserialize, Serialize};
+
+use crate::shared::executable::{self, ResolvedExecutable};
+
+const CODEX_PATH_OVERRIDE: &str = "AGENTGAUGE_CODEX_PATH";
+const OPENCODE_PATH_OVERRIDE: &str = "AGENTGAUGE_OPENCODE_PATH";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,39 +55,72 @@ pub fn detect() -> Vec<CliToolStatus> {
 }
 
 fn detect_one(tool: CliTool) -> CliToolStatus {
-    detect_executable(tool, tool.executable())
+    let override_variable = match tool {
+        CliTool::Codex => CODEX_PATH_OVERRIDE,
+        CliTool::OpenCode => OPENCODE_PATH_OVERRIDE,
+    };
+    detect_executable(tool, tool.executable(), override_variable)
 }
 
-fn detect_executable(tool: CliTool, executable: &str) -> CliToolStatus {
-    let result = Command::new(executable).arg("--version").output();
-    let (installed, version, reason) = match result {
+fn detect_executable(tool: CliTool, executable: &str, override_variable: &str) -> CliToolStatus {
+    let Some(candidate) = executable::resolve(executable, override_variable) else {
+        return unavailable(
+            tool,
+            executable,
+            executable::not_found_reason(override_variable),
+        );
+    };
+    match detect_candidate(tool, candidate) {
+        Ok(status) => status,
+        Err((path, reason)) => unavailable(tool, &path, reason),
+    }
+}
+
+fn detect_candidate(
+    tool: CliTool,
+    candidate: ResolvedExecutable,
+) -> Result<CliToolStatus, (String, String)> {
+    let path = candidate.path().to_string_lossy().into_owned();
+    let result = candidate
+        .command()
+        .arg("--version")
+        .stdin(Stdio::null())
+        .output();
+    match result {
         Ok(output) if output.status.success() => {
             let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-            if text.is_empty() {
-                (true, None, None)
-            } else {
-                (true, Some(text), None)
-            }
+            Ok(CliToolStatus {
+                tool,
+                display_name: tool.display_name().to_owned(),
+                executable: path,
+                installed: true,
+                version: (!text.is_empty()).then_some(text),
+                reason: None,
+            })
         }
-        Ok(output) => (
-            false,
-            None,
-            Some(format!("Version check exited with {}.", output.status)),
-        ),
-        Err(error) => (
-            false,
-            None,
-            Some(format!("Executable was not found on PATH ({error}).")),
-        ),
-    };
+        Ok(output) => Err((
+            path.clone(),
+            format!(
+                "{} --version exited with {}.",
+                tool.display_name(),
+                output.status
+            ),
+        )),
+        Err(error) => Err((
+            path.clone(),
+            format!("Could not run {} --version ({error}).", tool.display_name()),
+        )),
+    }
+}
 
+fn unavailable(tool: CliTool, executable: &str, reason: String) -> CliToolStatus {
     CliToolStatus {
         tool,
         display_name: tool.display_name().to_owned(),
         executable: executable.to_owned(),
-        installed,
-        version,
-        reason,
+        installed: false,
+        version: None,
+        reason: Some(reason),
     }
 }
 
@@ -106,10 +144,40 @@ mod tests {
         let status = detect_executable(
             CliTool::Codex,
             "agentgauge-test-command-that-does-not-exist",
+            CODEX_PATH_OVERRIDE,
         );
         assert!(!status.installed);
         assert!(status.version.is_none());
         assert!(status.reason.is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_version_check_does_not_put_the_executable_path_in_the_reason() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.temp/cli-detection-tests")
+            .join(format!("failed-version-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("create fixture directory");
+        let path = directory.join("codex");
+        std::fs::write(&path, "#!/bin/sh\nexit 7\n").expect("write fixture executable");
+        let mut permissions = std::fs::metadata(&path)
+            .expect("read fixture permissions")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).expect("make fixture executable");
+
+        let status = detect_executable(
+            CliTool::Codex,
+            path.to_str().expect("fixture path is UTF-8"),
+            CODEX_PATH_OVERRIDE,
+        );
+        let reason = status.reason.expect("failed check has a reason");
+        let _ = std::fs::remove_dir_all(directory);
+
+        assert!(!status.installed);
+        assert!(!reason.contains(path.to_str().expect("fixture path is UTF-8")));
     }
 
     #[test]

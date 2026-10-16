@@ -21,7 +21,7 @@ mod db;
 
 pub(crate) use db::local_usage_for;
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -29,6 +29,7 @@ use serde::Deserialize;
 
 use crate::shared::domain::{CodingSubscription, CredentialOrigin, ProviderKind};
 use crate::shared::error::{Error, ErrorKind};
+use crate::shared::executable;
 
 /// How long any single `opencode` CLI call may run before it is killed.
 ///
@@ -282,7 +283,15 @@ fn parse_model_listing(output: &str) -> Vec<OpenCodeModel> {
 }
 
 fn run_capture(args: &[&str], timeout: Duration) -> Result<String, Error> {
-    let mut child = Command::new(OPENCODE_EXECUTABLE)
+    let resolved = executable::resolve(OPENCODE_EXECUTABLE, "AGENTGAUGE_OPENCODE_PATH")
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::ProviderMissing,
+                executable::not_found_reason("AGENTGAUGE_OPENCODE_PATH"),
+            )
+        })?;
+    let mut child = resolved
+        .command()
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -291,7 +300,7 @@ fn run_capture(args: &[&str], timeout: Duration) -> Result<String, Error> {
         .map_err(|error| {
             Error::new(
                 ErrorKind::ProviderMissing,
-                format!("The `opencode` executable was not found on PATH ({error})."),
+                format!("The OpenCode CLI could not be started ({error})."),
             )
         })?;
 

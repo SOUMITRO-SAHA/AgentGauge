@@ -714,6 +714,7 @@ export interface DispatchFixtures {
   readonly usage: Record<string, unknown>;
   readonly installed: boolean;
   readonly version: string | null;
+  readonly cliDetectionFailure?: boolean;
   /**
    * Coding subscriptions OpenCode reports, as the `openCodeSubscriptions`
    * reply would carry them. Absent means "none connected" — Codex only.
@@ -1040,20 +1041,24 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
               {
                 tool: "codex",
                 displayName: "Codex CLI",
-                executable: "codex",
-                installed: data.installed,
-                version: data.version ?? null,
-                reason: data.installed
-                  ? null
-                  : "`codex` is not available on this system.",
+                executable: "/Users/test/.local/bin/codex",
+                installed: data.cliDetectionFailure ? false : data.installed,
+                version: data.cliDetectionFailure ? null : data.version ?? null,
+                reason: data.cliDetectionFailure
+                  ? "Could not run `/Users/test/.local/bin/codex --version` (Permission denied)."
+                  : data.installed
+                    ? null
+                    : "`codex` is not available on this system.",
               },
               {
                 tool: "openCode",
                 displayName: "OpenCode CLI",
-                executable: "opencode",
-                installed: true,
-                version: "opencode 1.0.0",
-                reason: null,
+                executable: "/Users/test/.opencode/bin/opencode",
+                installed: !data.cliDetectionFailure,
+                version: data.cliDetectionFailure ? null : "opencode 1.0.0",
+                reason: data.cliDetectionFailure
+                  ? "Could not run `/Users/test/.opencode/bin/opencode --version` (Permission denied)."
+                  : null,
               },
             ],
           };
@@ -1698,6 +1703,7 @@ export async function dashboardLive(options: {
   readonly widgetConfigured?: boolean | null;
   readonly widgetPlacedKinds?: readonly string[];
   readonly volumeAccessNeeded?: boolean;
+  readonly cliDetectionFailure?: boolean;
 } = {}): Promise<void> {
   await boot({
     visible: false,
@@ -1711,6 +1717,7 @@ export async function dashboardLive(options: {
     widgetPlacedKinds: options.widgetPlacedKinds,
     automationRunning: true,
     codexLocalUsage: codexLocalUsage(),
+    cliDetectionFailure: options.cliDetectionFailure,
     ...(options.volumeAccessNeeded ? { volumeAccess: { needsConsent: true } } : {}),
   });
 }

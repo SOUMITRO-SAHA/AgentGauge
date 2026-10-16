@@ -43,7 +43,9 @@ it("shapes CLI detection rows while the first check is pending", async () => {
           });
       }),
   };
-  const { ProviderStatusCard } = await import("~/components/usage/provider-status-card");
+  const { ProviderStatusCard } = await import(
+    "~/components/usage/provider-status-card"
+  );
   render(createElement(ProviderStatusCard));
 
   const loading = await screen.findByTestId("status-loading");
@@ -53,6 +55,76 @@ it("shapes CLI detection rows while the first check is pending", async () => {
   releaseRead?.();
   expect(await screen.findByTestId("cli-codex")).toBeTruthy();
   expect(screen.queryByTestId("status-loading")).toBeNull();
+}, 15_000);
+
+it("does not render resolved executable paths for installed CLIs", async () => {
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: () => ({
+      type: "cliDetections",
+      tools: [
+        {
+          tool: "codex",
+          displayName: "Codex CLI",
+          executable: "/Users/test/.local/bin/codex",
+          installed: true,
+          version: "1.0.0",
+          reason: null,
+        },
+        {
+          tool: "openCode",
+          displayName: "OpenCode CLI",
+          executable: "/Users/test/.opencode/bin/opencode",
+          installed: true,
+          version: "1.0.0",
+          reason: null,
+        },
+      ],
+    }),
+  };
+  const { ProviderStatusCard } = await import("~/components/usage/provider-status-card");
+  render(createElement(ProviderStatusCard));
+
+  expect((await screen.findByTestId("codex-version")).textContent).toBe("1.0.0");
+  expect(screen.getByTestId("opencode-version").textContent).toBe("1.0.0");
+  expect(document.body.innerHTML).not.toContain("/Users/test/.local/bin/codex");
+  expect(document.body.innerHTML).not.toContain("/Users/test/.opencode/bin/opencode");
+});
+
+it("does not render resolved executable paths when a CLI version check fails", async () => {
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: () => ({
+      type: "cliDetections",
+      tools: [
+        {
+          tool: "codex",
+          displayName: "Codex CLI",
+          executable: "/Users/test/.local/bin/codex",
+          installed: false,
+          version: null,
+          reason:
+            "Could not run `/Users/test/.local/bin/codex --version` (Permission denied).",
+        },
+        {
+          tool: "openCode",
+          displayName: "OpenCode CLI",
+          executable: "/Users/test/.opencode/bin/opencode",
+          installed: false,
+          version: null,
+          reason:
+            "Could not run `/Users/test/.opencode/bin/opencode --version` (Permission denied).",
+        },
+      ],
+    }),
+  };
+  const { ProviderStatusCard } = await import(
+    "~/components/usage/provider-status-card"
+  );
+  render(createElement(ProviderStatusCard));
+
+  expect(await screen.findByTestId("cli-codex")).toBeTruthy();
+  expect(screen.getByTestId("cli-opencode")).toBeTruthy();
+  expect(document.body.innerHTML).not.toContain("/Users/test/.local/bin/codex");
+  expect(document.body.innerHTML).not.toContain("/Users/test/.opencode/bin/opencode");
 });
 
 it("shows the CLI skeleton until a requested re-check completes", async () => {

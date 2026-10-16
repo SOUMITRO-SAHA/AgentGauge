@@ -177,7 +177,11 @@ pub(crate) fn monitor_request(
 /// The provider status for a plan: everything routes through the `opencode`
 /// executable, so that is what "installed" means here.
 pub(crate) fn opencode_status(kind: ProviderKind) -> ProviderStatus {
-    match crate::modules::providers::codex::probe(OPENCODE_EXECUTABLE) {
+    match crate::modules::providers::codex::probe(
+        OPENCODE_EXECUTABLE,
+        "AGENTGAUGE_OPENCODE_PATH",
+        "OpenCode CLI",
+    ) {
         Ok(version) => ProviderStatus {
             kind,
             executable: OPENCODE_EXECUTABLE.to_string(),
@@ -401,6 +405,54 @@ mod tests {
             path: "/api/monitor/usage/quota/limit",
             bearer: false,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_status_uses_its_own_executable_override() {
+        use std::ffi::OsString;
+        use std::os::unix::fs::PermissionsExt;
+
+        struct OverrideGuard {
+            key: &'static str,
+            previous: Option<OsString>,
+        }
+
+        impl Drop for OverrideGuard {
+            fn drop(&mut self) {
+                if let Some(value) = self.previous.take() {
+                    std::env::set_var(self.key, value);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+
+        let directory = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.temp/opencode-status-tests")
+            .join(format!("override-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("create fixture directory");
+        let path = directory.join("opencode");
+        std::fs::write(&path, "#!/bin/sh\nprintf 'opencode-override-fixture\\n'\n")
+            .expect("write fixture executable");
+        let mut permissions = std::fs::metadata(&path)
+            .expect("read fixture permissions")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).expect("make fixture executable");
+
+        let key = "AGENTGAUGE_OPENCODE_PATH";
+        let guard = OverrideGuard {
+            key,
+            previous: std::env::var_os(key),
+        };
+        std::env::set_var(key, &path);
+        let status = opencode_status(ProviderKind::Zai);
+        drop(guard);
+        let _ = std::fs::remove_dir_all(directory);
+
+        assert!(status.installed);
+        assert_eq!(status.version.as_deref(), Some("opencode-override-fixture"));
     }
 
     #[test]

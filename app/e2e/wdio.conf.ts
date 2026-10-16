@@ -8,11 +8,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 // Built by `bun run e2e:build`. Must be built with `--features custom-protocol`
 // so the binary embeds frontendDist and does not need a running Vite dev server.
-const appBinaryPath = path.resolve(
-  here,
-  "..",
-  "src-tauri/target/debug/agentgauge",
-);
+const appBinaryPath = process.env.AGENTGAUGE_E2E_BINARY
+  ? path.resolve(process.env.AGENTGAUGE_E2E_BINARY)
+  : path.resolve(here, "..", "src-tauri/target/debug/agentgauge");
 
 export const config: WebdriverIO.Config = {
   runner: "local",
@@ -34,6 +32,7 @@ export const config: WebdriverIO.Config = {
       path.join(here, "specs", "features", "onboarding.e2e.ts"),
       path.join(here, "specs", "features", "persistence.e2e.ts"),
       path.join(here, "specs", "features", "dashboard.e2e.ts"),
+      path.join(here, "specs", "features", "cli-detection.e2e.ts"),
       path.join(here, "specs", "features", "usage-tabs.e2e.ts"),
       path.join(here, "specs", "features", "kickoff.e2e.ts"),
       path.join(here, "specs", "features", "automation.e2e.ts"),

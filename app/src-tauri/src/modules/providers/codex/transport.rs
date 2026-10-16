@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use super::protocol;
 use crate::shared::error::{Error, ErrorKind};
+use crate::shared::executable;
 
 /// Executable we spawn. Overridable so a test can point at a stub.
 pub const CODEX_EXECUTABLE: &str = "codex";
@@ -61,7 +62,12 @@ impl AppServer {
     /// Returns `ProviderMissing` when the executable cannot be spawned, which
     /// is the signal the onboarding flow uses to tell the user what to install.
     pub fn spawn(executable: &str) -> Result<Self, Error> {
-        let mut child = Command::new(executable)
+        let resolved =
+            executable::resolve(executable, "AGENTGAUGE_CODEX_PATH").ok_or_else(|| {
+                Error::provider_missing(executable::not_found_reason("AGENTGAUGE_CODEX_PATH"))
+            })?;
+        let mut child = resolved
+            .command()
             .arg("app-server")
             .arg("--stdio")
             .stdin(Stdio::piped())
@@ -73,7 +79,7 @@ impl AppServer {
             .spawn()
             .map_err(|err| {
                 Error::provider_missing(format!(
-                    "`{executable}` could not be started ({err}). Install the Codex CLI and make sure it is on your PATH."
+                    "The Codex CLI could not be started ({err}). Check the executable and its runtime dependencies."
                 ))
             })?;
 
@@ -377,20 +383,27 @@ fn poisoned_error() -> Error {
 }
 
 /// Locates the executable and reads its version, without starting a server.
-pub fn probe(executable: &str) -> Result<String, Error> {
-    let output = Command::new(executable)
+pub fn probe(
+    executable: &str,
+    override_variable: &str,
+    display_name: &str,
+) -> Result<String, Error> {
+    let candidate = executable::resolve(executable, override_variable)
+        .ok_or_else(|| Error::provider_missing(executable::not_found_reason(override_variable)))?;
+    let output = candidate
+        .command()
         .arg("--version")
         .stdin(Stdio::null())
         .output()
-        .map_err(|err| {
+        .map_err(|error| {
             Error::provider_missing(format!(
-                "`{executable}` is not available on this system ({err})."
+                "Could not run the {display_name} version check ({error})."
             ))
         })?;
 
     if !output.status.success() {
         return Err(Error::provider_missing(format!(
-            "`{executable} --version` exited with {}.",
+            "The {display_name} version check exited with {}.",
             output.status
         )));
     }
@@ -420,14 +433,21 @@ mod tests {
 
     #[test]
     fn probe_reports_a_missing_executable_clearly() {
-        let err = probe("definitely-not-a-real-binary-xyz").expect_err("must fail");
+        let err = probe(
+            "definitely-not-a-real-binary-xyz",
+            "AGENTGAUGE_CODEX_PATH",
+            "Codex CLI",
+        )
+        .expect_err("must fail");
         assert_eq!(err.kind, ErrorKind::ProviderMissing);
-        assert!(err.message.contains("not available"));
+        assert!(err.message.contains("not found"));
+        assert!(err.message.contains("AGENTGAUGE_CODEX_PATH"));
     }
 
     #[test]
     fn probe_reads_a_version() {
-        let version = probe(CODEX_EXECUTABLE).expect("codex is installed in CI");
+        let version = probe(CODEX_EXECUTABLE, "AGENTGAUGE_CODEX_PATH", "Codex CLI")
+            .expect("codex is installed in CI");
         assert!(version.starts_with("codex-cli"));
     }
 

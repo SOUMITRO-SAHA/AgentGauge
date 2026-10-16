@@ -122,7 +122,7 @@ impl Provider for CodexProvider {
     }
 
     fn status(&self) -> ProviderStatus {
-        match transport::probe(&self.executable) {
+        match transport::probe(&self.executable, "AGENTGAUGE_CODEX_PATH", "Codex CLI") {
             Ok(version) => ProviderStatus {
                 kind: self.kind(),
                 executable: self.executable.clone(),

@@ -157,7 +157,7 @@ function CliStatusRow({ status }: { readonly status: Ipc.CliToolStatus }) {
         ) : (
           <>
             <span className="text-xs text-muted-foreground">
-              {status.reason ?? "The executable was not found on your PATH."}
+              {visibleFailureReason(status)}
             </span>
             <code className="inline-flex max-w-full items-center gap-1.5 self-start overflow-x-auto rounded-md bg-muted px-2 py-1 text-xs whitespace-nowrap text-foreground">
               <Terminal className="size-3 shrink-0" aria-hidden="true" />
@@ -167,6 +167,20 @@ function CliStatusRow({ status }: { readonly status: Ipc.CliToolStatus }) {
         )}
       </div>
     </div>
+  );
+}
+
+function visibleFailureReason(status: Ipc.CliToolStatus): string {
+  const reason = status.reason ?? "The executable was not found on your PATH.";
+  if (!isAbsoluteExecutable(status.executable)) return reason;
+  return reason.split(status.executable).join("the executable");
+}
+
+function isAbsoluteExecutable(executable: string): boolean {
+  return (
+    executable.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/.test(executable) ||
+    executable.startsWith("\\\\")
   );
 }
 

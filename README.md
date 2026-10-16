@@ -43,6 +43,7 @@ See the [Product Requirements Document](docs/PRD.md) for the full scope, capabil
 ## What works today
 
 - Codex usage is read through the locally installed `codex app-server`; the app does not call OpenAI's provider API or ask for API credentials.
+- Read-only CLI detection checks Codex and OpenCode with `--version`, independently of usage support. It searches the inherited path, macOS launchd path, and common install locations; `AGENTGAUGE_CODEX_PATH` and `AGENTGAUGE_OPENCODE_PATH` can select absolute executable paths without sourcing shell startup files.
 - The app displays the reported five-hour and weekly windows and freshness/status information.
 - The app observes changes in the reported `resetsAt` value as the rollover signal.
 - Usage tabs cover every connected coding plan: Codex plus the OpenCode-connected Z.AI, MiniMax, and Kimi plans (Z.AI live-verified; MiniMax/Kimi decode from vendor-documented endpoints and degrade to explicit unavailable).

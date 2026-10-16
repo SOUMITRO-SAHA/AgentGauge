@@ -10,6 +10,7 @@ pub mod clock;
 pub mod database;
 pub mod domain;
 pub mod error;
+pub mod executable;
 pub mod logging;
 pub mod platform;
 pub mod protocol;
