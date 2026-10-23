@@ -30,7 +30,7 @@ if pgrep -x agentgauge >/dev/null 2>&1 && { [[ -d "${HOME}/Applications/AgentGau
 fi
 
 launch_agents=("${launch_agent_dir}"/com.soumitrasaha.agentgauge*.plist)
-for plist in "${launch_agents[@]}"; do
+for plist in ${launch_agents[@]+"${launch_agents[@]}"}; do
   label="${plist##*/}"
   label="${label%.plist}"
   service="${launch_agent_domain}/${label}"
