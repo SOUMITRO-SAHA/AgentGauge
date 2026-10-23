@@ -98,8 +98,30 @@ bun run test           # Run unit and component tests
 bun run e2e            # Build and test the real native app
 bun run tauri build    # Build a native package for the current target
 bun run build:mac      # Build the macOS app and WidgetKit extension
+bun run build:install  # Build, replace any installed copy, and launch (macOS)
 bun run icons:generate # Regenerate desktop icons from public/logo.svg
 ```
+
+### Build and install locally (macOS)
+
+To try AgentGauge from source, one command builds the app with the embedded
+WidgetKit extension, removes every previous AgentGauge install (app bundles,
+a Homebrew Cask install, and user LaunchAgents — your data in
+`~/Library/Application Support/AgentGauge/` is preserved), installs the fresh
+bundle to `~/Applications/AgentGauge.app`, verifies its code seal, and
+launches it:
+
+```sh
+cd app
+bun run build:install
+```
+
+The build completes before anything is removed, so a failed build leaves your
+current install untouched. The command runs on macOS only and requires Bun,
+the Rust toolchain, and Xcode (for the WidgetKit extension). The result is
+ad-hoc signed and not notarized, so macOS may ask you to approve the first
+launch. The installed app re-registers its background LaunchAgent itself on
+launch.
 
 The icon generator copies only macOS, Windows, and Linux assets into
 `app/src-tauri/icons/`. Tauri's CLI currently creates mobile files as part of
