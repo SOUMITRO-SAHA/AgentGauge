@@ -21,6 +21,8 @@ bunx tauri build --bundles app            # build the .app
 bun run widget:embed path/to/App.app      # embed + re-sign
 # or all three:
 bun run build:mac
+# or build, remove every previous install, and install to ~/Applications:
+bun run build:install
 
 bun run clean:widget                      # remove widget build output (both configurations)
 ```
