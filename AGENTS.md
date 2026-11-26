@@ -161,6 +161,14 @@ Binding on every task, with no exceptions beyond those named here:
   `type(scope): subject` (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`,
   …), imperative mood, body explains why, no generated attribution footers.
 
+## Branch, issue, and pull request workflow
+
+- **Branch names** use `type/<issue-number>-<short-kebab-description>` (for example, `feat/142-widget-refresh-race`). Use the same `type` values as commits. Keep the description short and specific.
+- **Commits** follow the standard commit convention in [Documentation and commits](#documentation-and-commits-strict): `type(scope): subject`, imperative mood, body explains why, no generated attribution footers.
+- **Issues before work.** Every change should be tied to a valid issue. Before starting work, comment on the issue to claim it (for example, `Claiming this issue.`).
+- **Stale claims.** If an issue was claimed more than 1 week ago and no PR has been opened, comment asking for a status update and whether you can take the task. Do not start work until the claimant confirms you may take it. If you receive no reply, wait 5 days after your status request, then comment that you are claiming the issue and begin work.
+- **Pull requests.** Every PR must link a valid issue. Keep the PR scoped, describe the problem and approach, list validation run, and call out any user-visible, permission, network, subprocess, or quota-consuming changes.
+
 ## Development and verification
 
 Use Bun for JavaScript package operations:

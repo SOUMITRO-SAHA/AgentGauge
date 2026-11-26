@@ -6,8 +6,10 @@ Thank you for your interest in improving AgentGauge. Contributions should make t
 
 1. Read the [README](README.md) for current capabilities and setup.
 2. Read the [PRD](docs/PRD.md) before proposing product or integration work. Its harness integration order and capability boundaries are intentional.
-3. For substantial changes, open an issue or discussion first to agree on scope and feasibility.
-4. Check the [license](LICENSE) before contributing. This project has a custom license with a commercial redistribution restriction; it is not OSI-approved open source. Contributions are submitted under the terms described in that license unless a separate written agreement applies.
+3. Find or create a valid issue before starting work. Every pull request must be linked to a valid issue.
+4. Claim the issue by commenting on it before you begin work (for example, `Claiming this issue.`).
+5. If an issue was claimed more than 1 week ago and no pull request has been opened, comment asking for a status update and whether you can take the task. Do not start work until the claimant confirms you may take it. If you receive no reply, wait 5 days after your status request, then comment that you are claiming the issue and begin work.
+6. Check the [license](LICENSE) before contributing. This project has a custom license with a commercial redistribution restriction; it is not OSI-approved open source. Contributions are submitted under the terms described in that license unless a separate written agreement applies.
 
 ## Project boundaries
 
@@ -33,7 +35,9 @@ Use Bun for JavaScript package operations. Keep `app/bun.lock` and `app/src-taur
 
 ## Making changes
 
+- Create a branch named `type/<issue-number>-<short-kebab-description>` (for example, `fix/142-widget-refresh-race`). Use the same `type` values as commit messages: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, and similar.
 - Prefer a focused change that solves one problem.
+- Write commits using the standard commit convention: `type(scope): subject` in imperative mood. Explain why in the body when needed, and do not add generated attribution footers.
 - Follow the existing TypeScript/React and Rust style and preserve the architecture in `AGENTS.md`.
 - For Rust, keep dependency direction downward: composition root → modules → shared → crates. Avoid cycles and sideways imports between sibling modules.
 - Keep harness-specific logic in its adapter/module rather than coupling it into generic UI.
@@ -68,8 +72,8 @@ Tests must not require network access, API keys, or a live provider account. Moc
 
 ## Pull requests
 
+- Every pull request must be linked to a valid issue (for example, `Closes #123`). Do not open a PR without an issue.
 - Use a clear title and explain the problem, the approach, and any user-visible behavior change.
-- Link the relevant issue or PRD requirement where applicable.
 - Include tests and list the exact validation commands run, with platform details for native checks.
 - Call out new permissions, data collection, subprocess behavior, network access, or quota-consuming actions explicitly.
 - Include screenshots for visual changes when useful; never include sensitive account information.
