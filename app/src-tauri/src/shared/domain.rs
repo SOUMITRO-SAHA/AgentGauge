@@ -15,6 +15,7 @@ pub enum ProviderKind {
     Zai,
     Minimax,
     Kimi,
+    Antigravity,
 }
 
 impl ProviderKind {
@@ -25,6 +26,7 @@ impl ProviderKind {
             Self::Zai => "zai",
             Self::Minimax => "minimax",
             Self::Kimi => "kimi",
+            Self::Antigravity => "antigravity",
         }
     }
 
@@ -35,6 +37,7 @@ impl ProviderKind {
             Self::Zai => "Z.AI",
             Self::Minimax => "MiniMax",
             Self::Kimi => "Kimi",
+            Self::Antigravity => "Antigravity",
         }
     }
 
@@ -45,6 +48,7 @@ impl ProviderKind {
             Self::Zai => "z.ai coding plan",
             Self::Minimax => "minimax token plan",
             Self::Kimi => "kimi code plan",
+            Self::Antigravity => "antigravity cli",
         }
     }
 }
@@ -840,6 +844,9 @@ fn model_belongs_to_kind(kind: ProviderKind, provider_id: &str) -> bool {
             provider_id,
             "kimi-for-coding" | "kimi-code-plan-cn" | "kimi-code-plan-global"
         ),
+        // Antigravity is not an OpenCode-connected plan and its models do not
+        // come from the models.dev catalog, so nothing belongs to it here.
+        ProviderKind::Antigravity => false,
     }
 }
 

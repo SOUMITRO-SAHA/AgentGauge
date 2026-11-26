@@ -11,12 +11,14 @@ use crate::shared::executable::{self, ResolvedExecutable};
 
 const CODEX_PATH_OVERRIDE: &str = "AGENTGAUGE_CODEX_PATH";
 const OPENCODE_PATH_OVERRIDE: &str = "AGENTGAUGE_OPENCODE_PATH";
+const ANTIGRAVITY_PATH_OVERRIDE: &str = "AGENTGAUGE_ANTIGRAVITY_PATH";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CliTool {
     Codex,
     OpenCode,
+    Antigravity,
 }
 
 impl CliTool {
@@ -24,6 +26,7 @@ impl CliTool {
         match self {
             Self::Codex => "codex",
             Self::OpenCode => "opencode",
+            Self::Antigravity => "agy",
         }
     }
 
@@ -31,6 +34,7 @@ impl CliTool {
         match self {
             Self::Codex => "Codex CLI",
             Self::OpenCode => "OpenCode CLI",
+            Self::Antigravity => "Antigravity CLI",
         }
     }
 }
@@ -48,7 +52,7 @@ pub struct CliToolStatus {
 
 /// Runs only each CLI's version command; no agent session or server is started.
 pub fn detect() -> Vec<CliToolStatus> {
-    [CliTool::Codex, CliTool::OpenCode]
+    [CliTool::Codex, CliTool::OpenCode, CliTool::Antigravity]
         .into_iter()
         .map(detect_one)
         .collect()
@@ -58,6 +62,7 @@ fn detect_one(tool: CliTool) -> CliToolStatus {
     let override_variable = match tool {
         CliTool::Codex => CODEX_PATH_OVERRIDE,
         CliTool::OpenCode => OPENCODE_PATH_OVERRIDE,
+        CliTool::Antigravity => ANTIGRAVITY_PATH_OVERRIDE,
     };
     detect_executable(tool, tool.executable(), override_variable)
 }
@@ -135,8 +140,22 @@ mod tests {
                 .iter()
                 .map(|status| status.tool)
                 .collect::<Vec<_>>(),
-            [CliTool::Codex, CliTool::OpenCode]
+            [CliTool::Codex, CliTool::OpenCode, CliTool::Antigravity]
         );
+    }
+
+    #[test]
+    fn antigravity_detects_the_agy_executable_and_names_its_override() {
+        // The lock keeps this read of the shared override variable off the
+        // antigravity provider tests' writes to the same variable.
+        let _env = crate::shared::executable::test_env_lock();
+        let status = detect_one(CliTool::Antigravity);
+        assert_eq!(status.tool, CliTool::Antigravity);
+        assert_eq!(status.display_name, "Antigravity CLI");
+        if !status.installed {
+            let reason = status.reason.expect("uninstalled rows carry a reason");
+            assert!(reason.contains(ANTIGRAVITY_PATH_OVERRIDE));
+        }
     }
 
     #[test]

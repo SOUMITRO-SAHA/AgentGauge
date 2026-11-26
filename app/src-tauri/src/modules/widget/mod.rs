@@ -256,6 +256,7 @@ impl WidgetSnapshot {
             ProviderKind::Zai => 1,
             ProviderKind::Minimax => 2,
             ProviderKind::Kimi => 3,
+            ProviderKind::Antigravity => 4,
         });
 
         if providers.is_empty() {

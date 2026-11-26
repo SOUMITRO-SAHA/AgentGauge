@@ -716,6 +716,12 @@ export interface DispatchFixtures {
   readonly version: string | null;
   readonly cliDetectionFailure?: boolean;
   /**
+   * Whether the `cliDetection` reply reports the Antigravity CLI installed.
+   * Absent means it is not installed, so the Stats view shows no Antigravity
+   * tab.
+   */
+  readonly antigravityInstalled?: boolean;
+  /**
    * Coding subscriptions OpenCode reports, as the `openCodeSubscriptions`
    * reply would carry them. Absent means "none connected" — Codex only.
    */
@@ -1059,6 +1065,16 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                 reason: data.cliDetectionFailure
                   ? "Could not run `/Users/test/.opencode/bin/opencode --version` (Permission denied)."
                   : null,
+              },
+              {
+                tool: "antigravity",
+                displayName: "Antigravity CLI",
+                executable: "/Users/test/.local/bin/agy",
+                installed: data.antigravityInstalled ?? false,
+                version: data.antigravityInstalled ? "antigravity 1.5.17" : null,
+                reason: data.antigravityInstalled
+                  ? null
+                  : "Executable was not found in the app PATH or common install locations. Set AGENTGAUGE_ANTIGRAVITY_PATH to its absolute path.",
               },
             ],
           };
@@ -1972,6 +1988,83 @@ export async function dashboardWithStatsTrends(): Promise<void> {
       finalRoute: "stats",
     },
   );
+}
+
+/**
+ * Onboarding dismissed, Codex only, with the Antigravity CLI detected and its
+ * sessions-only record answering the account read.
+ *
+ * The usage-window reply for `antigravity` mirrors the Rust provider's honest
+ * refusal — an unavailable snapshot with a reason — and the account read
+ * carries the session record with no token fields at all, exactly the shape
+ * `sessions.rs` produces.
+ */
+export async function dashboardWithAntigravity(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+    antigravityInstalled: true,
+    usageByProvider: {
+      antigravity: {
+        provider: "antigravity",
+        freshness: "unavailable",
+        fetchedAt: null,
+        source: "antigravity cli",
+        reason:
+          "Antigravity reports quota only inside its own /usage command; it has no interface AgentGauge can read.",
+        plan: null,
+        permission: "unknown",
+        windows: [],
+        fiveHour: null,
+        weekly: null,
+      },
+    },
+    accountUsageByProvider: {
+      antigravity: {
+        fetchedAt: 1791561935000,
+        summary: {
+          totalTokens: null,
+          peakDailyTokens: null,
+          longestRunningTurnSec: null,
+          currentStreakDays: null,
+          longestStreakDays: null,
+          totalRequests: null,
+        },
+        windowDays: null,
+        models: [],
+        modelDailyUsage: [],
+        cacheStats: null,
+        dailyUsageBuckets: [],
+        local: {
+          models: [],
+          modelDays: [],
+          projects: [],
+          days: [],
+          sessionDays: [
+            { day: "2026-11-21", sessions: 1 },
+            { day: "2026-11-24", sessions: 2 },
+            { day: "2026-11-25", sessions: 3 },
+            { day: "2026-11-26", sessions: 1 },
+          ],
+          medianTokensPerSession: null,
+          compactions: null,
+          costUsd: 0,
+          unpricedTokens: 0,
+          sessions: 7,
+          filesScanned: 14,
+          filesUnreadable: 0,
+          filesCompressed: 0,
+          firstDay: "2026-11-21",
+          lastDay: "2026-11-26",
+        },
+      },
+    },
+  });
 }
 
 /**

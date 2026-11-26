@@ -51,6 +51,7 @@ export const config: WebdriverIO.Config = {
       path.join(here, "specs", "features", "stats", "cost-trends.e2e.ts"),
       path.join(here, "specs", "features", "stats", "local-sessions.e2e.ts"),
       path.join(here, "specs", "features", "stats", "responsive.e2e.ts"),
+      path.join(here, "specs", "features", "antigravity-stats.e2e.ts"),
       path.join(here, "specs", "features", "process", "process.e2e.ts"),
       path.join(here, "specs", "features", "process", "responsive.e2e.ts"),
       path.join(here, "specs", "features", "process", "cpu-ports.e2e.ts"),
