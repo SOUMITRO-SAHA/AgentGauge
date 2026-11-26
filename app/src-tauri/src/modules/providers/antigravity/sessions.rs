@@ -308,7 +308,7 @@ fn modified_day(metadata: &fs::Metadata) -> Option<String> {
 /// The repo carries no date-time dependency; this is Howard Hinnant's
 /// `civil_from_days` algorithm, the same conversion every date library
 /// performs internally.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let day_of_era = (z - era * 146_097) as u64;

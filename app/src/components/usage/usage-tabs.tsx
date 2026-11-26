@@ -18,7 +18,7 @@ import * as Cause from "effect/Cause";
 import { useEffect, useRef } from "react";
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react";
 
-import { selectedTabAtom, subscriptionsAtom, usageForAtom } from "~/atoms";
+import { cliDetectionAtom, selectedTabAtom, subscriptionsAtom, usageForAtom } from "~/atoms";
 import { PanelHeader } from "~/components/dashboard/panel";
 import { FreshnessPill } from "~/components/usage/provider-status-card";
 import {
@@ -36,8 +36,8 @@ import {
   formatPlan,
   millisUntilReset,
   safeResetAt,
-  tabsFrom,
   toneFor,
+  usageTabsFrom,
   windowTitle,
   type UsageTab,
 } from "~/lib/usage";
@@ -45,6 +45,7 @@ import { cn } from "~/lib/utils";
 
 export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
   const subscriptions = useAtomValue(subscriptionsAtom);
+  const cliDetections = useAtomValue(cliDetectionAtom);
   const selected = useAtomValue(selectedTabAtom);
   const setSelected = useAtomSet(selectedTabAtom);
   const refreshSubscriptions = useAtomRefresh(subscriptionsAtom);
@@ -54,12 +55,24 @@ export function UsageTabs({ nowMs }: { readonly nowMs: number }) {
   // what is on screen, plus the tab set itself.
   const refreshers = useRef(new Map<string, () => void>());
 
-  const tabs = tabsFrom(
+  // The same detection signal Stats uses: the Antigravity tab exists while
+  // its CLI is installed, and its body explains why it shows no windows.
+  const antigravityInstalled = AsyncResult.match(cliDetections, {
+    onInitial: () => false,
+    onSuccess: (result) =>
+      result.value.some(
+        (status) => status.tool === "antigravity" && status.installed,
+      ),
+    onFailure: () => false,
+  });
+
+  const tabs = usageTabsFrom(
     AsyncResult.match(subscriptions, {
       onInitial: () => [],
       onSuccess: (result) => result.value,
       onFailure: () => [],
     }),
+    antigravityInstalled,
   );
 
   const active = tabs.some((tab) => tab.value === selected)
@@ -167,7 +180,11 @@ function SubscriptionsNotice({
   });
 }
 
-/** What one plan's tab shows: its reading, or the honest reason there is none. */
+/**
+ * What one tab shows: its reading, the honest reason there is none, and —
+ * for the detected-CLI Antigravity tab, which can never carry windows — the
+ * pointer to where its numbers actually live.
+ */
 function PlanTabBody({
   tab,
   nowMs,
@@ -192,12 +209,23 @@ function PlanTabBody({
   }
 
   return (
-    <ProviderUsage
-      kind={tab.kind}
-      value={tab.value}
-      nowMs={nowMs}
-      refreshers={refreshers}
-    />
+    <div className="flex flex-col gap-4">
+      <ProviderUsage
+        kind={tab.kind}
+        value={tab.value}
+        nowMs={nowMs}
+        refreshers={refreshers}
+      />
+      {tab.kind === "antigravity" ? (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="usage-antigravity-pointer"
+        >
+          Windows come from Antigravity&apos;s own /usage command. Its local
+          session statistics are in the Stats view.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

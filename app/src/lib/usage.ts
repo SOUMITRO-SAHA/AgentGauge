@@ -210,8 +210,27 @@ export function statsTabsFrom(
   subscriptions: readonly Ipc.CodingSubscription[],
   antigravityInstalled = false,
 ): UsageTab[] {
-  const tabs = [ALL_PLANS_TAB, ...tabsFrom(subscriptions)];
-  if (antigravityInstalled && !tabs.some((tab) => tab.value === "antigravity")) {
+  return [ALL_PLANS_TAB, ...usageTabsFrom(subscriptions, antigravityInstalled)];
+}
+
+/**
+ * The tab set for the Usage panel: Codex first, every OpenCode-reported plan
+ * after, then Antigravity while its CLI is installed.
+ *
+ * Distinct from [`tabsFrom`], which Automation shares and which must keep
+ * listing plans only: a rollover monitor has nothing to watch on a provider
+ * that reports no windows. Antigravity's tab here reads windows it cannot
+ * have, so its body says why and points at Stats.
+ */
+export function usageTabsFrom(
+  subscriptions: readonly Ipc.CodingSubscription[],
+  antigravityInstalled = false,
+): UsageTab[] {
+  const tabs = tabsFrom(subscriptions);
+  if (
+    antigravityInstalled &&
+    !tabs.some((tab) => tab.value === ANTIGRAVITY_TAB.value)
+  ) {
     tabs.push(ANTIGRAVITY_TAB);
   }
   return tabs;

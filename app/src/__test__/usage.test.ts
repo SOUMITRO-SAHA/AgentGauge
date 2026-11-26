@@ -18,6 +18,7 @@ import {
   safeResetAt,
   statsTabsFrom,
   toneFor,
+  usageTabsFrom,
   windowTitle,
 } from "~/lib/usage";
 import type * as Ipc from "~/lib/ipc";
@@ -225,5 +226,38 @@ describe("statsTabsFrom", () => {
     expect(
       tabs.filter((tab) => tab.value === "antigravity"),
     ).toHaveLength(1);
+  });
+});
+
+describe("usageTabsFrom", () => {
+  const subscription = (
+    providerId: string,
+    integration: Ipc.ProviderKind | null,
+  ): Ipc.CodingSubscription => ({
+    providerId,
+    name: providerId,
+    label: providerId,
+    integration,
+    credential: "stored",
+    apiBase: null,
+  });
+
+  it("keeps Antigravity out of the Usage strip while its CLI is not detected", () => {
+    const tabs = usageTabsFrom([subscription("zai-coding-plan", "zai")]);
+    expect(tabs.map((tab) => tab.value)).toEqual(["codex", "zai"]);
+  });
+
+  it("appends Antigravity after the plans once its CLI is detected", () => {
+    const tabs = usageTabsFrom(
+      [subscription("zai-coding-plan", "zai")],
+      true,
+    );
+    expect(tabs.map((tab) => tab.value)).toEqual([
+      "codex",
+      "zai",
+      "antigravity",
+    ]);
+    expect(tabs[2].kind).toBe("antigravity");
+    expect(tabs[2].label).toBe("Antigravity");
   });
 });

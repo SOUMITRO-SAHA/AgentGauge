@@ -1991,13 +1991,15 @@ export async function dashboardWithStatsTrends(): Promise<void> {
 }
 
 /**
- * Onboarding dismissed, Codex only, with the Antigravity CLI detected and its
- * sessions-only record answering the account read.
+ * Onboarding dismissed, Codex only, with the Antigravity CLI detected, its
+ * quota windows answering the usage read, and its sessions-only record
+ * answering the account read.
  *
- * The usage-window reply for `antigravity` mirrors the Rust provider's honest
- * refusal — an unavailable snapshot with a reason — and the account read
- * carries the session record with no token fields at all, exactly the shape
- * `sessions.rs` produces.
+ * The usage-window reply mirrors the real provider: four windows parsed from
+ * `agy -p /usage` (two model families × five-hour and weekly), with no
+ * single five-hour window promoted. The account read carries the session
+ * record with no token fields at all, exactly the shape `sessions.rs`
+ * produces.
  */
 export async function dashboardWithAntigravity(): Promise<void> {
   await boot({
@@ -2012,16 +2014,44 @@ export async function dashboardWithAntigravity(): Promise<void> {
     usageByProvider: {
       antigravity: {
         provider: "antigravity",
-        freshness: "unavailable",
-        fetchedAt: null,
+        freshness: "live",
+        fetchedAt: 1791561935000,
         source: "antigravity cli",
-        reason:
-          "Antigravity reports quota only inside its own /usage command; it has no interface AgentGauge can read.",
+        reason: null,
         plan: null,
-        permission: "unknown",
-        windows: [],
+        permission: "allowed",
         fiveHour: null,
         weekly: null,
+        windows: [
+          {
+            label: "Gemini weekly",
+            usedPercent: 25,
+            durationMins: 10080,
+            resetsAt: Math.floor(Date.now() / 1000) + 6 * 86400,
+            remainingPercent: 75,
+          },
+          {
+            label: "Gemini 5h",
+            usedPercent: 0,
+            durationMins: 300,
+            resetsAt: Math.floor(Date.now() / 1000) + 4 * 3600,
+            remainingPercent: 100,
+          },
+          {
+            label: "Claude & GPT weekly",
+            usedPercent: 0,
+            durationMins: 10080,
+            resetsAt: Math.floor(Date.now() / 1000) + 6 * 86400,
+            remainingPercent: 100,
+          },
+          {
+            label: "Claude & GPT 5h",
+            usedPercent: 0,
+            durationMins: 300,
+            resetsAt: Math.floor(Date.now() / 1000) + 5 * 3600,
+            remainingPercent: 100,
+          },
+        ],
       },
     },
     accountUsageByProvider: {

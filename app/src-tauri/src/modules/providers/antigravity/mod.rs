@@ -1,14 +1,15 @@
 //! The Antigravity CLI integration.
 //!
-//! Antigravity (`agy`, Google's terminal coding agent) publishes no interface
-//! AgentGauge can read quota through: its `/usage` command talks to an
-//! internal Google API with credentials that never leave the OS keyring, and
-//! its local files record sessions, not tokens. What this provider offers is
-//! therefore honest by construction — an installation check, and the session
-//! record `sessions.rs` reads — and every capability it cannot provide
-//! refuses instead of fabricating.
+//! Antigravity (`agy`, Google's terminal coding agent) exposes quota through
+//! its own `/usage` command, which this provider runs headless in JSON mode
+//! — an internal slash command that costs no quota and never starts a
+//! session. Token analytics are a different matter: the CLI records no
+//! token counts locally, so the account read is the machine's own session
+//! record, and every capability that could spend quota (ping, kickoff)
+//! refuses outright.
 
 pub(crate) mod sessions;
+pub(crate) mod usage;
 
 use crate::shared::clock::{Clock, SystemClock};
 use crate::shared::domain::{
@@ -67,12 +68,11 @@ impl Provider for AntigravityProvider {
         }
     }
 
+    /// The quota windows come from the CLI's own `/usage` command, run
+    /// headless with JSON output: an internal slash command, so the read
+    /// costs no quota. Failures degrade to an explicit unavailable state.
     fn read_usage(&self) -> Result<UsageSnapshot, Error> {
-        Ok(UsageSnapshot::unavailable(
-            ProviderKind::Antigravity,
-            "Antigravity reports quota only inside its own /usage command; \
-             it has no interface AgentGauge can read.",
-        ))
+        usage::read_usage_snapshot(ProviderKind::Antigravity, Clock::now_ms(&SystemClock))
     }
 
     /// The account read is the machine's own Antigravity session record.
@@ -145,8 +145,32 @@ mod tests {
     }
 
     #[test]
-    fn the_usage_read_reports_why_there_are_no_windows() {
-        let snapshot = AntigravityProvider::new().read_usage().expect("snapshot");
+    fn a_missing_cli_degrades_to_an_explicit_unavailable_reading() {
+        let _env = crate::shared::executable::test_env_lock();
+        struct OverrideGuard {
+            key: &'static str,
+            previous: Option<std::ffi::OsString>,
+        }
+        impl Drop for OverrideGuard {
+            fn drop(&mut self) {
+                if let Some(value) = self.previous.take() {
+                    std::env::set_var(self.key, value);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+
+        let key = ANTIGRAVITY_PATH_OVERRIDE;
+        let guard = OverrideGuard {
+            key,
+            previous: std::env::var_os(key),
+        };
+        std::env::set_var(key, "/nonexistent/antigravity-usage-test/agy");
+        let snapshot = AntigravityProvider::new().read_usage();
+        drop(guard);
+
+        let snapshot = snapshot.expect("snapshot");
         assert_eq!(snapshot.provider, ProviderKind::Antigravity);
         assert_eq!(
             snapshot.freshness,
@@ -156,7 +180,65 @@ mod tests {
         assert!(snapshot
             .reason
             .as_deref()
-            .is_some_and(|reason| reason.contains("/usage")));
+            .is_some_and(|reason| reason.contains(ANTIGRAVITY_PATH_OVERRIDE)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_usage_read_parses_the_cli_json_envelope() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _env = crate::shared::executable::test_env_lock();
+        struct OverrideGuard {
+            key: &'static str,
+            previous: Option<std::ffi::OsString>,
+        }
+        impl Drop for OverrideGuard {
+            fn drop(&mut self) {
+                if let Some(value) = self.previous.take() {
+                    std::env::set_var(self.key, value);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+
+        let directory = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.temp/antigravity-usage-tests")
+            .join(format!("read-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("create fixture directory");
+        let reply = directory.join("reply.json");
+        std::fs::write(&reply, usage::test_fixture_reply()).expect("write fixture reply");
+        let path = directory.join("agy");
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\ncat \"{}\"\n", reply.to_string_lossy()),
+        )
+        .expect("write fixture executable");
+        let mut permissions = std::fs::metadata(&path)
+            .expect("read fixture permissions")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).expect("make fixture executable");
+
+        let key = ANTIGRAVITY_PATH_OVERRIDE;
+        let guard = OverrideGuard {
+            key,
+            previous: std::env::var_os(key),
+        };
+        std::env::set_var(key, &path);
+        let snapshot = AntigravityProvider::new().read_usage();
+        drop(guard);
+        let _ = std::fs::remove_dir_all(directory);
+
+        let snapshot = snapshot.expect("snapshot");
+        assert_eq!(snapshot.freshness, crate::shared::domain::Freshness::Live);
+        assert_eq!(snapshot.windows.len(), 4);
+        let gemini_weekly = &snapshot.windows[0];
+        assert_eq!(gemini_weekly.label, "Gemini weekly");
+        assert_eq!(gemini_weekly.remaining_percent, 75);
+        assert_eq!(gemini_weekly.used_percent, 25);
+        assert!(gemini_weekly.resets_at.is_some());
     }
 
     #[test]
