@@ -195,10 +195,17 @@ pub struct PathEnv {
     /// `$OPENCODE_DB`, when set: the file OpenCode was told to keep its
     /// database in, outside `opencode_data`.
     pub opencode_db: Option<PathBuf>,
+    /// The `.gemini` directory Antigravity keeps its surfaces under. There
+    /// is no documented relocation override for it.
+    pub gemini_home: Option<PathBuf>,
 }
 
 /// The executables tracked as tool groups.
-const TRACKED_TOOLS: [(&str, &str); 2] = [("codex", "Codex"), ("opencode", "OpenCode")];
+const TRACKED_TOOLS: [(&str, &str); 3] = [
+    ("codex", "Codex"),
+    ("opencode", "OpenCode"),
+    ("agy", "Antigravity"),
+];
 
 /// Longest command line returned, in characters.
 const MAX_COMMAND_CHARS: usize = 160;
@@ -545,6 +552,7 @@ fn tool_storage(executable: &str, paths: &PathEnv) -> StorageReport {
     match executable {
         "codex" => codex_storage(paths),
         "opencode" => opencode_storage(paths),
+        "agy" => antigravity_storage(paths),
         other => StorageReport::Absent {
             reason: format!("No data directory is defined for `{other}` in this build."),
         },
@@ -698,6 +706,52 @@ fn opencode_storage(paths: &PathEnv) -> StorageReport {
     }
 
     measure_storage(root, &components, external)
+}
+
+/// The Antigravity surfaces every install may create under `~/.gemini`,
+/// verified against a real install: the CLI's data root, the IDE and ACP
+/// roots beside it, and the IDE 2.0 directory third-party tooling
+/// documents. A surface that is absent on a given install is omitted as a
+/// row rather than listed as zero.
+fn antigravity_components() -> Vec<Component> {
+    [
+        Component::Directory {
+            label: "CLI surface",
+            name: "antigravity-cli",
+        },
+        Component::Directory {
+            label: "IDE surface",
+            name: "antigravity-ide",
+        },
+        Component::Directory {
+            label: "ACP surface",
+            name: "antigravity-acp",
+        },
+        Component::Directory {
+            label: "IDE 2.0 surface",
+            name: "antigravity",
+        },
+    ]
+    .to_vec()
+}
+
+fn antigravity_storage(paths: &PathEnv) -> StorageReport {
+    let Some(root) = paths.gemini_home.as_deref() else {
+        return StorageReport::Absent {
+            reason: "No home directory is available, so the data directory cannot be located."
+                .to_owned(),
+        };
+    };
+    if !root.exists() {
+        return StorageReport::Absent {
+            reason: format!("Antigravity has not created `{}` yet.", root.display()),
+        };
+    }
+
+    // The `.gemini` root predates Antigravity — the legacy Gemini CLI and
+    // plain configuration files share it — so the components carry the
+    // surfaces this tool owns and the rest reports as its own bucket.
+    measure_storage(root, &antigravity_components(), Vec::new())
 }
 
 /// Parses `lsof -F pcn` output into pid/port pairs with the bound interface.
@@ -1014,6 +1068,7 @@ fn paths_for(
                 .join("opencode"),
         ),
         opencode_db,
+        gemini_home: Some(home.join(".gemini")),
     }
 }
 
@@ -1495,6 +1550,67 @@ mod tests {
     }
 
     #[test]
+    fn the_real_antigravity_surfaces_are_labelled_components() {
+        let root = temp_root("antigravity-components");
+        for name in ["antigravity-cli", "antigravity-ide", "antigravity-acp"] {
+            fs::create_dir(root.join(name)).expect("creates surface");
+            fs::write(root.join(name).join("session.db"), vec![0u8; 2]).expect("fills surface");
+        }
+        // The shared root carries non-Antigravity files (the legacy Gemini
+        // CLI's configuration); they must land in the rest bucket, not in a
+        // surface row.
+        fs::write(root.join("settings.json"), vec![0u8; 6]).expect("writes shared config");
+
+        let report = tool_storage(
+            "agy",
+            &PathEnv {
+                gemini_home: Some(root),
+                ..PathEnv::default()
+            },
+        );
+        let StorageReport::Measured { rows, .. } = report else {
+            panic!("expected a measured report");
+        };
+        let labels: Vec<&str> = rows.iter().map(|row| row.label.as_str()).collect();
+        for expected in ["CLI surface", "IDE surface", "ACP surface", "Everything else"] {
+            assert!(labels.contains(&expected), "missing label {expected}");
+        }
+        // The IDE 2.0 directory does not exist on this fixture, so it is
+        // omitted rather than listed as zero.
+        assert!(!labels.contains(&"IDE 2.0 surface"));
+        let surface_rows = rows
+            .iter()
+            .filter(|row| row.label != "Everything else")
+            .collect::<Vec<_>>();
+        assert!(surface_rows
+            .iter()
+            .all(|row| row.bytes == 2 && row.file_count == 1));
+    }
+
+    #[test]
+    fn antigravity_reports_absent_until_its_root_exists() {
+        let report = tool_storage("agy", &PathEnv::default());
+        let StorageReport::Absent { reason } = report else {
+            panic!("expected an absent report without a home");
+        };
+        assert!(reason.contains("No home directory"));
+
+        let missing = temp_root("antigravity-missing");
+        std::fs::remove_dir_all(&missing).expect("clears the fixture root");
+        let report = tool_storage(
+            "agy",
+            &PathEnv {
+                gemini_home: Some(missing.join(".gemini")),
+                ..PathEnv::default()
+            },
+        );
+        let StorageReport::Absent { reason } = report else {
+            panic!("expected an absent report for an uncreated root");
+        };
+        assert!(reason.contains(".gemini"));
+    }
+
+    #[test]
     fn a_relocated_sqlite_home_is_reported_outside_the_root_total() {
         let root = temp_root("codex-relocated");
         fs::write(root.join("history.jsonl"), vec![0u8; 10]).expect("writes history");
@@ -1635,7 +1751,7 @@ mod tests {
             1_700_000_000_000,
         );
         let ids: Vec<&str> = insights.groups.iter().map(|g| g.id.as_str()).collect();
-        assert_eq!(ids, ["codex", "opencode"]);
+        assert_eq!(ids, ["codex", "opencode", "agy"]);
         assert_eq!(insights.fetched_at, 1_700_000_000_000);
         assert!(insights
             .groups
@@ -2086,7 +2202,7 @@ mod tests {
                 .iter()
                 .map(|g| g.id.as_str())
                 .collect::<Vec<_>>(),
-            ["codex", "opencode"]
+            ["codex", "opencode", "agy"]
         );
         assert!(
             insights

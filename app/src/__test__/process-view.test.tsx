@@ -160,7 +160,7 @@ it("mirrors the success shape while loading: one skeleton panel per group plus t
   const tabs = await screen.findByTestId("process-loading-tabs");
   expect(
     tabs.querySelectorAll('[data-testid="process-loading-tab"]'),
-  ).toHaveLength(2);
+  ).toHaveLength(3);
   expect(await screen.findByTestId("process-loading-note")).toBeTruthy();
   expect(screen.getByTestId("process-refreshing")).toBeTruthy();
 

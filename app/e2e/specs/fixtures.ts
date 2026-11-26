@@ -360,6 +360,7 @@ export function processGroup(id: string, overrides: Record<string, unknown> = {}
   const displayNames: Record<string, string> = {
     codex: "Codex",
     opencode: "OpenCode",
+    antigravity: "Antigravity",
   };
   return {
     id,
@@ -2011,6 +2012,57 @@ export async function dashboardWithAntigravity(): Promise<void> {
     widgetSupported: true,
     automationRunning: true,
     antigravityInstalled: true,
+    processInsights: {
+      fetchedAt: Date.now(),
+      groups: [
+        processGroup("codex"),
+        processGroup("opencode"),
+        processGroup("antigravity", {
+          processes: [
+            processSummary({
+              pid: 4207,
+              name: "agy",
+              command: "agy",
+              memoryBytes: 41 * 1024 * 1024,
+              startedAt: Math.floor(Date.now() / 1000) - 600,
+              cpuUsage: 1.5,
+              listeningPorts: [],
+            }),
+          ],
+          totalMemoryBytes: 41 * 1024 * 1024,
+          totalCpuUsage: 1.5,
+          storage: {
+            state: "measured",
+            totalBytes: 36 * 1024 * 1024,
+            totalFiles: 42,
+            root: "/Users/test/.gemini",
+            rows: [
+              {
+                label: "CLI surface",
+                path: "/Users/test/.gemini/antigravity-cli",
+                bytes: 21 * 1024 * 1024,
+                fileCount: 21,
+              },
+              {
+                label: "IDE surface",
+                path: "/Users/test/.gemini/antigravity-ide",
+                bytes: 15 * 1024 * 1024,
+                fileCount: 16,
+              },
+              {
+                label: "Everything else",
+                path: "/Users/test/.gemini",
+                bytes: 3072,
+                fileCount: 5,
+              },
+            ],
+            externalRows: [],
+          },
+          ports: { state: "checked", listening: [] },
+          service: null,
+        }),
+      ],
+    },
     usageByProvider: {
       antigravity: {
         provider: "antigravity",

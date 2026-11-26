@@ -118,4 +118,31 @@ describe("Antigravity local session stats", () => {
     );
     expect(present).toBe(false);
   });
+
+  it("tracks the agy process group and its storage on the Processes screen", async () => {
+    await dashboardWithAntigravity();
+    await gotoView("processes");
+
+    await clickDisplayed('[data-testid="process-tab-antigravity"]');
+    await expectDisplayed('[data-testid="process-panel-antigravity"]');
+
+    const panel = await browser.execute(() => {
+      const read = (id: string) =>
+        document
+          .querySelector(`[data-testid="${id}"]`)
+          ?.textContent?.replace(/\s+/g, " ") ?? "";
+      return {
+        group: read("process-panel-antigravity"),
+        storageRows: Array.from(
+          document.querySelectorAll(
+            '[data-testid^="process-storage-row-antigravity"]',
+          ),
+        ).length,
+      };
+    });
+
+    expect(panel.group).toContain("agy");
+    expect(panel.group).toContain("CLI surface");
+    expect(panel.storageRows).toBe(3);
+  });
 });
