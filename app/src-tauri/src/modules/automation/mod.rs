@@ -582,6 +582,7 @@ mod tests {
             windows: vec![window.clone()],
             five_hour: Some(window),
             weekly: None,
+            quota_groups: Vec::new(),
         }
     }
 

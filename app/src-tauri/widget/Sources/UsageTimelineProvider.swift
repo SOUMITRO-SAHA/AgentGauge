@@ -4,6 +4,7 @@ struct UsageEntry: TimelineEntry {
     let date: Date
     let snapshot: Snapshot?
     let provider: Snapshot.Provider?
+    let selectedGroup: Snapshot.Provider.QuotaGroup?
     let refreshFailed: Bool
     let refreshing: Bool
 
@@ -11,12 +12,14 @@ struct UsageEntry: TimelineEntry {
         date: Date,
         snapshot: Snapshot?,
         provider: Snapshot.Provider?,
+        selectedGroup: Snapshot.Provider.QuotaGroup? = nil,
         refreshFailed: Bool = false,
         refreshing: Bool = false
     ) {
         self.date = date
         self.snapshot = snapshot
         self.provider = provider
+        self.selectedGroup = selectedGroup ?? provider.flatMap { QuotaGroupSelectionStore.selectedGroup(in: $0) }
         self.refreshFailed = refreshFailed
         self.refreshing = refreshing
     }
@@ -46,8 +49,7 @@ struct UsageTimelineProvider: TimelineProvider {
         PlacementReceipt.recordIfRealRender(kind: kind, isPreview: context.isPreview)
         let now = Date()
         let entry = makeEntry(date: now, snapshot: SnapshotStore.read())
-        let resets = [entry.provider?.fiveHour?.resetsAt, entry.provider?.weekly?.resetsAt]
-            .compactMap { $0 }
+        let resets = (entry.provider?.allResetTimestamps ?? [])
             .filter { $0 > now.timeIntervalSince1970 }
             .map { Date(timeIntervalSince1970: $0) }
         let nextReset = resets.min()
@@ -62,10 +64,12 @@ struct UsageTimelineProvider: TimelineProvider {
     }
 
     private func makeEntry(date: Date, snapshot: Snapshot?) -> UsageEntry {
-        UsageEntry(
+        let provider = snapshot.flatMap(ProviderSelectionStore.selectedProvider)
+        return UsageEntry(
             date: date,
             snapshot: snapshot,
-            provider: snapshot.flatMap(ProviderSelectionStore.selectedProvider),
+            provider: provider,
+            selectedGroup: provider.flatMap { QuotaGroupSelectionStore.selectedGroup(in: $0) },
             refreshFailed: WidgetRefreshRequest.result()?.state == "failure" && !WidgetRefreshRequest.isPending,
             refreshing: WidgetRefreshRequest.isPending
         )

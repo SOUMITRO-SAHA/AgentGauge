@@ -15,6 +15,8 @@ pub(crate) mod codex;
 #[cfg(not(any(test, feature = "testkit")))]
 mod codex;
 
+mod antigravity;
+
 pub(crate) mod coding_plan;
 pub(crate) mod http;
 pub(crate) mod kimi;
@@ -28,6 +30,7 @@ use crate::shared::domain::{
 use crate::shared::error::{Error, ErrorKind};
 use crate::shared::provider::{PingOutcome, Provider, ProviderStatus};
 
+use antigravity::AntigravityProvider;
 use codex::CODEX_EXECUTABLE;
 pub use codex::{CodexProvider, PING_PROMPT};
 use kimi::KimiProvider;
@@ -55,6 +58,7 @@ impl ProviderRegistry {
                 Box::new(ZaiProvider::new()),
                 Box::new(MinimaxProvider::new()),
                 Box::new(KimiProvider::new()),
+                Box::new(AntigravityProvider::new()),
             ],
         }
     }
@@ -196,6 +200,7 @@ mod tests {
                 ProviderKind::Zai,
                 ProviderKind::Minimax,
                 ProviderKind::Kimi,
+                ProviderKind::Antigravity,
             ]
         );
     }
@@ -203,7 +208,7 @@ mod tests {
     #[test]
     fn reports_status_for_every_provider() {
         let registry = ProviderRegistry::new();
-        assert_eq!(registry.status().len(), 4);
+        assert_eq!(registry.status().len(), 5);
     }
 
     #[test]

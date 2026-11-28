@@ -14,6 +14,7 @@ import type * as Ipc from "~/lib/ipc";
 const INSTALL_COMMANDS: Record<Ipc.CliToolStatus["tool"], string> = {
   codex: "npm install -g @openai/codex",
   openCode: "npm install -g opencode-ai",
+  antigravity: "curl -fsSL antigravity.google/cli/install.sh | bash",
 };
 
 const INITIAL_CLI_SKELETON_ROWS: ReadonlyArray<
@@ -21,7 +22,13 @@ const INITIAL_CLI_SKELETON_ROWS: ReadonlyArray<
 > = [
   { tool: "codex", installed: true },
   { tool: "openCode", installed: true },
+  { tool: "antigravity", installed: true },
 ];
+
+/** The row's test id, stable across the installed and not-found states. */
+function cliTestid(tool: Ipc.CliToolStatus["tool"]): string {
+  return tool === "openCode" ? "opencode" : tool;
+}
 
 export function ProviderStatusCard() {
   const result = useAtomValue(cliDetectionAtom);
@@ -66,8 +73,11 @@ export function ProviderStatusCard() {
                   <CliStatusRow key={tool.tool} status={tool} />
                 ))}
                 <p className="border-t border-border/60 pt-3 text-xs text-muted-foreground">
-                  AgentGauge currently reads usage from Codex only. Detecting
-                  another CLI does not enable its usage integration.
+                  Detection is an installation check, not a usage integration.
+                  AgentGauge reads Codex&apos;s windows and local logs,
+                  OpenCode-connected plans, and Antigravity&apos;s local
+                  session record; a detected CLI without one of those is not
+                  read.
                 </p>
               </div>
             ),
@@ -134,7 +144,7 @@ function CliStatusRow({ status }: { readonly status: Ipc.CliToolStatus }) {
   return (
     <div
       className="flex min-w-0 items-start gap-3"
-      data-testid={`cli-${status.tool === "openCode" ? "opencode" : "codex"}`}
+      data-testid={`cli-${cliTestid(status.tool)}`}
     >
       {status.installed ? (
         <CheckCircle className="mt-0.5 size-4 shrink-0 text-ok" aria-hidden="true" />
@@ -150,7 +160,7 @@ function CliStatusRow({ status }: { readonly status: Ipc.CliToolStatus }) {
         {status.installed ? (
           <span
             className="break-words text-xs text-muted-foreground"
-            data-testid={`${status.tool === "openCode" ? "opencode" : "codex"}-version`}
+            data-testid={`${cliTestid(status.tool)}-version`}
           >
             {status.version ?? "Version unknown"}
           </span>

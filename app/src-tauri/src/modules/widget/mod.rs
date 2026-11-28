@@ -74,7 +74,7 @@ pub const WIDGET_KIND: &str = "AIStatsUsageWidget";
 /// The widget refuses to render a snapshot whose version it does not recognise,
 /// so a mismatch shows as "no reading" rather than as numbers that may no longer
 /// mean what they claim.
-pub const SNAPSHOT_VERSION: u32 = 2;
+pub const SNAPSHOT_VERSION: u32 = 3;
 
 /// Desktop widgets require macOS 14. Below that only Notification Center widgets
 /// existed, and `chronod` will not load a modern widget extension.
@@ -162,6 +162,16 @@ impl From<&UsageWindow> for WidgetQuota {
     }
 }
 
+/// One model-family pool's 5-hour and weekly quotas inside a multi-pool provider.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetQuotaGroup {
+    pub id: String,
+    pub display_name: String,
+    pub five_hour: Option<WidgetQuota>,
+    pub weekly: Option<WidgetQuota>,
+}
+
 /// One provider's 5-hour and weekly quotas.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,6 +184,8 @@ pub struct WidgetProviderSnapshot {
     pub reason: Option<String>,
     pub five_hour: Option<WidgetQuota>,
     pub weekly: Option<WidgetQuota>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quota_groups: Vec<WidgetQuotaGroup>,
 }
 
 impl WidgetProviderSnapshot {
@@ -189,11 +201,27 @@ impl WidgetProviderSnapshot {
             reason: snapshot.reason.clone(),
             five_hour: snapshot.five_hour.as_ref().map(WidgetQuota::from),
             weekly: snapshot.weekly.as_ref().map(WidgetQuota::from),
+            quota_groups: snapshot
+                .quota_groups
+                .iter()
+                .filter(|group| group.five_hour.is_some() || group.weekly.is_some())
+                .map(|group| WidgetQuotaGroup {
+                    id: group.id.clone(),
+                    display_name: group.label.clone(),
+                    five_hour: group.five_hour.as_ref().map(WidgetQuota::from),
+                    weekly: group.weekly.as_ref().map(WidgetQuota::from),
+                })
+                .collect(),
         }
     }
 
     fn has_quotas(&self) -> bool {
-        self.five_hour.is_some() || self.weekly.is_some()
+        self.five_hour.is_some()
+            || self.weekly.is_some()
+            || self
+                .quota_groups
+                .iter()
+                .any(|group| group.five_hour.is_some() || group.weekly.is_some())
     }
 
     fn unavailable(provider: ProviderKind, reason: impl Into<String>, now_secs: i64) -> Self {
@@ -206,6 +234,7 @@ impl WidgetProviderSnapshot {
             reason: Some(reason.into()),
             five_hour: None,
             weekly: None,
+            quota_groups: Vec::new(),
         }
     }
 }
@@ -256,6 +285,7 @@ impl WidgetSnapshot {
             ProviderKind::Zai => 1,
             ProviderKind::Minimax => 2,
             ProviderKind::Kimi => 3,
+            ProviderKind::Antigravity => 4,
         });
 
         if providers.is_empty() {
@@ -355,6 +385,14 @@ impl SnapshotStore {
                         Error::storage(format!("could not decode {}: {error}", self.path.display()))
                     })?;
                 Ok(Some(legacy.into_current()))
+            }
+            Some(2) => {
+                let mut snapshot: WidgetSnapshot =
+                    serde_json::from_value(value).map_err(|error| {
+                        Error::storage(format!("could not decode {}: {error}", self.path.display()))
+                    })?;
+                snapshot.version = SNAPSHOT_VERSION;
+                Ok(Some(snapshot))
             }
             Some(version) if version == u64::from(SNAPSHOT_VERSION) => {
                 let snapshot: WidgetSnapshot = serde_json::from_value(value).map_err(|error| {
@@ -463,6 +501,7 @@ impl LegacyWidgetSnapshotV1 {
             reason: self.reason,
             five_hour: None,
             weekly: None,
+            quota_groups: Vec::new(),
         };
 
         for window in self.windows {
@@ -1099,6 +1138,7 @@ mod tests {
             windows: vec![five_hour.clone(), weekly.clone()],
             five_hour: Some(five_hour),
             weekly: Some(weekly),
+            quota_groups: Vec::new(),
         }
     }
 
@@ -1523,5 +1563,142 @@ mod tests {
         assert_eq!(parse_version("27.0.1"), Some((27, 0)));
         assert_eq!(parse_version("26"), Some((26, 0)));
         assert_eq!(parse_version("beta"), None);
+    }
+
+    #[test]
+    fn antigravity_quota_groups_project_and_merge_without_single_windows() {
+        use crate::shared::domain::{QuotaGroup, UsagePermission, UsageWindow};
+
+        assert_eq!(SNAPSHOT_VERSION, 3);
+        let antigravity = UsageSnapshot {
+            provider: ProviderKind::Antigravity,
+            freshness: Freshness::Live,
+            fetched_at: Some(1_700_000_000_000),
+            source: ProviderKind::Antigravity.source().to_string(),
+            reason: None,
+            plan: None,
+            permission: UsagePermission::Allowed,
+            windows: Vec::new(),
+            five_hour: None,
+            weekly: None,
+            quota_groups: vec![
+                QuotaGroup {
+                    id: "gemini".to_string(),
+                    label: "Gemini".to_string(),
+                    five_hour: Some(UsageWindow::new(
+                        "Gemini 5h",
+                        0,
+                        Some(300),
+                        Some(1_700_018_000),
+                    )),
+                    weekly: Some(UsageWindow::new(
+                        "Gemini weekly",
+                        25,
+                        Some(10_080),
+                        Some(1_700_600_000),
+                    )),
+                },
+                QuotaGroup {
+                    id: "claude-gpt".to_string(),
+                    label: "Claude & GPT".to_string(),
+                    five_hour: Some(UsageWindow::new(
+                        "Claude & GPT 5h",
+                        10,
+                        Some(300),
+                        Some(1_700_018_500),
+                    )),
+                    weekly: Some(UsageWindow::new(
+                        "Claude & GPT weekly",
+                        5,
+                        Some(10_080),
+                        Some(1_700_605_000),
+                    )),
+                },
+            ],
+        };
+
+        let merged = WidgetSnapshot::merge(
+            Some(WidgetSnapshot::from_usage(
+                &usage_with_both_windows(),
+                1_700_000_000,
+            )),
+            &[antigravity],
+            1_700_000_010,
+        );
+        assert_eq!(
+            merged
+                .providers
+                .iter()
+                .map(|p| p.provider)
+                .collect::<Vec<_>>(),
+            vec![ProviderKind::Codex, ProviderKind::Antigravity]
+        );
+        let agy = &merged.providers[1];
+        assert_eq!(agy.quota_groups.len(), 2);
+        assert_eq!(agy.quota_groups[0].id, "gemini");
+        assert_eq!(agy.quota_groups[0].display_name, "Gemini");
+        assert_eq!(
+            agy.quota_groups[0]
+                .weekly
+                .as_ref()
+                .unwrap()
+                .remaining_percent,
+            75
+        );
+        assert_eq!(agy.quota_groups[1].id, "claude-gpt");
+        assert_eq!(
+            agy.quota_groups[1]
+                .five_hour
+                .as_ref()
+                .unwrap()
+                .remaining_percent,
+            90
+        );
+
+        let json = serde_json::to_value(&merged).expect("serialises");
+        assert_eq!(json["version"], 3);
+        assert_eq!(json["providers"][1]["provider"], "antigravity");
+        assert_eq!(json["providers"][1]["quotaGroups"][0]["id"], "gemini");
+        assert_eq!(
+            json["providers"][1]["quotaGroups"][0]["displayName"],
+            "Gemini"
+        );
+        assert_eq!(
+            json["providers"][1]["quotaGroups"][0]["weekly"]["remainingPercent"],
+            75
+        );
+
+        let failed = UsageSnapshot::unavailable(ProviderKind::Antigravity, "timeout");
+        let stale = WidgetSnapshot::merge(Some(merged), &[failed], 1_700_000_020);
+        assert_eq!(stale.providers[1].freshness, Freshness::Stale);
+        assert_eq!(stale.providers[1].quota_groups.len(), 2);
+    }
+
+    #[test]
+    fn version_two_snapshots_upgrade_into_version_three() {
+        let dir = scratch("version-two");
+        let store = SnapshotStore::at(dir.join("widget-snapshot.json"));
+        let v2 = serde_json::json!({
+            "version": 2,
+            "providers": [
+                {
+                    "provider": "codex",
+                    "displayName": "Codex",
+                    "generatedAt": 1_700_000_000,
+                    "plan": "Team",
+                    "freshness": "live",
+                    "reason": null,
+                    "fiveHour": { "remainingPercent": 88, "resetsAt": 1_700_017_760 },
+                    "weekly": { "remainingPercent": 46, "resetsAt": 1_700_345_600 }
+                }
+            ]
+        });
+        fs::write(store.path(), serde_json::to_vec(&v2).unwrap()).expect("v2 file");
+
+        let read = store.read().expect("reads v2").expect("snapshot");
+        assert_eq!(read.version, SNAPSHOT_VERSION);
+        assert_eq!(read.providers.len(), 1);
+        assert_eq!(read.providers[0].provider, ProviderKind::Codex);
+        assert!(read.providers[0].quota_groups.is_empty());
     }
 }

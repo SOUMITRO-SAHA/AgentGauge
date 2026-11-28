@@ -68,6 +68,7 @@ build_appex() {
     -o "$DERIVED/ProviderCyclerTests"
   "$DERIVED/ProviderCyclerTests"
   bash "$WIDGET_DIR/Tests/WidgetStoragePathTests.sh"
+  bash "$WIDGET_DIR/Tests/WidgetSnapshotTests.sh"
   bash "$WIDGET_DIR/Tests/WidgetBridgeTests.sh"
   bash "$WIDGET_DIR/Tests/PlacementReceiptTests.sh"
   bash "$WIDGET_DIR/Tests/WidgetSigningOptionsTests.sh"
@@ -139,6 +140,7 @@ build_appex() {
   if /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPrincipalClass' "$appex/Contents/Info.plist" >/dev/null 2>&1; then
     die "NSExtensionPrincipalClass must not be set; it crashes _EXRunningExtension with 'Unrecognized extension type'"
   fi
+  [ -d "$appex/Contents/Resources/Metadata.appintents" ] || die "Metadata.appintents is missing; interactive widget AppIntents would fail"
 
   printf '%s\n' "$appex"
 }

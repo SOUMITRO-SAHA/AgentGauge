@@ -253,12 +253,12 @@ function counted(count: number, singular: string, plural: string): string {
 /**
  * How many tab ghosts the skeleton reserves.
  *
- * Mirrors the tracked tools the backend reports (Codex and OpenCode today);
- * when a tool is added there, this follows in the same change so the
- * skeleton keeps predicting the success shape. One panel ghost is enough
- * beside them: only the active tab's panel is on screen.
+ * Mirrors the tracked tools the backend reports (Codex, OpenCode and
+ * Antigravity); when a tool is added there, this follows in the same change
+ * so the skeleton keeps predicting the success shape. One panel ghost is
+ * enough beside them: only the active tab's panel is on screen.
  */
-const SKELETON_TABS = 2;
+const SKELETON_TABS = 3;
 
 function ProcessLoadingSkeleton() {
   return (

@@ -172,6 +172,21 @@ export const CODEX_TAB: UsageTab = {
 };
 
 /**
+ * Antigravity's tab, present only while its CLI is detected.
+ *
+ * Antigravity is not an OpenCode-connected plan, so nothing in the
+ * subscription list can announce it; the CLI detection read is the only
+ * signal this build has. A tab for an uninstalled CLI would answer a
+ * question the detection card already answers, so absence is the honest
+ * state there.
+ */
+export const ANTIGRAVITY_TAB: UsageTab = {
+  value: "antigravity",
+  label: "Antigravity",
+  kind: "antigravity",
+};
+
+/**
  * The overview tab, which every connected plan is listed on at once.
  *
  * Its value is not a provider id and must never collide with one; a plan
@@ -185,15 +200,40 @@ export const ALL_PLANS_TAB: UsageTab = {
 };
 
 /**
- * The tab set for the Stats view: the overview first, then every plan.
+ * The tab set for the Stats view: the overview first, then every plan, then
+ * Antigravity when its CLI is installed.
  *
  * Distinct from [`tabsFrom`], which Automation and the usage tabs share and
  * which must keep listing plans only.
  */
 export function statsTabsFrom(
   subscriptions: readonly Ipc.CodingSubscription[],
+  antigravityInstalled = false,
 ): UsageTab[] {
-  return [ALL_PLANS_TAB, ...tabsFrom(subscriptions)];
+  return [ALL_PLANS_TAB, ...usageTabsFrom(subscriptions, antigravityInstalled)];
+}
+
+/**
+ * The tab set for the Usage panel: Codex first, every OpenCode-reported plan
+ * after, then Antigravity while its CLI is installed.
+ *
+ * Distinct from [`tabsFrom`], which Automation shares and which must keep
+ * listing plans only: a rollover monitor has nothing to watch on a provider
+ * that reports no windows. Antigravity's tab here reads windows it cannot
+ * have, so its body says why and points at Stats.
+ */
+export function usageTabsFrom(
+  subscriptions: readonly Ipc.CodingSubscription[],
+  antigravityInstalled = false,
+): UsageTab[] {
+  const tabs = tabsFrom(subscriptions);
+  if (
+    antigravityInstalled &&
+    !tabs.some((tab) => tab.value === ANTIGRAVITY_TAB.value)
+  ) {
+    tabs.push(ANTIGRAVITY_TAB);
+  }
+  return tabs;
 }
 
 /**

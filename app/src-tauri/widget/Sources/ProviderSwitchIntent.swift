@@ -27,3 +27,24 @@ struct SwitchProviderIntent: AppIntent {
         return .result()
     }
 }
+
+struct SelectQuotaGroupIntent: AppIntent {
+    static var title: LocalizedStringResource = "Select Antigravity model group"
+
+    @Parameter(title: "Group")
+    var groupId: String
+
+    init() {
+        groupId = ""
+    }
+
+    init(groupId: String) {
+        self.groupId = groupId
+    }
+
+    func perform() async throws -> some IntentResult {
+        try QuotaGroupSelectionStore.select(groupId: groupId)
+        WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
+        return .result()
+    }
+}

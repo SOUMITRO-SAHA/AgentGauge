@@ -1,7 +1,7 @@
 import Foundation
 
 struct Snapshot: Codable {
-    static let supportedVersion = 2
+    static let supportedVersion = 3
 
     let version: Int
     let providers: [Provider]
@@ -19,8 +19,8 @@ struct Snapshot: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let version = try container.decode(Int.self, forKey: .version)
-        if version == Self.supportedVersion {
-            self.version = version
+        if version == Self.supportedVersion || version == 2 {
+            self.version = Self.supportedVersion
             providers = try container.decode([Provider].self, forKey: .providers)
             return
         }
@@ -70,13 +70,73 @@ struct Snapshot: Codable {
         let reason: String?
         let fiveHour: Quota?
         let weekly: Quota?
+        let quotaGroups: [QuotaGroup]
 
         var id: ProviderKind { provider }
         var isUnavailable: Bool { freshness == "unavailable" }
+        var allResetTimestamps: [Double] {
+            ([fiveHour?.resetsAt, weekly?.resetsAt]
+                + quotaGroups.flatMap { [$0.fiveHour?.resetsAt, $0.weekly?.resetsAt] })
+                .compactMap { $0 }
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case provider
+            case displayName
+            case generatedAt
+            case plan
+            case freshness
+            case reason
+            case fiveHour
+            case weekly
+            case quotaGroups
+        }
+
+        init(
+            provider: ProviderKind,
+            displayName: String,
+            generatedAt: Double,
+            plan: String?,
+            freshness: String,
+            reason: String?,
+            fiveHour: Quota?,
+            weekly: Quota?,
+            quotaGroups: [QuotaGroup] = []
+        ) {
+            self.provider = provider
+            self.displayName = displayName
+            self.generatedAt = generatedAt
+            self.plan = plan
+            self.freshness = freshness
+            self.reason = reason
+            self.fiveHour = fiveHour
+            self.weekly = weekly
+            self.quotaGroups = quotaGroups
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            provider = try container.decode(ProviderKind.self, forKey: .provider)
+            displayName = try container.decode(String.self, forKey: .displayName)
+            generatedAt = try container.decode(Double.self, forKey: .generatedAt)
+            plan = try container.decodeIfPresent(String.self, forKey: .plan)
+            freshness = try container.decode(String.self, forKey: .freshness)
+            reason = try container.decodeIfPresent(String.self, forKey: .reason)
+            fiveHour = try container.decodeIfPresent(Quota.self, forKey: .fiveHour)
+            weekly = try container.decodeIfPresent(Quota.self, forKey: .weekly)
+            quotaGroups = try container.decodeIfPresent([QuotaGroup].self, forKey: .quotaGroups) ?? []
+        }
 
         struct Quota: Codable {
             let remainingPercent: Int
             let resetsAt: Double?
+        }
+
+        struct QuotaGroup: Codable, Identifiable {
+            let id: String
+            let displayName: String
+            let fiveHour: Quota?
+            let weekly: Quota?
         }
     }
 
@@ -85,6 +145,7 @@ struct Snapshot: Codable {
         case zai
         case minimax
         case kimi
+        case antigravity
 
         var id: String { rawValue }
 
@@ -94,6 +155,7 @@ struct Snapshot: Codable {
             case .zai: "Z.AI"
             case .minimax: "MiniMax"
             case .kimi: "Kimi"
+            case .antigravity: "Antigravity"
             }
         }
 
@@ -103,6 +165,7 @@ struct Snapshot: Codable {
             case .zai: "Z"
             case .minimax: "M"
             case .kimi: "K"
+            case .antigravity: "A"
             }
         }
     }

@@ -360,6 +360,7 @@ export function processGroup(id: string, overrides: Record<string, unknown> = {}
   const displayNames: Record<string, string> = {
     codex: "Codex",
     opencode: "OpenCode",
+    antigravity: "Antigravity",
   };
   return {
     id,
@@ -716,6 +717,12 @@ export interface DispatchFixtures {
   readonly version: string | null;
   readonly cliDetectionFailure?: boolean;
   /**
+   * Whether the `cliDetection` reply reports the Antigravity CLI installed.
+   * Absent means it is not installed, so the Stats view shows no Antigravity
+   * tab.
+   */
+  readonly antigravityInstalled?: boolean;
+  /**
    * Coding subscriptions OpenCode reports, as the `openCodeSubscriptions`
    * reply would carry them. Absent means "none connected" — Codex only.
    */
@@ -1059,6 +1066,16 @@ async function installDispatchOnce(fixtures: DispatchFixtures) {
                 reason: data.cliDetectionFailure
                   ? "Could not run `/Users/test/.opencode/bin/opencode --version` (Permission denied)."
                   : null,
+              },
+              {
+                tool: "antigravity",
+                displayName: "Antigravity CLI",
+                executable: "/Users/test/.local/bin/agy",
+                installed: data.antigravityInstalled ?? false,
+                version: data.antigravityInstalled ? "antigravity 1.5.17" : null,
+                reason: data.antigravityInstalled
+                  ? null
+                  : "Executable was not found in the app PATH or common install locations. Set AGENTGAUGE_ANTIGRAVITY_PATH to its absolute path.",
               },
             ],
           };
@@ -1972,6 +1989,164 @@ export async function dashboardWithStatsTrends(): Promise<void> {
       finalRoute: "stats",
     },
   );
+}
+
+/**
+ * Onboarding dismissed, Codex only, with the Antigravity CLI detected, its
+ * quota windows answering the usage read, and its sessions-only record
+ * answering the account read.
+ *
+ * The usage-window reply mirrors the real provider: four windows parsed from
+ * `agy -p /usage` (two model families × five-hour and weekly), with no
+ * single five-hour window promoted. The account read carries the session
+ * record with no token fields at all, exactly the shape `sessions.rs`
+ * produces.
+ */
+export async function dashboardWithAntigravity(): Promise<void> {
+  await boot({
+    visible: false,
+    usage: liveSnapshot(),
+    installed: true,
+    version: "codex-cli 0.159.0",
+    widgetEmbedded: true,
+    widgetSupported: true,
+    automationRunning: true,
+    antigravityInstalled: true,
+    processInsights: {
+      fetchedAt: Date.now(),
+      groups: [
+        processGroup("codex"),
+        processGroup("opencode"),
+        processGroup("antigravity", {
+          processes: [
+            processSummary({
+              pid: 4207,
+              name: "agy",
+              command: "agy",
+              memoryBytes: 41 * 1024 * 1024,
+              startedAt: Math.floor(Date.now() / 1000) - 600,
+              cpuUsage: 1.5,
+              listeningPorts: [],
+            }),
+          ],
+          totalMemoryBytes: 41 * 1024 * 1024,
+          totalCpuUsage: 1.5,
+          storage: {
+            state: "measured",
+            totalBytes: 36 * 1024 * 1024,
+            totalFiles: 42,
+            root: "/Users/test/.gemini",
+            rows: [
+              {
+                label: "CLI surface",
+                path: "/Users/test/.gemini/antigravity-cli",
+                bytes: 21 * 1024 * 1024,
+                fileCount: 21,
+              },
+              {
+                label: "IDE surface",
+                path: "/Users/test/.gemini/antigravity-ide",
+                bytes: 15 * 1024 * 1024,
+                fileCount: 16,
+              },
+              {
+                label: "Everything else",
+                path: "/Users/test/.gemini",
+                bytes: 3072,
+                fileCount: 5,
+              },
+            ],
+            externalRows: [],
+          },
+          ports: { state: "checked", listening: [] },
+          service: null,
+        }),
+      ],
+    },
+    usageByProvider: {
+      antigravity: {
+        provider: "antigravity",
+        freshness: "live",
+        fetchedAt: 1791561935000,
+        source: "antigravity cli",
+        reason: null,
+        plan: null,
+        permission: "allowed",
+        fiveHour: null,
+        weekly: null,
+        windows: [
+          {
+            label: "Gemini weekly",
+            usedPercent: 25,
+            durationMins: 10080,
+            resetsAt: Math.floor(Date.now() / 1000) + 6 * 86400,
+            remainingPercent: 75,
+          },
+          {
+            label: "Gemini 5h",
+            usedPercent: 0,
+            durationMins: 300,
+            resetsAt: Math.floor(Date.now() / 1000) + 4 * 3600,
+            remainingPercent: 100,
+          },
+          {
+            label: "Claude & GPT weekly",
+            usedPercent: 0,
+            durationMins: 10080,
+            resetsAt: Math.floor(Date.now() / 1000) + 6 * 86400,
+            remainingPercent: 100,
+          },
+          {
+            label: "Claude & GPT 5h",
+            usedPercent: 0,
+            durationMins: 300,
+            resetsAt: Math.floor(Date.now() / 1000) + 5 * 3600,
+            remainingPercent: 100,
+          },
+        ],
+      },
+    },
+    accountUsageByProvider: {
+      antigravity: {
+        fetchedAt: 1791561935000,
+        summary: {
+          totalTokens: null,
+          peakDailyTokens: null,
+          longestRunningTurnSec: null,
+          currentStreakDays: null,
+          longestStreakDays: null,
+          totalRequests: null,
+        },
+        windowDays: null,
+        models: [],
+        modelDailyUsage: [],
+        cacheStats: null,
+        dailyUsageBuckets: [],
+        local: {
+          models: [],
+          modelDays: [],
+          projects: [],
+          days: [],
+          sessionDays: [
+            { day: "2026-11-21", sessions: 1 },
+            { day: "2026-11-24", sessions: 2 },
+            { day: "2026-11-25", sessions: 3 },
+            { day: "2026-11-26", sessions: 1 },
+          ],
+          medianTokensPerSession: null,
+          compactions: null,
+          costUsd: 0,
+          unpricedTokens: 0,
+          sessions: 7,
+          filesScanned: 14,
+          filesUnreadable: 0,
+          filesCompressed: 0,
+          firstDay: "2026-11-21",
+          lastDay: "2026-11-26",
+        },
+      },
+    },
+  });
 }
 
 /**

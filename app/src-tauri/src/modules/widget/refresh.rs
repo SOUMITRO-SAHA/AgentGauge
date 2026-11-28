@@ -158,6 +158,7 @@ mod tests {
                 reason: None,
                 five_hour: None,
                 weekly: None,
+                quota_groups: Vec::new(),
             }],
         };
         fs::write(directory.join(SELECTION_FILE), "zai").unwrap();
@@ -185,6 +186,7 @@ mod tests {
                     reason: None,
                     five_hour: None,
                     weekly: None,
+                    quota_groups: Vec::new(),
                 }],
             })
             .unwrap();
@@ -196,6 +198,51 @@ mod tests {
         });
         assert_eq!(seen.get(), Some(ProviderKind::Codex));
         assert!(result.is_err());
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn antigravity_selection_is_serviced_when_present_in_snapshot() {
+        let directory =
+            std::env::temp_dir().join(format!("widget-refresh-agy-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let store = SnapshotStore::at(directory.join("snapshot.json"));
+        store
+            .write(&WidgetSnapshot {
+                version: super::super::SNAPSHOT_VERSION,
+                providers: vec![
+                    super::super::WidgetProviderSnapshot {
+                        provider: ProviderKind::Codex,
+                        display_name: "Codex".into(),
+                        generated_at: 0,
+                        plan: None,
+                        freshness: Freshness::Live,
+                        reason: None,
+                        five_hour: None,
+                        weekly: None,
+                        quota_groups: Vec::new(),
+                    },
+                    super::super::WidgetProviderSnapshot {
+                        provider: ProviderKind::Antigravity,
+                        display_name: "Antigravity".into(),
+                        generated_at: 0,
+                        plan: None,
+                        freshness: Freshness::Live,
+                        reason: None,
+                        five_hour: None,
+                        weekly: None,
+                        quota_groups: Vec::new(),
+                    },
+                ],
+            })
+            .unwrap();
+        fs::write(directory.join(SELECTION_FILE), "antigravity").unwrap();
+        let seen = std::cell::Cell::new(None);
+        let _ = service_request(&store, &directory, &|kind| {
+            seen.set(Some(kind));
+            Ok(UsageSnapshot::unavailable(kind, "not connected"))
+        });
+        assert_eq!(seen.get(), Some(ProviderKind::Antigravity));
         let _ = fs::remove_dir_all(directory);
     }
 }

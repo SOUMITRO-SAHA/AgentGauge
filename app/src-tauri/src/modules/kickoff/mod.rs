@@ -863,12 +863,20 @@ mod tests {
                 ProviderKind::Zai => "glm-5.3-flash",
                 ProviderKind::Minimax => "MiniMax-M3",
                 ProviderKind::Kimi => "k3",
+                // Antigravity has no kickoff, so the overview must never ask;
+                // if the defaults ever include it, this test forces a look.
+                ProviderKind::Antigravity => {
+                    panic!("antigravity has no kickoff models")
+                }
             };
             let effort_id = match kind {
                 ProviderKind::Codex => "minimal",
                 ProviderKind::Zai => "low",
                 ProviderKind::Minimax => "disabled",
                 ProviderKind::Kimi => "low",
+                ProviderKind::Antigravity => {
+                    panic!("antigravity has no kickoff efforts")
+                }
             };
             Ok(vec![KickoffModelInfo {
                 provider_id: "fixture".to_string(),

@@ -86,7 +86,7 @@ fn current_search_directories() -> Vec<PathBuf> {
     directories
 }
 
-fn home_directory() -> Option<PathBuf> {
+pub(crate) fn home_directory() -> Option<PathBuf> {
     env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE"))
         .map(PathBuf::from)
@@ -577,6 +577,15 @@ fn resolve_in_paths(
     candidate_paths(executable, explicit_path, directories)
         .into_iter()
         .next()
+}
+
+/// Serializes tests that read or write an executable-override environment
+/// variable, which is process-global state every resolution reads.
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::Mutex;
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(all(test, unix))]

@@ -44,6 +44,7 @@ import { ArrowClockwise, Fire, Lightning } from "@phosphor-icons/react";
 
 import {
   accountUsageForAtom,
+  cliDetectionAtom,
   localUsageForAtom,
   priceListAtom,
   statsTabAtom,
@@ -105,6 +106,7 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
   const selected = useAtomValue(statsTabAtom);
   const setSelected = useAtomSet(statsTabAtom);
   const subscriptions = useAtomValue(subscriptionsAtom);
+  const cliDetections = useAtomValue(cliDetectionAtom);
   const [mounted, setMounted] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -139,12 +141,22 @@ export function StatsView({ visible }: { readonly visible: boolean }) {
     );
   }, []);
 
+  const antigravityInstalled = AsyncResult.match(cliDetections, {
+    onInitial: () => false,
+    onSuccess: (result) =>
+      result.value.some(
+        (status) => status.tool === "antigravity" && status.installed,
+      ),
+    onFailure: () => false,
+  });
+
   const tabs = statsTabsFrom(
     AsyncResult.match(subscriptions, {
       onInitial: () => [],
       onSuccess: (result) => result.value,
       onFailure: () => [],
     }),
+    antigravityInstalled,
   );
 
   const active = tabs.some((tab) => tab.value === selected)
@@ -500,7 +512,7 @@ function PlanSummaryRow({
                 : localFailed
                   ? "Local logs unavailable"
                   : local !== null
-                    ? `${formatCompactCount(localTotals(local))} tokens`
+                    ? localTokensLabel(local)
                     : "No token history"}
         </span>
         <span
@@ -549,6 +561,22 @@ function localTotals(local: Ipc.LocalUsage): number {
     (sum, model) => sum + model.input + model.output,
     0,
   );
+}
+
+/**
+ * The token line for a plan answered from local logs.
+ *
+ * A record with sessions but no token counts — Antigravity's, which its CLI
+ * never writes — must not read as "0 tokens": the zero would describe a
+ * measurement nobody made. The session count is the real figure, and the
+ * missing tokens are named as missing.
+ */
+function localTokensLabel(local: Ipc.LocalUsage): string {
+  const tokens = localTotals(local);
+  if (tokens > 0) return `${formatCompactCount(tokens)} tokens`;
+  return local.sessions > 0
+    ? `${formatCompactCount(local.sessions)} sessions · no token counts`
+    : "No token history";
 }
 
 /**
@@ -655,6 +683,15 @@ function StatsTabBody({ tab }: { readonly tab: UsageTab }) {
     return (
       <div className="flex flex-col gap-4">
         <CodexActivity />
+        <PlanReading kind={tab.kind} label={tab.label} />
+      </div>
+    );
+  }
+
+  if (tab.kind === "antigravity") {
+    return (
+      <div className="flex flex-col gap-4">
+        <AntigravityActivity />
         <PlanReading kind={tab.kind} label={tab.label} />
       </div>
     );
@@ -1539,6 +1576,81 @@ export function ProjectLeaderboard({
         illustrative, not a bill; unpriced projects still show token usage.
       </p>
     </div>
+  );
+}
+
+/**
+ * Antigravity's own Stats panel: the session record its CLI keeps on this
+ * machine.
+ *
+ * Antigravity records no token counts locally — its conversation databases
+ * are protobuf blobs, and its quota is visible only inside its own `/usage`
+ * command — so this panel reports sessions, on their days, and says plainly
+ * that tokens are not part of the local record. What it must never do is
+ * render that absence as zeros.
+ */
+function AntigravityActivity() {
+  const usage = useAtomValue(accountUsageForAtom("antigravity"));
+  const refresh = useAtomRefresh(accountUsageForAtom("antigravity"));
+
+  return (
+    <section
+      className={`${PANEL} flex flex-col gap-4`}
+      data-testid="stats-antigravity-activity"
+    >
+      <PanelHeader
+        title="Antigravity sessions"
+        testId="stats-antigravity-refresh"
+        onRefresh={refresh}
+      />
+      <p className="-mt-3 text-xs text-muted-foreground">
+        Read from Antigravity&apos;s own session records on this machine.
+        Antigravity does not record token counts locally, and its quota is
+        visible only in its own /usage command — so there are no token or cost
+        figures here, and none are invented.
+      </p>
+      {AsyncResult.match(usage, {
+        onInitial: () => <LocalLogLoadingSkeleton />,
+        onSuccess: (result) => {
+          const local = result.value.local;
+          if (local === null) {
+            return (
+              <p
+                className="text-sm text-muted-foreground"
+                data-testid="stats-antigravity-empty"
+              >
+                No Antigravity session records were found on this machine yet.
+              </p>
+            );
+          }
+          return (
+            <>
+              <p
+                className="text-sm text-foreground"
+                data-testid="stats-antigravity-summary"
+              >
+                {local.sessions === 1
+                  ? "1 session"
+                  : `${formatCount(local.sessions)} sessions`}
+                {local.firstDay !== null && local.lastDay !== null
+                  ? ` · ${local.firstDay} → ${local.lastDay}`
+                  : ""}
+              </p>
+              <LocalSessionStats usage={local} />
+            </>
+          );
+        },
+        onFailure: () => (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="stats-antigravity-unavailable"
+          >
+            Antigravity&apos;s session record could not be read. Your other
+            readings are not affected.
+          </p>
+        ),
+      })}
+    </section>
   );
 }
 

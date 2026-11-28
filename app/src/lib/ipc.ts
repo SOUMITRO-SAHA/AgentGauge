@@ -94,7 +94,13 @@ async function invoke(
 // Domain types
 // ---------------------------------------------------------------------------
 
-export const PROVIDER_KINDS = ["codex", "zai", "minimax", "kimi"] as const;
+export const PROVIDER_KINDS = [
+  "codex",
+  "zai",
+  "minimax",
+  "kimi",
+  "antigravity",
+] as const;
 export const ProviderKind = Schema.Literals([...PROVIDER_KINDS]);
 export type ProviderKind = typeof ProviderKind.Type;
 
@@ -136,7 +142,7 @@ export const CodingSubscription = Schema.Struct({
 export type CodingSubscription = typeof CodingSubscription.Type;
 
 export const CliToolStatus = Schema.Struct({
-  tool: Schema.Literals(["codex", "openCode"]),
+  tool: Schema.Literals(["codex", "openCode", "antigravity"]),
   displayName: Schema.String,
   executable: Schema.String,
   installed: Schema.Boolean,

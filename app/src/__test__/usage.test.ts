@@ -16,9 +16,12 @@ import {
   formatUsed,
   millisUntilReset,
   safeResetAt,
+  statsTabsFrom,
   toneFor,
+  usageTabsFrom,
   windowTitle,
 } from "~/lib/usage";
+import type * as Ipc from "~/lib/ipc";
 
 describe("effectiveFreshness", () => {
   it("keeps a fresh reading live", () => {
@@ -179,5 +182,82 @@ describe("formatPlan", () => {
   it("renders known tiers readably", () => {
     expect(formatPlan("team")).toBe("Team");
     expect(formatPlan("proLite")).toBe("Pro Lite");
+  });
+});
+
+describe("statsTabsFrom", () => {
+  const subscription = (
+    providerId: string,
+    integration: Ipc.ProviderKind | null,
+  ): Ipc.CodingSubscription => ({
+    providerId,
+    name: providerId,
+    label: providerId,
+    integration,
+    credential: "stored",
+    apiBase: null,
+  });
+
+  it("keeps Antigravity out of the tab strip while its CLI is not detected", () => {
+    const tabs = statsTabsFrom([subscription("zai-coding-plan", "zai")]);
+    expect(tabs.map((tab) => tab.value)).toEqual(["all", "codex", "zai"]);
+  });
+
+  it("appends Antigravity last once its CLI is detected", () => {
+    const tabs = statsTabsFrom(
+      [subscription("zai-coding-plan", "zai")],
+      true,
+    );
+    expect(tabs.map((tab) => tab.value)).toEqual([
+      "all",
+      "codex",
+      "zai",
+      "antigravity",
+    ]);
+    expect(tabs[3].kind).toBe("antigravity");
+    expect(tabs[3].label).toBe("Antigravity");
+  });
+
+  it("never duplicates Antigravity when a plan somehow carries its integration", () => {
+    const tabs = statsTabsFrom(
+      [subscription("antigravity-plan", "antigravity")],
+      true,
+    );
+    expect(
+      tabs.filter((tab) => tab.value === "antigravity"),
+    ).toHaveLength(1);
+  });
+});
+
+describe("usageTabsFrom", () => {
+  const subscription = (
+    providerId: string,
+    integration: Ipc.ProviderKind | null,
+  ): Ipc.CodingSubscription => ({
+    providerId,
+    name: providerId,
+    label: providerId,
+    integration,
+    credential: "stored",
+    apiBase: null,
+  });
+
+  it("keeps Antigravity out of the Usage strip while its CLI is not detected", () => {
+    const tabs = usageTabsFrom([subscription("zai-coding-plan", "zai")]);
+    expect(tabs.map((tab) => tab.value)).toEqual(["codex", "zai"]);
+  });
+
+  it("appends Antigravity after the plans once its CLI is detected", () => {
+    const tabs = usageTabsFrom(
+      [subscription("zai-coding-plan", "zai")],
+      true,
+    );
+    expect(tabs.map((tab) => tab.value)).toEqual([
+      "codex",
+      "zai",
+      "antigravity",
+    ]);
+    expect(tabs[2].kind).toBe("antigravity");
+    expect(tabs[2].label).toBe("Antigravity");
   });
 });

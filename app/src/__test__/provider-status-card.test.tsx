@@ -50,7 +50,7 @@ it("shapes CLI detection rows while the first check is pending", async () => {
 
   const loading = await screen.findByTestId("status-loading");
   expect(loading.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(4);
-  expect(loading.querySelectorAll('[data-testid="status-loading-row"]')).toHaveLength(2);
+  expect(loading.querySelectorAll('[data-testid="status-loading-row"]')).toHaveLength(3);
 
   releaseRead?.();
   expect(await screen.findByTestId("cli-codex")).toBeTruthy();
@@ -183,4 +183,43 @@ it("shows the CLI skeleton until a requested re-check completes", async () => {
   expect(screen.getByTestId("refresh-provider").hasAttribute("disabled")).toBe(
     false,
   );
+});
+
+it("renders the Antigravity row with its install command and no resolved path", async () => {
+  (window as unknown as { __wdio_mocks__?: unknown }).__wdio_mocks__ = {
+    dispatch: () => ({
+      type: "cliDetections",
+      tools: [
+        {
+          tool: "codex",
+          displayName: "Codex CLI",
+          executable: "codex",
+          installed: true,
+          version: "1.0.0",
+          reason: null,
+        },
+        {
+          tool: "antigravity",
+          displayName: "Antigravity CLI",
+          executable: "/Users/test/.local/bin/agy",
+          installed: false,
+          version: null,
+          reason:
+            "Executable was not found in the app PATH or common install locations. Set AGENTGAUGE_ANTIGRAVITY_PATH to its absolute path.",
+        },
+      ],
+    }),
+  };
+  const { ProviderStatusCard } = await import(
+    "~/components/usage/provider-status-card"
+  );
+  render(createElement(ProviderStatusCard));
+
+  const row = await screen.findByTestId("cli-antigravity");
+  expect(row.textContent).toContain("Antigravity CLI not found");
+  expect(row.textContent).toContain(
+    "curl -fsSL antigravity.google/cli/install.sh | bash",
+  );
+  expect(screen.queryByTestId("antigravity-version")).toBeNull();
+  expect(document.body.innerHTML).not.toContain("/Users/test/.local/bin/agy");
 });

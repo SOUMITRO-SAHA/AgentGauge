@@ -174,6 +174,7 @@ export const PRICING_PROVIDER_IDS: Readonly<
   zai: "zai-coding-plan",
   minimax: "minimax-coding-plan",
   kimi: "kimi-code-plan-global",
+  antigravity: "google",
 };
 
 /** Fetches the bundled price list. Failure is a real state the UI must show. */
