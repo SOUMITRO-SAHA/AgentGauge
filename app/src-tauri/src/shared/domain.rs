@@ -90,6 +90,18 @@ pub struct UsageWindow {
     pub remaining_percent: i32,
 }
 
+/// One model-family quota pool reported by a provider with multiple pools,
+/// carrying explicit 5-hour and weekly windows so downstream surfaces never
+/// infer quota identity from display labels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaGroup {
+    pub id: String,
+    pub label: String,
+    pub five_hour: Option<UsageWindow>,
+    pub weekly: Option<UsageWindow>,
+}
+
 impl UsageWindow {
     /// Builds a window, deriving `remaining_percent` so the two can never
     /// disagree.
@@ -586,6 +598,10 @@ pub struct UsageSnapshot {
     pub five_hour: Option<UsageWindow>,
     /// The weekly window, when present.
     pub weekly: Option<UsageWindow>,
+    /// Model-family quota pools when a provider reports separate 5-hour and
+    /// weekly windows per family instead of one account-wide pair.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quota_groups: Vec<QuotaGroup>,
 }
 
 impl UsageSnapshot {
@@ -603,6 +619,7 @@ impl UsageSnapshot {
             windows: Vec::new(),
             five_hour: None,
             weekly: None,
+            quota_groups: Vec::new(),
         }
     }
 }

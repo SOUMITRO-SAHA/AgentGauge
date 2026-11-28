@@ -123,6 +123,7 @@ pub fn decode_usages(
         windows,
         five_hour,
         weekly,
+        quota_groups: Vec::new(),
     })
 }
 

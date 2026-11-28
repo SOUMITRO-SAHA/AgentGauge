@@ -155,6 +155,40 @@ enum ProviderSelectionError: Error, LocalizedError {
     }
 }
 
+enum QuotaGroupSelectionStore {
+#if DEBUG
+    static let fileName = "widget-group-selection-dev.txt"
+#else
+    static let fileName = "widget-group-selection.txt"
+#endif
+
+    static var fileURL: URL {
+        SnapshotStore.directoryURL.appendingPathComponent(fileName)
+    }
+
+    static func selectedGroup(
+        in provider: Snapshot.Provider,
+        from url: URL = fileURL
+    ) -> Snapshot.Provider.QuotaGroup? {
+        guard !provider.quotaGroups.isEmpty else { return nil }
+        if let raw = try? String(contentsOf: url, encoding: .utf8) {
+            let stored = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let matched = provider.quotaGroups.first(where: { $0.id == stored }) {
+                return matched
+            }
+        }
+        return provider.quotaGroups.first
+    }
+
+    static func select(groupId: String, to url: URL = fileURL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(groupId.utf8).write(to: url, options: .atomic)
+    }
+}
+
 /// The widget's own record that WidgetKit rendered it on this Mac.
 ///
 /// `WidgetCenter.getCurrentConfigurations` answers only about the app that calls

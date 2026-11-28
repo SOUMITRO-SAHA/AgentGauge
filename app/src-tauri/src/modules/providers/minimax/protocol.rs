@@ -152,6 +152,7 @@ pub fn decode_remains(
         windows,
         five_hour,
         weekly,
+        quota_groups: Vec::new(),
     })
 }
 

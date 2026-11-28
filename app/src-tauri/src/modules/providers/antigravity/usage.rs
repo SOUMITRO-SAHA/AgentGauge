@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use crate::shared::domain::{ProviderKind, UsageSnapshot, UsageWindow};
+use crate::shared::domain::{ProviderKind, QuotaGroup, UsageSnapshot, UsageWindow};
 use crate::shared::error::Error;
 use crate::shared::executable;
 
@@ -81,6 +81,11 @@ struct ParsedWindow {
     resets_at: Option<i64>,
 }
 
+struct ParsedUsageReport {
+    windows: Vec<ParsedWindow>,
+    quota_groups: Vec<QuotaGroup>,
+}
+
 /// Reads the quota snapshot by running the CLI's own `/usage` command.
 ///
 /// Every anticipated failure — executable missing, refused run, timeout,
@@ -91,24 +96,25 @@ pub fn read_usage_snapshot(kind: ProviderKind, now_ms: i64) -> Result<UsageSnaps
         Ok(output) => output,
         Err(error) => return Ok(unavailable(kind, error.message)),
     };
-    let windows = match parse_usage_envelope(&output) {
-        Ok(windows) => windows,
+    let report = match parse_usage_report(&output) {
+        Ok(report) => report,
         Err(error) => return Ok(unavailable(kind, error.message)),
     };
-    Ok(live_snapshot(kind, windows, now_ms))
+    Ok(live_snapshot(kind, report, now_ms))
 }
 
 fn unavailable(kind: ProviderKind, reason: String) -> UsageSnapshot {
     UsageSnapshot::unavailable(kind, reason)
 }
 
-fn live_snapshot(kind: ProviderKind, windows: Vec<ParsedWindow>, now_ms: i64) -> UsageSnapshot {
+fn live_snapshot(kind: ProviderKind, report: ParsedUsageReport, now_ms: i64) -> UsageSnapshot {
     let mut snapshot = UsageSnapshot::unavailable(kind, String::new());
     snapshot.freshness = crate::shared::domain::Freshness::Live;
     snapshot.fetched_at = Some(now_ms);
     snapshot.reason = None;
     snapshot.permission = crate::shared::domain::UsagePermission::Allowed;
-    snapshot.windows = windows
+    snapshot.windows = report
+        .windows
         .into_iter()
         .map(|window| {
             UsageWindow::new(
@@ -119,6 +125,7 @@ fn live_snapshot(kind: ProviderKind, windows: Vec<ParsedWindow>, now_ms: i64) ->
             )
         })
         .collect();
+    snapshot.quota_groups = report.quota_groups;
     snapshot
 }
 
@@ -203,12 +210,13 @@ fn first_line(text: &str) -> String {
         .to_owned()
 }
 
-/// Parses the `/usage` JSON envelope into windows.
+/// Parses the `/usage` JSON envelope into flat windows and structured quota
+/// groups.
 ///
 /// The command name is checked so a stray model reply can never be read as
 /// quota; unknown groups keep their own name, and a repeated label keeps the
 /// first value rather than rendering two rows under one key.
-fn parse_usage_envelope(raw: &str) -> Result<Vec<ParsedWindow>, Error> {
+fn parse_usage_report(raw: &str) -> Result<ParsedUsageReport, Error> {
     let envelope: UsageEnvelope = serde_json::from_str(raw).map_err(|error| {
         Error::provider_missing(format!("Could not read the usage reply ({error})."))
     })?;
@@ -227,20 +235,49 @@ fn parse_usage_envelope(raw: &str) -> Result<Vec<ParsedWindow>, Error> {
 
     let mut windows = Vec::new();
     let mut labels = std::collections::HashSet::new();
+    let mut quota_groups: Vec<QuotaGroup> = Vec::new();
     for group in envelope.command.data.groups {
         let family = family_label(&group.name);
+        let group_id = family_id(&group.name);
+        let mut five_hour = None;
+        let mut weekly = None;
+
         for bucket in group.buckets {
             let label = format!("{family} {}", bucket.window);
             let used = ((1.0 - bucket.remaining_fraction) * 100.0).round() as i32;
             let resets_at = bucket.reset_time.as_deref().and_then(parse_rfc3339_utc);
+            let duration = duration_mins(&bucket.window);
             let window = ParsedWindow {
                 label: label.clone(),
                 used_percent: used,
-                duration_mins: duration_mins(&bucket.window),
+                duration_mins: duration,
                 resets_at,
             };
-            if labels.insert(label) {
+            if labels.insert(label.clone()) {
+                if bucket.window == "5h" && five_hour.is_none() {
+                    five_hour = Some(UsageWindow::new(label.clone(), used, duration, resets_at));
+                } else if bucket.window == "weekly" && weekly.is_none() {
+                    weekly = Some(UsageWindow::new(label, used, duration, resets_at));
+                }
                 windows.push(window);
+            }
+        }
+
+        if five_hour.is_some() || weekly.is_some() {
+            if let Some(existing) = quota_groups.iter_mut().find(|entry| entry.id == group_id) {
+                if existing.five_hour.is_none() {
+                    existing.five_hour = five_hour;
+                }
+                if existing.weekly.is_none() {
+                    existing.weekly = weekly;
+                }
+            } else {
+                quota_groups.push(QuotaGroup {
+                    id: group_id,
+                    label: family.to_string(),
+                    five_hour,
+                    weekly,
+                });
             }
         }
     }
@@ -249,7 +286,15 @@ fn parse_usage_envelope(raw: &str) -> Result<Vec<ParsedWindow>, Error> {
             "The usage command reported no quota groups.".to_owned(),
         ));
     }
-    Ok(windows)
+    Ok(ParsedUsageReport {
+        windows,
+        quota_groups,
+    })
+}
+
+#[cfg(test)]
+fn parse_usage_envelope(raw: &str) -> Result<Vec<ParsedWindow>, Error> {
+    parse_usage_report(raw).map(|report| report.windows)
 }
 
 /// The short family label a window row renders. Known groups shorten well;
@@ -261,6 +306,26 @@ fn family_label(group: &str) -> &str {
         "Claude & GPT"
     } else {
         group
+    }
+}
+
+fn family_id(group: &str) -> String {
+    if group.contains("Gemini") {
+        "gemini".to_string()
+    } else if group.contains("Claude") || group.contains("GPT") {
+        "claude-gpt".to_string()
+    } else {
+        let slug: String = group
+            .to_ascii_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        let trimmed = slug.trim_matches('-');
+        if trimmed.is_empty() {
+            "other".to_string()
+        } else {
+            trimmed.to_string()
+        }
     }
 }
 
@@ -329,6 +394,30 @@ mod tests {
         assert_eq!(windows[1].used_percent, 0);
         assert_eq!(windows[1].duration_mins, Some(FIVE_HOUR_MINS));
         assert_eq!(windows[3].label, "Claude & GPT 5h");
+    }
+
+    #[test]
+    fn the_snapshot_projects_structured_quota_groups_without_claiming_single_windows() {
+        let parsed = parse_usage_report(CAPTURED_REPLY).expect("parses");
+        let snapshot = live_snapshot(ProviderKind::Antigravity, parsed, 1_700_000_000_000);
+        assert!(snapshot.five_hour.is_none());
+        assert!(snapshot.weekly.is_none());
+        assert_eq!(snapshot.quota_groups.len(), 2);
+
+        let gemini = &snapshot.quota_groups[0];
+        assert_eq!(gemini.id, "gemini");
+        assert_eq!(gemini.label, "Gemini");
+        assert_eq!(gemini.five_hour.as_ref().unwrap().remaining_percent, 100);
+        assert_eq!(gemini.weekly.as_ref().unwrap().remaining_percent, 75);
+
+        let third_party = &snapshot.quota_groups[1];
+        assert_eq!(third_party.id, "claude-gpt");
+        assert_eq!(third_party.label, "Claude & GPT");
+        assert_eq!(
+            third_party.five_hour.as_ref().unwrap().remaining_percent,
+            100
+        );
+        assert_eq!(third_party.weekly.as_ref().unwrap().remaining_percent, 100);
     }
 
     #[test]

@@ -1572,7 +1572,12 @@ mod tests {
             panic!("expected a measured report");
         };
         let labels: Vec<&str> = rows.iter().map(|row| row.label.as_str()).collect();
-        for expected in ["CLI surface", "IDE surface", "ACP surface", "Everything else"] {
+        for expected in [
+            "CLI surface",
+            "IDE surface",
+            "ACP surface",
+            "Everything else",
+        ] {
             assert!(labels.contains(&expected), "missing label {expected}");
         }
         // The IDE 2.0 directory does not exist on this fixture, so it is

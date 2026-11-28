@@ -136,6 +136,26 @@ function installAntigravityDispatch(): void {
                       permission: "allowed",
                       fiveHour: null,
                       weekly: null,
+                      quotaGroups: [
+                        {
+                          id: "gemini",
+                          label: "Gemini",
+                          fiveHour: {
+                            label: "Gemini 5h",
+                            usedPercent: 0,
+                            durationMins: 300,
+                            resetsAt: Math.floor(Date.now() / 1000) + 4 * 3600,
+                            remainingPercent: 100,
+                          },
+                          weekly: {
+                            label: "Gemini weekly",
+                            usedPercent: 25,
+                            durationMins: 10080,
+                            resetsAt: Math.floor(Date.now() / 1000) + 6 * 86400,
+                            remainingPercent: 75,
+                          },
+                        },
+                      ],
                       windows: [
                         {
                           label: "Gemini weekly",

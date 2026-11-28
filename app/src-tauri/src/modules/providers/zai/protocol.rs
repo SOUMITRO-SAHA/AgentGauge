@@ -136,6 +136,7 @@ pub fn decode_quota(
         windows,
         five_hour,
         weekly,
+        quota_groups: Vec::new(),
     })
 }
 

@@ -261,6 +261,7 @@ pub fn decode_rate_limits(
         five_hour,
         weekly,
         windows,
+        quota_groups: Vec::new(),
     })
 }
 
